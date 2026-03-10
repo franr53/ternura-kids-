@@ -50,7 +50,12 @@
       "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npm uninstall @ducanh2912/next-pwa 2>&1 | tail -3)",
       "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -30)",
       "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -20)",
-      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -50)"
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -50)",
+      "Bash(cd \"C:/users/franc/documents/ternurakids\" && npx tsc --noEmit --project tsconfig.json 2>&1 | head -30)",
+      "Bash(cd \"C:/users/franc/documents/ternurakids\" && npx tsc --noEmit 2>&1 | head -20)",
+      "Bash(cd \"C:/users/franc/documents/ternurakids\" && npx tsc --noEmit 2>&1 | head -10)",
+      "Bash(ls \"C:/users/franc/documents/ternurakids/src/app/\\(app\\)/proveedores/\")",
+      "Bash(cd \"C:/users/franc/documents/ternurakids\" && mkdir -p src/app/api/scan-remito)"
     ]
   }
 }
