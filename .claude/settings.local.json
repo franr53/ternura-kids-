@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest ternura-kids --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git 2>&1)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git --yes 2>&1 || true)",
+      "Read(//c/Users/franc/Documents/**)",
+      "Bash(npx create-next-app@latest ternurakids --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git 2)",
+      "Bash(1:*)",
+      "Bash(cd /c/Users/franc/Documents && npx create-next-app@latest tkapp --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-git 2>&1 << 'EOF'\nNo\nEOF)",
+      "Bash(cd /c/Users/franc/Documents && cp -r tkapp/. TernuraKids/ && rm -rf tkapp)",
+      "Bash(cp -r /c/Users/franc/Documents/tkapp/src /c/Users/franc/Documents/TernuraKids/ && cp -r /c/Users/franc/Documents/tkapp/public /c/Users/franc/Documents/TernuraKids/ && cp /c/Users/franc/Documents/tkapp/package.json /c/Users/franc/Documents/TernuraKids/ && rm -rf /c/Users/franc/Documents/tkapp)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init --defaults 2>&1 | tail -10)",
+      "Bash(npx shadcn@latest add card table badge input label select dialog sheet dropdown-menu avatar sidebar navigation-menu tabs form toast separator skeleton 2>&1 | tail -5)",
+      "Bash(npx shadcn@latest add sonner 2>&1 | tail -3)",
+      "Bash(grep -v \"^Id\" /c/Users/franc/Downloads/Stock_Actualizado_Formato\\\\\\(Productos\\\\\\).csv | cut -d';' -f3 | sort | uniq -c | sort -rn)",
+      "Bash(grep \"NIÑA\\\\|NI.A\" /c/Users/franc/Downloads/Stock_Actualizado_Formato\\\\\\(Productos\\\\\\).csv | head -10 | cut -d';' -f1,2,3,4,5,6,7,9)",
+      "Bash(grep \"BEB\" /c/Users/franc/Downloads/Stock_Actualizado_Formato\\\\\\(Productos\\\\\\).csv | head -10 | cut -d';' -f1,2,3,4,5,6,7,9)",
+      "Bash(grep -v \"^Id\" /c/Users/franc/Downloads/Stock_Actualizado_Formato\\\\\\(Productos\\\\\\).csv | cut -d';' -f4 | sort | uniq -c | sort -rn | head -20)",
+      "Bash(npm run:*)",
+      "Bash(npx shadcn@latest add card input label --yes 2>&1 | tail -5)",
+      "Bash(npx shadcn@latest add badge select --yes 2>&1 | tail -5)",
+      "Bash(npx shadcn@latest add separator --yes 2>&1 | tail -3 && npm run build 2>&1 | grep -E \"Error:|Module not found|✓ Compiled\" | head -10)",
+      "Bash(ls /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/)",
+      "Bash(npx shadcn@latest add tabs --yes 2>&1 | tail -5)",
+      "Bash(npx shadcn@latest add textarea --yes 2>&1 | tail -5)",
+      "Bash(npx shadcn@latest add skeleton --yes 2>&1 | tail -5)",
+      "Bash(npx shadcn@latest add dialog --yes 2>&1 | tail -5)",
+      "Read(//c/Users/franc/.claude/skills/**)",
+      "Read(//c/Users/franc/.claude/skills//**)",
+      "Bash(git init:*)"
+    ]
+  }
+}
