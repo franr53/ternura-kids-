@@ -14,7 +14,7 @@ import { confirmarVenta } from '@/lib/services/ventas'
 import {
   X, Search, Plus, Minus, User,
   Banknote, CreditCard, Smartphone, HandCoins,
-  CheckCircle, ShoppingCart, AlertTriangle,
+  CheckCircle, ShoppingCart, AlertTriangle, Pencil, ArrowRight,
 } from 'lucide-react'
 
 type VarianteConProducto = Variante & {
@@ -76,6 +76,20 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   // UI
   const [loading, setLoading] = useState(false)
 
+  // Edición de precio
+  const [editandoPrecioIdx, setEditandoPrecioIdx] = useState<number | null>(null)
+  const [precioTemporal, setPrecioTemporal] = useState('')
+  const [modalPrecio, setModalPrecio] = useState<{
+    idx: number
+    precioAnterior: number
+    nuevoPrecio: number
+    varianteId: string
+    productoId: string
+    productoNombre: string
+    talle: string
+  } | null>(null)
+  const [aplicandoPrecio, setAplicandoPrecio] = useState(false)
+
   useEffect(() => {
     async function cargar() {
       setLoadingData(true)
@@ -116,6 +130,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     } else {
       setCarrito(prev => [...prev, {
         varianteId: variante.id,
+        productoId: variante.producto.id,
         productoNombre: variante.producto.nombre,
         talle: variante.talle,
         codigoBarras: variante.codigo_barras,
@@ -141,6 +156,64 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
   function eliminarItem(idx: number) {
     setCarrito(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function iniciarEditPrecio(idx: number) {
+    setEditandoPrecioIdx(idx)
+    setPrecioTemporal(carrito[idx].precio.toString())
+  }
+
+  function confirmarEditPrecio(idx: number) {
+    const nuevo = parseFloat(precioTemporal)
+    if (isNaN(nuevo) || nuevo <= 0) { setEditandoPrecioIdx(null); return }
+    const item = carrito[idx]
+    if (nuevo === item.precio) { setEditandoPrecioIdx(null); return }
+    setEditandoPrecioIdx(null)
+    setModalPrecio({
+      idx,
+      precioAnterior: item.precio,
+      nuevoPrecio: nuevo,
+      varianteId: item.varianteId,
+      productoId: item.productoId || '',
+      productoNombre: item.productoNombre,
+      talle: item.talle,
+    })
+  }
+
+  function aplicarSoloVenta() {
+    if (!modalPrecio) return
+    setCarrito(prev => prev.map((item, i) =>
+      i === modalPrecio.idx ? { ...item, precio: modalPrecio.nuevoPrecio } : item
+    ))
+    setModalPrecio(null)
+    toast.success('Precio actualizado solo para esta venta')
+  }
+
+  async function aplicarPrecio(alcance: 'variante' | 'todas_variantes' | 'producto') {
+    if (!modalPrecio) return
+    setAplicandoPrecio(true)
+    const { nuevoPrecio, varianteId, productoId, idx } = modalPrecio
+    try {
+      if (alcance === 'variante') {
+        await supabase.from('variantes').update({ precio_venta: nuevoPrecio }).eq('id', varianteId)
+        toast.success(`Precio de T.${modalPrecio.talle} actualizado`)
+      } else if (alcance === 'todas_variantes') {
+        await supabase.from('variantes').update({ precio_venta: nuevoPrecio }).eq('producto_id', productoId)
+        toast.success('Precio de todas las tallas actualizado')
+      } else {
+        await supabase.from('productos').update({ precio_venta: nuevoPrecio }).eq('id', productoId)
+        await supabase.from('variantes').update({ precio_venta: null }).eq('producto_id', productoId)
+        toast.success('Precio base del producto actualizado')
+      }
+      setCarrito(prev => prev.map((item, i) =>
+        i === idx ? { ...item, precio: nuevoPrecio } : item
+      ))
+    } catch {
+      toast.error('Error al actualizar el precio')
+    } finally {
+      setAplicandoPrecio(false)
+      setModalPrecio(null)
+    }
   }
 
   async function handleConfirmarVenta() {
@@ -173,7 +246,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl max-h-[92vh] flex flex-col">
+      <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl max-h-[92vh] flex flex-col relative">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -264,7 +337,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               ) : (
                 <div className="space-y-2">
                   {carrito.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors">
+                    <div key={idx} className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors group">
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-800 truncate">{item.productoNombre}</p>
                         <p className="text-xs text-gray-500">T. {item.talle}</p>
@@ -284,9 +357,34 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                           <Plus size={11} />
                         </button>
                       </div>
-                      <p className="text-sm font-semibold text-gray-800 w-20 text-right shrink-0">
-                        {formatPrecio(item.precio * item.cantidad)}
-                      </p>
+
+                      {/* Precio editable */}
+                      {editandoPrecioIdx === idx ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number"
+                            value={precioTemporal}
+                            onChange={e => setPrecioTemporal(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') confirmarEditPrecio(idx)
+                              if (e.key === 'Escape') setEditandoPrecioIdx(null)
+                            }}
+                            onBlur={() => confirmarEditPrecio(idx)}
+                            autoFocus
+                            className="w-24 text-right text-sm font-semibold border border-teal-400 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => iniciarEditPrecio(idx)}
+                          className="flex items-center gap-1 text-sm font-semibold text-gray-800 w-20 text-right shrink-0 hover:text-teal-600 transition-colors group/precio"
+                          title="Editar precio"
+                        >
+                          <span>{formatPrecio(item.precio * item.cantidad)}</span>
+                          <Pencil size={11} className="text-gray-300 group-hover/precio:text-teal-400 transition-colors shrink-0" />
+                        </button>
+                      )}
+
                       <button
                         onClick={() => eliminarItem(idx)}
                         className="text-gray-300 hover:text-red-400 transition-colors shrink-0"
@@ -424,6 +522,75 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
             </div>
           </div>
         </div>
+
+        {/* Modal cambio de precio */}
+        {modalPrecio && (
+          <div className="absolute inset-0 z-10 bg-black/40 flex items-center justify-center rounded-2xl">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
+                  <Pencil size={18} className="text-teal-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-800 text-base">Cambio de precio</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    <span className="font-medium text-gray-700">{modalPrecio.productoNombre}</span>
+                    {modalPrecio.talle && <span className="text-gray-400"> · T. {modalPrecio.talle}</span>}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-sm text-gray-400 line-through">{formatPrecio(modalPrecio.precioAnterior)}</span>
+                    <ArrowRight size={14} className="text-gray-300" />
+                    <span className="text-sm font-bold text-teal-600">{formatPrecio(modalPrecio.nuevoPrecio)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">¿Dónde aplicar el cambio?</p>
+
+              <div className="space-y-2">
+                <button
+                  onClick={aplicarSoloVenta}
+                  disabled={aplicandoPrecio}
+                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
+                >
+                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Solo esta venta</p>
+                  <p className="text-xs text-gray-400 mt-0.5">No modifica el inventario</p>
+                </button>
+                <button
+                  onClick={() => aplicarPrecio('variante')}
+                  disabled={aplicandoPrecio}
+                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
+                >
+                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Esta talla (T. {modalPrecio.talle})</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Actualiza solo esta variante en el inventario</p>
+                </button>
+                <button
+                  onClick={() => aplicarPrecio('todas_variantes')}
+                  disabled={aplicandoPrecio}
+                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
+                >
+                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Todas las tallas</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Actualiza todas las variantes de {modalPrecio.productoNombre}</p>
+                </button>
+                <button
+                  onClick={() => aplicarPrecio('producto')}
+                  disabled={aplicandoPrecio}
+                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
+                >
+                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Precio base del producto</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Actualiza el producto y resetea precios de variantes</p>
+                </button>
+              </div>
+
+              <button
+                onClick={() => setModalPrecio(null)}
+                className="mt-4 w-full text-center text-sm text-gray-400 hover:text-gray-600 py-2"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="p-4 border-t border-gray-100 flex gap-3">

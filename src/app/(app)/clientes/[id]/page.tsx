@@ -9,17 +9,29 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard } from 'lucide-react'
+import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
+
+type VentaItem = {
+  cantidad: number
+  precio_unitario: number
+  variante?: { talle: string; producto?: { nombre: string } }
+}
+
+type VentaConItems = Venta & {
+  venta_items?: VentaItem[]
+  venta_pagos?: { metodo: string; monto: number }[]
+}
 
 export default function ClienteDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const supabase = createClient()
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [movimientos, setMovimientos] = useState<FiadoMovimiento[]>([])
-  const [ventas, setVentas] = useState<Venta[]>([])
+  const [ventas, setVentas] = useState<VentaConItems[]>([])
+  const [ventaExpandida, setVentaExpandida] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [nombre, setNombre] = useState('')
@@ -34,7 +46,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       const [{ data: c }, { data: movs }, { data: vs }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(30),
-        supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre)))').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(10),
+        supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
       ])
       if (c) { setCliente(c); setNombre(c.nombre); setTelefono(c.telefono || ''); setDireccion(c.direccion || '') }
       setMovimientos(movs || [])
@@ -216,18 +228,70 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       {/* Historial compras */}
       {ventas.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Últimas compras</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {ventas.map(venta => (
-                <div key={venta.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                  <div>
-                    <p className="text-sm font-medium text-gray-700">{new Date(venta.creado_en).toLocaleDateString('es-AR')}</p>
-                    <p className="text-xs text-gray-500">{(venta as any).venta_items?.length || 0} artículos</p>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><ShoppingBag size={16} className="text-teal-500" /> Historial de compras</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <div>
+              {ventas.map((venta, i) => {
+                const items = venta.venta_items || []
+                const expandida = ventaExpandida === venta.id
+                const metodos = venta.venta_pagos?.map(p => p.metodo).join(' + ') || ''
+                return (
+                  <div key={venta.id} className={cn('border-b border-gray-50 last:border-0', expandida && 'bg-teal-50/40')}>
+                    {/* Fila principal — clickeable para expandir */}
+                    <button
+                      className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors text-left"
+                      onClick={() => setVentaExpandida(expandida ? null : venta.id)}
+                    >
+                      <div className="text-gray-400 shrink-0">
+                        {expandida ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800">
+                          {new Date(venta.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {items.length} {items.length === 1 ? 'artículo' : 'artículos'}
+                          {metodos && <span className="ml-2 text-gray-300">· {metodos}</span>}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-bold text-gray-800">{formatPrecio(venta.total)}</p>
+                        {venta.descuento > 0 && (
+                          <p className="text-xs text-green-600">− {formatPrecio(venta.descuento)} desc.</p>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Detalle de artículos */}
+                    {expandida && items.length > 0 && (
+                      <div className="px-5 pb-3 space-y-1">
+                        <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
+                          {items.map((item, j) => (
+                            <div key={j} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 last:border-0">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-800 truncate">
+                                  {item.variante?.producto?.nombre || '—'}
+                                </p>
+                                {item.variante?.talle && (
+                                  <p className="text-xs text-gray-400">Talle {item.variante.talle}</p>
+                                )}
+                              </div>
+                              <div className="text-right shrink-0 ml-4">
+                                {item.cantidad > 1 && (
+                                  <p className="text-xs text-gray-400">{item.cantidad} × {formatPrecio(item.precio_unitario)}</p>
+                                )}
+                                <p className="text-sm font-semibold text-gray-700">
+                                  {formatPrecio(item.precio_unitario * item.cantidad)}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <p className="font-semibold text-gray-800">{formatPrecio(venta.total)}</p>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>

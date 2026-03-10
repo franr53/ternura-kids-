@@ -20,6 +20,7 @@ import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
 
 export interface ItemCarrito {
   varianteId: string
+  productoId?: string
   productoNombre: string
   talle: string
   codigoBarras?: string
