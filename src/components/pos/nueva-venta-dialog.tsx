@@ -276,9 +276,16 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <Input
-                  placeholder={loadingData ? 'Cargando productos...' : 'Buscar producto por nombre...'}
+                  placeholder={loadingData ? 'Cargando...' : 'Buscar por nombre o escanear código...'}
                   value={busProducto}
                   onChange={e => setBusProducto(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const exacto = todasVariantes.find(v => v.codigo_barras === busProducto.trim())
+                      if (exacto) { agregarAlCarrito(exacto); return }
+                      if (resultadosProducto.length === 1) agregarAlCarrito(resultadosProducto[0])
+                    }
+                  }}
                   className="pl-9 text-sm"
                   autoFocus
                   disabled={loadingData}
@@ -362,7 +369,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                         </button>
                       </div>
 
-                      {/* Precio editable */}
+                      {/* Precio editable con detalle unitario */}
                       {editandoPrecioIdx === idx ? (
                         <div className="flex items-center gap-1 shrink-0">
                           <input
@@ -381,11 +388,16 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                       ) : (
                         <button
                           onClick={() => iniciarEditPrecio(idx)}
-                          className="flex items-center gap-1 text-sm font-semibold text-gray-800 w-20 text-right shrink-0 hover:text-teal-600 transition-colors group/precio"
+                          className="text-right shrink-0 hover:text-teal-600 transition-colors group/precio"
                           title="Editar precio"
                         >
-                          <span>{formatPrecio(item.precio * item.cantidad)}</span>
-                          <Pencil size={11} className="text-gray-300 group-hover/precio:text-teal-400 transition-colors shrink-0" />
+                          {item.cantidad > 1 && (
+                            <p className="text-xs text-gray-400 group-hover/precio:text-teal-400">{formatPrecio(item.precio)} c/u</p>
+                          )}
+                          <div className="flex items-center gap-1 justify-end">
+                            <span className="text-sm font-semibold text-gray-800">{formatPrecio(item.precio * item.cantidad)}</span>
+                            <Pencil size={10} className="text-gray-300 group-hover/precio:text-teal-400 transition-colors" />
+                          </div>
                         </button>
                       )}
 
