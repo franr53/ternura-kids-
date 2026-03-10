@@ -60,7 +60,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   // Data
   const [todasVariantes, setTodasVariantes] = useState<VarianteConProducto[]>([])
   const [todosClientes, setTodosClientes] = useState<Cliente[]>([])
-  const [proveedoresConDeuda, setProveedoresConDeuda] = useState<Proveedor[]>([])
+  const [todosProveedores, setTodosProveedores] = useState<Proveedor[]>([])
   const [loadingData, setLoadingData] = useState(true)
 
   // Venta state
@@ -107,11 +107,11 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
           .order('talle')
           .limit(500),
         supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
-        supabase.from('proveedores').select('*').gt('deuda_total', 0).eq('activo', true).order('nombre'),
+        supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
       ])
       setTodasVariantes((variantes || []).filter((v) => v.producto?.activo) as VarianteConProducto[])
       setTodosClientes(clientes || [])
-      setProveedoresConDeuda((proveedores || []) as Proveedor[])
+      setTodosProveedores((proveedores || []) as Proveedor[])
       setLoadingData(false)
     }
     cargar()
@@ -558,7 +558,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               </div>
 
               {/* Selector proveedor (solo con transferencia) */}
-              {metodoPago === 'transferencia' && proveedoresConDeuda.length > 0 && (
+              {metodoPago === 'transferencia' && todosProveedores.length > 0 && (
                 <div className="mt-2.5">
                   {proveedorTransferencia ? (
                     <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
@@ -577,15 +577,15 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                     <select
                       defaultValue=""
                       onChange={e => {
-                        const prov = proveedoresConDeuda.find(p => p.id === e.target.value)
+                        const prov = todosProveedores.find(p => p.id === e.target.value)
                         setProveedorTransferencia(prov || null)
                       }}
                       className="w-full h-8 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     >
                       <option value="">↗ ¿Va al alias de un proveedor?</option>
-                      {proveedoresConDeuda.map(p => (
+                      {todosProveedores.map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.nombre} — debe {formatPrecio(p.deuda_total)}
+                          {p.nombre}{p.deuda_total > 0 ? ` — debe ${formatPrecio(p.deuda_total)}` : ''}
                         </option>
                       ))}
                     </select>
