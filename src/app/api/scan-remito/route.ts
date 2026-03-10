@@ -1,7 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { NextRequest, NextResponse } from 'next/server'
-
-const client = new Anthropic()
 
 const PROMPT = `Sos un asistente que analiza remitos y boletas de proveedores de ropa infantil argentina.
 Extraé la información y devolvé SOLO JSON válido, sin texto adicional ni markdown.
@@ -20,35 +18,30 @@ Formato exacto de respuesta (sin nada más):
 {"proveedorNombre":null,"numeroRemito":null,"items":[{"nombre":"...","talle":"...","cantidad":1,"precio_unitario":null,"confianza":"alta"}]}`
 
 export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY no configurada en .env.local' }, { status: 500 })
+  if (!process.env.GEMINI_API_KEY) {
+    return NextResponse.json({ error: 'GEMINI_API_KEY no configurada en .env.local' }, { status: 500 })
   }
 
   try {
     const body = await req.json()
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
 
-    let content: Anthropic.MessageParam['content']
-
+    let result
     if (body.type === 'image') {
-      const { imageBase64, mimeType } = body as { imageBase64: string; mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' }
-      content = [
-        { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBase64 } },
-        { type: 'text', text: PROMPT },
-      ]
+      const { imageBase64, mimeType } = body as { imageBase64: string; mimeType: string }
+      result = await model.generateContent([
+        { inlineData: { data: imageBase64, mimeType } },
+        PROMPT,
+      ])
     } else if (body.type === 'text') {
       const { texto } = body as { texto: string }
-      content = [{ type: 'text', text: `${PROMPT}\n\nTexto del remito/lista:\n${texto}` }]
+      result = await model.generateContent(`${PROMPT}\n\nTexto del remito/lista:\n${texto}`)
     } else {
       return NextResponse.json({ error: 'Tipo inválido. Usá "image" o "text".' }, { status: 400 })
     }
 
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
-      messages: [{ role: 'user', content }],
-    })
-
-    const raw = response.content[0].type === 'text' ? response.content[0].text.trim() : ''
+    const raw = result.response.text().trim()
 
     // Extraer JSON aunque haya texto extra
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
