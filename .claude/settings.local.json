@@ -28,7 +28,8 @@
       "Bash(npx shadcn@latest add dialog --yes 2>&1 | tail -5)",
       "Read(//c/Users/franc/.claude/skills/**)",
       "Read(//c/Users/franc/.claude/skills//**)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(git add:*)"
     ]
   }
 }
