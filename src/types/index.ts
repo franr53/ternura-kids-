@@ -57,6 +57,8 @@ export interface Variante {
   codigo_barras?: string
   stock: number
   stock_minimo: number
+  precio_venta?: number | null
+  precio_costo?: number | null
   creado_en: string
   producto?: Producto
 }

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -56,7 +56,7 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-5 border-b border-gray-100">
         {!collapsed && (
           <div>
-            <span className="text-lg font-bold text-pink-600">Ternura</span>
+            <span className="text-lg font-bold text-teal-600">Ternura</span>
             <span className="text-lg font-bold text-gray-700"> Kids</span>
           </div>
         )}
@@ -79,7 +79,7 @@ export default function Sidebar() {
               className={cn(
                 'flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-sm font-medium transition-colors',
                 active
-                  ? 'bg-pink-50 text-pink-600'
+                  ? 'bg-teal-50 text-teal-600'
                   : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
               )}
               title={collapsed ? label : undefined}

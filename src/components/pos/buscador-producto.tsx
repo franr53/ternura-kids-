@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -15,34 +15,47 @@ interface Props {
   onCerrar: () => void
 }
 
+function normalizar(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function fuzzyMatch(texto: string, query: string): boolean {
+  const t = normalizar(texto)
+  return normalizar(query).split(/\s+/).filter(Boolean).every(w => t.includes(w))
+}
+
+function matchVariante(v: VarianteConProducto, query: string): boolean {
+  const q = query.trim()
+  if (v.codigo_barras && v.codigo_barras.includes(q)) return true
+  return fuzzyMatch(v.producto.nombre, q)
+}
+
 export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
   const supabase = createClient()
   const [busqueda, setBusqueda] = useState('')
-  const [resultados, setResultados] = useState<VarianteConProducto[]>([])
-  const [loading, setLoading] = useState(false)
+  const [todasVariantes, setTodasVariantes] = useState<VarianteConProducto[]>([])
+  const [loading, setLoading] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
   useEffect(() => {
-    if (!busqueda.trim()) { setResultados([]); return }
-    const timer = setTimeout(buscar, 300)
-    return () => clearTimeout(timer)
-  }, [busqueda])
+    async function cargar() {
+      setLoading(true)
+      const { data } = await supabase
+        .from('variantes')
+        .select('*, producto:productos(*, categoria:categorias(nombre, color))')
+        .order('talle')
+        .limit(500)
+      setTodasVariantes((data || []).filter(v => v.producto?.activo) as VarianteConProducto[])
+      setLoading(false)
+    }
+    cargar()
+  }, [])
 
-  async function buscar() {
-    setLoading(true)
-    const { data } = await supabase
-      .from('variantes')
-      .select(`*, producto:productos(*, categoria:categorias(nombre, color))`)
-      .eq('producto.activo', true)
-      .ilike('producto.nombre', `%${busqueda}%`)
-      .order('talle')
-      .limit(50)
-
-    setResultados((data || []).filter(v => v.producto) as VarianteConProducto[])
-    setLoading(false)
-  }
+  const resultados = busqueda.trim()
+    ? todasVariantes.filter(v => matchVariante(v, busqueda))
+    : []
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-16 px-4">
@@ -61,11 +74,17 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
           </button>
         </div>
         <div className="overflow-y-auto flex-1">
-          {loading && <div className="p-8 text-center text-gray-400 text-sm">Buscando...</div>}
-          {!loading && busqueda && resultados.length === 0 && (
+          {loading && <div className="p-8 text-center text-gray-400 text-sm">Cargando productos...</div>}
+          {!loading && !busqueda.trim() && (
+            <div className="p-8 text-center text-gray-400">
+              <Search size={32} className="mx-auto mb-2 opacity-40" />
+              <p className="text-sm">Escribí el nombre del producto</p>
+            </div>
+          )}
+          {!loading && busqueda.trim() && resultados.length === 0 && (
             <div className="p-8 text-center text-gray-400">
               <Package size={32} className="mx-auto mb-2" />
-              <p className="text-sm">No se encontraron productos</p>
+              <p className="text-sm">No se encontraron productos para &ldquo;{busqueda}&rdquo;</p>
             </div>
           )}
           {!loading && resultados.length > 0 && (
@@ -74,8 +93,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                 <button
                   key={variante.id}
                   onClick={() => { onSeleccionar(variante); onCerrar() }}
-                  disabled={variante.stock <= 0}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-pink-50 transition-colors text-left disabled:opacity-40"
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
                 >
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-800 text-sm truncate">{variante.producto.nombre}</p>
@@ -92,10 +110,12 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                     </div>
                   </div>
                   <div className="text-right ml-3 shrink-0">
-                    <p className="font-semibold text-gray-800 text-sm">{formatPrecio(variante.producto.precio_venta)}</p>
-                    <Badge variant={variante.stock <= 0 ? 'destructive' : 'secondary'} className="text-xs">
-                      Stock: {variante.stock}
-                    </Badge>
+                    <p className="font-semibold text-gray-800 text-sm">{formatPrecio(variante.precio_venta ?? variante.producto.precio_venta)}</p>
+                    {variante.stock <= 0 ? (
+                      <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-xs">Stock: {variante.stock}</Badge>
+                    )}
                   </div>
                 </button>
               ))}

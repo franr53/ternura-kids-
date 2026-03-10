@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -53,7 +53,7 @@ export default function NuevoClientePage() {
       </Card>
       <div className="flex gap-3 justify-end">
         <Link href="/clientes"><Button variant="outline">Cancelar</Button></Link>
-        <Button onClick={guardar} disabled={loading} className="bg-pink-500 hover:bg-pink-600">
+        <Button onClick={guardar} disabled={loading} className="bg-teal-500 hover:bg-teal-600">
           {loading ? 'Guardando...' : 'Guardar cliente'}
         </Button>
       </div>

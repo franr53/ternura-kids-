@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -29,12 +29,12 @@ export default function LoginPage() {
     <div className="min-h-screen flex" style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}>
       {/* Panel izquierdo — decorativo */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center"
-        style={{ background: 'linear-gradient(135deg, #fdf2f8 0%, #fce7f3 40%, #fbcfe8 100%)' }}>
+        style={{ background: 'linear-gradient(135deg, #f0fdfc 0%, #ccfbf1 40%, #99f6e4 100%)' }}>
         {/* Círculos decorativos */}
         <div className="absolute top-[-80px] left-[-80px] w-80 h-80 rounded-full opacity-20"
-          style={{ background: 'radial-gradient(circle, #ec4899, transparent)' }} />
+          style={{ background: 'radial-gradient(circle, #4EC3BD, transparent)' }} />
         <div className="absolute bottom-[-60px] right-[-60px] w-96 h-96 rounded-full opacity-15"
-          style={{ background: 'radial-gradient(circle, #f472b6, transparent)' }} />
+          style={{ background: 'radial-gradient(circle, #14b8a6, transparent)' }} />
         <div className="absolute top-1/3 right-20 w-24 h-24 rounded-full opacity-30"
           style={{ background: 'radial-gradient(circle, #fbbf24, transparent)' }} />
 
@@ -42,21 +42,21 @@ export default function LoginPage() {
           {/* Logo grande */}
           <div className="mb-8">
             <div className="inline-flex items-center justify-center w-24 h-24 rounded-full mb-6"
-              style={{ background: 'linear-gradient(135deg, #ec4899, #f9a8d4)' }}>
-              <span className="text-4xl">🎀</span>
+              style={{ background: 'linear-gradient(135deg, #4EC3BD, #14b8a6)' }}>
+              <span className="text-4xl">🧸</span>
             </div>
           </div>
-          <h1 className="text-5xl font-bold mb-3" style={{ color: '#be185d', letterSpacing: '-1px' }}>
+          <h1 className="text-5xl font-bold mb-3" style={{ color: '#0f766e', letterSpacing: '-1px' }}>
             Ternura
           </h1>
-          <h2 className="text-3xl font-light mb-6" style={{ color: '#db2777', letterSpacing: '4px' }}>
+          <h2 className="text-3xl font-light mb-6" style={{ color: '#0d9488', letterSpacing: '4px' }}>
             KIDS
           </h2>
-          <div className="w-16 h-0.5 mx-auto mb-6" style={{ background: '#f9a8d4' }} />
-          <p className="text-lg" style={{ color: '#9d174d', fontStyle: 'italic' }}>
+          <div className="w-16 h-0.5 mx-auto mb-6" style={{ background: '#4EC3BD' }} />
+          <p className="text-lg" style={{ color: '#134e4a', fontStyle: 'italic' }}>
             Sistema de gestión
           </p>
-          <p className="text-sm mt-2" style={{ color: '#be185d', opacity: 0.7 }}>
+          <p className="text-sm mt-2" style={{ color: '#0f766e', opacity: 0.7 }}>
             Ropa infantil con amor
           </p>
         </div>
@@ -70,10 +70,10 @@ export default function LoginPage() {
           {/* Logo mobile */}
           <div className="lg:hidden text-center mb-10">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4"
-              style={{ background: 'linear-gradient(135deg, #ec4899, #f9a8d4)' }}>
-              <span className="text-2xl">🎀</span>
+              style={{ background: 'linear-gradient(135deg, #4EC3BD, #14b8a6)' }}>
+              <span className="text-2xl">🧸</span>
             </div>
-            <h1 className="text-3xl font-bold" style={{ color: '#be185d' }}>Ternura Kids</h1>
+            <h1 className="text-3xl font-bold" style={{ color: '#0f766e' }}>Ternura Kids</h1>
           </div>
 
           <div className="mb-10">
@@ -93,7 +93,7 @@ export default function LoginPage() {
                 required
                 autoFocus
                 placeholder="tu@email.com"
-                className="w-full px-4 py-3 border-b-2 border-gray-200 bg-transparent text-gray-800 outline-none transition-colors placeholder-gray-300 text-sm focus:border-pink-400"
+                className="w-full px-4 py-3 border-b-2 border-gray-200 bg-transparent text-gray-800 outline-none transition-colors placeholder-gray-300 text-sm focus:border-teal-400"
                 style={{ fontFamily: 'inherit' }}
               />
             </div>
@@ -107,7 +107,7 @@ export default function LoginPage() {
                 onChange={e => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full px-4 py-3 border-b-2 border-gray-200 bg-transparent text-gray-800 outline-none transition-colors placeholder-gray-300 text-sm focus:border-pink-400"
+                className="w-full px-4 py-3 border-b-2 border-gray-200 bg-transparent text-gray-800 outline-none transition-colors placeholder-gray-300 text-sm focus:border-teal-400"
                 style={{ fontFamily: 'inherit' }}
               />
             </div>
@@ -119,8 +119,8 @@ export default function LoginPage() {
                 className="w-full py-4 text-white font-semibold text-sm uppercase tracking-widest transition-all duration-200 disabled:opacity-60"
                 style={{
                   background: loading
-                    ? '#f9a8d4'
-                    : 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
+                    ? '#99f6e4'
+                    : 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
                   borderRadius: '4px',
                   letterSpacing: '2px',
                 }}

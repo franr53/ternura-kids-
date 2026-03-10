@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -120,7 +120,7 @@ export default function CajaPage() {
     return (
       <div className="p-6 max-w-md mx-auto space-y-6">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-pink-100 rounded-lg"><Wallet size={24} className="text-pink-600" /></div>
+          <div className="p-2 bg-teal-100 rounded-lg"><Wallet size={24} className="text-teal-600" /></div>
           <h1 className="text-2xl font-bold text-gray-800">Abrir caja</h1>
         </div>
         <Card>
@@ -137,7 +137,7 @@ export default function CajaPage() {
                 autoFocus
               />
             </div>
-            <Button onClick={abrirCaja} disabled={abriendo} className="w-full bg-pink-500 hover:bg-pink-600">
+            <Button onClick={abrirCaja} disabled={abriendo} className="w-full bg-teal-500 hover:bg-teal-600">
               {abriendo ? 'Abriendo...' : 'Abrir caja del día'}
             </Button>
           </CardContent>
@@ -152,7 +152,7 @@ export default function CajaPage() {
     <div className="p-6 max-w-2xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-pink-100 rounded-lg"><Wallet size={24} className="text-pink-600" /></div>
+          <div className="p-2 bg-teal-100 rounded-lg"><Wallet size={24} className="text-teal-600" /></div>
           <div>
             <h1 className="text-2xl font-bold text-gray-800">Caja del día</h1>
             <p className="text-gray-500 text-sm">{new Date(caja.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>

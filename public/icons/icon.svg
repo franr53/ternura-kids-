@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#4EC3BD"/>
+  <rect width="512" height="512" rx="96" fill="url(#grad)"/>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#5DCFCA;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0d9488;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Oso teddy simplificado -->
+  <!-- Orejas -->
+  <circle cx="170" cy="148" r="52" fill="white" opacity="0.9"/>
+  <circle cx="342" cy="148" r="52" fill="white" opacity="0.9"/>
+  <circle cx="170" cy="148" r="32" fill="#4EC3BD"/>
+  <circle cx="342" cy="148" r="32" fill="#4EC3BD"/>
+  <!-- Cabeza -->
+  <circle cx="256" cy="220" r="110" fill="white" opacity="0.95"/>
+  <!-- Ojos -->
+  <circle cx="218" cy="200" r="14" fill="#0f766e"/>
+  <circle cx="294" cy="200" r="14" fill="#0f766e"/>
+  <circle cx="222" cy="196" r="5" fill="white"/>
+  <circle cx="298" cy="196" r="5" fill="white"/>
+  <!-- Nariz -->
+  <ellipse cx="256" cy="232" rx="20" ry="14" fill="#0f766e"/>
+  <!-- Boca -->
+  <path d="M238 248 Q256 264 274 248" stroke="#0f766e" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <!-- Cuerpo -->
+  <ellipse cx="256" cy="370" rx="100" ry="90" fill="white" opacity="0.9"/>
+  <!-- Brazos -->
+  <ellipse cx="138" cy="355" rx="42" ry="60" fill="white" opacity="0.85" transform="rotate(-20 138 355)"/>
+  <ellipse cx="374" cy="355" rx="42" ry="60" fill="white" opacity="0.85" transform="rotate(20 374 355)"/>
+  <!-- Panza -->
+  <ellipse cx="256" cy="375" rx="58" ry="52" fill="#ccfbf1" opacity="0.8"/>
+  <!-- Moño -->
+  <path d="M226 290 L244 300 L226 310 Z" fill="#f97316"/>
+  <path d="M286 290 L268 300 L286 310 Z" fill="#f97316"/>
+  <circle cx="256" cy="300" r="12" fill="#f97316"/>
+</svg>

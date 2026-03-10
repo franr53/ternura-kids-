@@ -6,12 +6,9 @@ import { createClient } from '@/lib/supabase/client'
 import { Producto, Categoria, Proveedor } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import {
-  Plus, Search, Package, AlertTriangle, TrendingUp, Filter
-} from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, Layers } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { formatPrecio } from '@/lib/utils'
 
 export default function InventarioPage() {
@@ -24,6 +21,7 @@ export default function InventarioPage() {
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
   const [filtroProveedor, setFiltroProveedor] = useState('todos')
   const [filtroStock, setFiltroStock] = useState('todos')
+  const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
 
   const cargarDatos = useCallback(async () => {
     setLoading(true)
@@ -44,6 +42,25 @@ export default function InventarioPage() {
 
   useEffect(() => { cargarDatos() }, [cargarDatos])
 
+  // Cálculo de anomalías (client-side)
+  const todosLosCodigos = productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter(Boolean) ?? [])
+  const codigosDuplicados = new Set(
+    todosLosCodigos.filter((c, i) => todosLosCodigos.indexOf(c) !== i)
+  )
+  const nombresContados = productos.reduce<Record<string, number>>((acc, p) => {
+    const n = p.nombre.trim().toLowerCase()
+    acc[n] = (acc[n] || 0) + 1
+    return acc
+  }, {})
+  const nombresRepetidos = new Set(Object.entries(nombresContados).filter(([, c]) => c > 1).map(([n]) => n))
+
+  const conteoAnomalias = {
+    sin_codigo: productos.filter(p => p.variantes?.some(v => !v.codigo_barras)).length,
+    cod_duplicado: productos.filter(p => p.variantes?.some(v => v.codigo_barras && codigosDuplicados.has(v.codigo_barras))).length,
+    nombre_repetido: productos.filter(p => nombresRepetidos.has(p.nombre.trim().toLowerCase())).length,
+    precio_invalido: productos.filter(p => p.precio_venta === 0 || p.precio_venta < p.precio_costo).length,
+  }
+
   const productosFiltrados = productos.filter(p => {
     const matchBusqueda = busqueda === '' ||
       p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -56,16 +73,23 @@ export default function InventarioPage() {
       filtroStock === 'sin_stock' ? stockTotal === 0 :
       filtroStock === 'stock_bajo' ? stockTotal > 0 && p.variantes?.some(v => v.stock <= v.stock_minimo) :
       true
-    return matchBusqueda && matchCategoria && matchProveedor && matchStock
+    const matchAnomalia = !filtroAnomalia ? true :
+      filtroAnomalia === 'sin_codigo' ? p.variantes?.some(v => !v.codigo_barras) :
+      filtroAnomalia === 'cod_duplicado' ? p.variantes?.some(v => v.codigo_barras && codigosDuplicados.has(v.codigo_barras)) :
+      filtroAnomalia === 'nombre_repetido' ? nombresRepetidos.has(p.nombre.trim().toLowerCase()) :
+      filtroAnomalia === 'precio_invalido' ? (p.precio_venta === 0 || p.precio_venta < p.precio_costo) :
+      true
+    return matchBusqueda && matchCategoria && matchProveedor && matchStock && matchAnomalia
   })
 
   // Stats
   const totalProductos = productos.length
   const sinStock = productos.filter(p => (p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0) === 0).length
   const stockBajo = productos.filter(p => p.variantes?.some(v => v.stock > 0 && v.stock <= v.stock_minimo)).length
+  const totalAnomalias = Object.values(conteoAnomalias).reduce((a, b) => a + b, 0)
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -73,53 +97,62 @@ export default function InventarioPage() {
           <p className="text-gray-500 text-sm mt-0.5">{totalProductos} productos activos</p>
         </div>
         <Link href="/inventario/nuevo">
-          <Button className="bg-pink-500 hover:bg-pink-600 gap-2">
-            <Plus size={18} /> Nuevo producto
+          <Button className="bg-teal-500 hover:bg-teal-600 gap-2">
+            <Plus size={16} /> Nuevo producto
           </Button>
         </Link>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="pt-5 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg"><Package size={20} className="text-blue-600" /></div>
-              <div>
-                <p className="text-2xl font-bold text-gray-800">{totalProductos}</p>
-                <p className="text-xs text-gray-500">Total productos</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-5 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-100 rounded-lg"><AlertTriangle size={20} className="text-red-500" /></div>
-              <div>
-                <p className="text-2xl font-bold text-gray-800">{sinStock}</p>
-                <p className="text-xs text-gray-500">Sin stock</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-5 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-orange-100 rounded-lg"><TrendingUp size={20} className="text-orange-500" /></div>
-              <div>
-                <p className="text-2xl font-bold text-gray-800">{stockBajo}</p>
-                <p className="text-xs text-gray-500">Stock bajo</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
+          <div className="p-2 rounded-lg" style={{ background: 'linear-gradient(135deg, #ccfbf1, #99f6e4)' }}>
+            <Package size={18} className="text-teal-600" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-800">{totalProductos}</p>
+            <p className="text-xs text-gray-500">Total</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-red-50">
+            <AlertTriangle size={18} className="text-red-500" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-800">{sinStock}</p>
+            <p className="text-xs text-gray-500">Sin stock</p>
+          </div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-orange-50">
+            <Layers size={18} className="text-orange-500" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-800">{stockBajo}</p>
+            <p className="text-xs text-gray-500">Stock bajo</p>
+          </div>
+        </div>
+        <div
+          className={cn(
+            'rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-opacity',
+            totalAnomalias > 0 ? 'bg-amber-50 border border-amber-200' : 'bg-white border border-gray-200 opacity-50'
+          )}
+          onClick={() => totalAnomalias > 0 && setFiltroAnomalia(filtroAnomalia ? null : 'precio_invalido')}
+        >
+          <div className="p-2 rounded-lg bg-amber-100">
+            <AlertTriangle size={18} className="text-amber-600" />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-800">{totalAnomalias}</p>
+            <p className="text-xs text-gray-500">Anomalías</p>
+          </div>
+        </div>
       </div>
 
       {/* Filtros */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <Input
             placeholder="Buscar por nombre o código de barras..."
             value={busqueda}
@@ -157,10 +190,46 @@ export default function InventarioPage() {
         </Select>
       </div>
 
+      {/* Filtros de anomalías */}
+      {(conteoAnomalias.sin_codigo > 0 || conteoAnomalias.cod_duplicado > 0 || conteoAnomalias.nombre_repetido > 0 || conteoAnomalias.precio_invalido > 0) && (
+        <div className="flex items-center gap-2 flex-wrap px-3 py-2.5 bg-amber-50 rounded-xl border border-amber-100">
+          <span className="text-xs text-amber-700 font-semibold flex items-center gap-1.5 mr-1">
+            <AlertTriangle size={13} /> Anomalías detectadas:
+          </span>
+          {([
+            { key: 'sin_codigo', label: 'Sin código de barras', count: conteoAnomalias.sin_codigo, cls: 'bg-yellow-100 border-yellow-300 text-yellow-800 hover:bg-yellow-200' },
+            { key: 'cod_duplicado', label: 'Códigos duplicados', count: conteoAnomalias.cod_duplicado, cls: 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200' },
+            { key: 'nombre_repetido', label: 'Nombres repetidos', count: conteoAnomalias.nombre_repetido, cls: 'bg-purple-100 border-purple-300 text-purple-700 hover:bg-purple-200' },
+            { key: 'precio_invalido', label: 'Precio inválido', count: conteoAnomalias.precio_invalido, cls: 'bg-orange-100 border-orange-300 text-orange-700 hover:bg-orange-200' },
+          ] as const).filter(f => f.count > 0).map(f => (
+            <button
+              key={f.key}
+              onClick={() => setFiltroAnomalia(filtroAnomalia === f.key ? null : f.key)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors',
+                f.cls,
+                filtroAnomalia === f.key && 'ring-2 ring-offset-1 ring-current'
+              )}
+            >
+              {f.label}
+              <span className="bg-white/60 px-1.5 py-0.5 rounded-full font-bold">{f.count}</span>
+            </button>
+          ))}
+          {filtroAnomalia && (
+            <button onClick={() => setFiltroAnomalia(null)} className="text-xs text-amber-600 hover:text-amber-800 ml-auto font-medium">
+              × Limpiar filtro
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Tabla */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading ? (
-          <div className="p-12 text-center text-gray-400">Cargando...</div>
+          <div className="p-12 text-center">
+            <div className="w-8 h-8 border-2 border-teal-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-gray-400 text-sm">Cargando inventario...</p>
+          </div>
         ) : productosFiltrados.length === 0 ? (
           <div className="p-12 text-center">
             <Package size={40} className="mx-auto text-gray-300 mb-3" />
@@ -170,26 +239,26 @@ export default function InventarioPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 text-gray-600 font-medium">Producto</th>
-                <th className="text-left px-4 py-3 text-gray-600 font-medium">Categoría</th>
-                <th className="text-left px-4 py-3 text-gray-600 font-medium">Proveedor</th>
-                <th className="text-right px-4 py-3 text-gray-600 font-medium">Precio venta</th>
-                <th className="text-center px-4 py-3 text-gray-600 font-medium">Stock total</th>
-                <th className="text-center px-4 py-3 text-gray-600 font-medium">Talles</th>
-                <th className="text-center px-4 py-3 text-gray-600 font-medium"></th>
+                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Producto</th>
+                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Categoría</th>
+                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Proveedor</th>
+                <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio</th>
+                <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Stock</th>
+                <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Talles</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {productosFiltrados.map(producto => {
                 const stockTotal = producto.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
-                const sinStock = stockTotal === 0
-                const stockBajo = !sinStock && producto.variantes?.some(v => v.stock > 0 && v.stock <= v.stock_minimo)
+                const sinStockRow = stockTotal === 0
+                const stockBajoRow = !sinStockRow && producto.variantes?.some(v => v.stock > 0 && v.stock <= v.stock_minimo)
                 return (
-                  <tr key={producto.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={producto.id} className="hover:bg-gray-50 transition-colors group">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        {(sinStock || stockBajo) && (
-                          <AlertTriangle size={14} className={sinStock ? 'text-red-400' : 'text-orange-400'} />
+                        {(sinStockRow || stockBajoRow) && (
+                          <AlertTriangle size={13} className={sinStockRow ? 'text-red-400 shrink-0' : 'text-orange-400 shrink-0'} />
                         )}
                         <span className="font-medium text-gray-800">{producto.nombre}</span>
                       </div>
@@ -202,24 +271,51 @@ export default function InventarioPage() {
                         >
                           {producto.categoria.nombre}
                         </span>
-                      ) : <span className="text-gray-400">—</span>}
+                      ) : <span className="text-gray-400 text-xs">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{producto.proveedor?.nombre ?? '—'}</td>
-                    <td className="px-4 py-3 text-right font-medium text-gray-800">
-                      {formatPrecio(producto.precio_venta)}
+                    <td className="px-4 py-3 text-gray-600 text-xs">{producto.proveedor?.nombre ?? '—'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`font-semibold ${producto.precio_venta === 0 || producto.precio_venta < producto.precio_costo ? 'text-red-500' : 'text-gray-800'}`}>
+                        {formatPrecio(producto.precio_venta)}
+                      </span>
+                      {producto.precio_venta < producto.precio_costo && producto.precio_venta > 0 && (
+                        <p className="text-xs text-red-400">costo: {formatPrecio(producto.precio_costo)}</p>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <Badge variant={sinStock ? 'destructive' : stockBajo ? 'outline' : 'secondary'}>
+                      <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        sinStockRow
+                          ? 'bg-red-100 text-red-600'
+                          : stockBajoRow
+                            ? 'bg-orange-100 text-orange-600'
+                            : 'bg-teal-50 text-teal-700'
+                      }`}>
                         {stockTotal}
-                      </Badge>
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-center text-gray-500 text-xs">
-                      {producto.variantes?.length ?? 0} talles
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1 justify-center">
+                        {producto.variantes?.map(v => (
+                          <span
+                            key={v.id}
+                            title={`Stock: ${v.stock}`}
+                            className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              v.stock === 0
+                                ? 'bg-red-100 text-red-600'
+                                : v.stock <= v.stock_minimo
+                                  ? 'bg-orange-100 text-orange-600'
+                                  : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {v.talle}: {v.stock}
+                          </span>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <Link href={`/inventario/${producto.id}`}>
-                        <Button variant="ghost" size="sm" className="text-pink-600 hover:text-pink-700">
-                          Ver
+                        <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                          Editar
                         </Button>
                       </Link>
                     </td>

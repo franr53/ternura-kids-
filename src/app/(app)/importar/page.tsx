@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -193,16 +193,16 @@ export default function ImportarPage() {
 
       {/* Paso 1 */}
       <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-pink-500 text-white text-xs flex items-center justify-center font-bold">1</span> Cargar datos</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-teal-500 text-white text-xs flex items-center justify-center font-bold">1</span> Cargar datos</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <Button onClick={cargarDatosPreprocesados} className="w-full bg-pink-500 hover:bg-pink-600 gap-2">
+          <Button onClick={cargarDatosPreprocesados} className="w-full bg-teal-500 hover:bg-teal-600 gap-2">
             <Zap size={16} /> Usar datos pre-procesados de Contagram (recomendado)
           </Button>
           <div className="relative">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
             <div className="relative flex justify-center text-xs text-gray-400 bg-white px-2 w-fit mx-auto">o subí el CSV manualmente</div>
           </div>
-          <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-pink-400 hover:bg-pink-50 transition-colors">
+          <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-teal-400 hover:bg-teal-50 transition-colors">
             <Upload size={20} className="text-gray-400 mb-1" />
             <span className="text-sm text-gray-500">Seleccionar archivo CSV</span>
             <input type="file" accept=".csv" className="hidden" onChange={cargarCSV} />
@@ -213,7 +213,7 @@ export default function ImportarPage() {
       {/* Preview */}
       {data && !completado && (
         <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-pink-500 text-white text-xs flex items-center justify-center font-bold">2</span> Previsualización</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><span className="w-6 h-6 rounded-full bg-teal-500 text-white text-xs flex items-center justify-center font-bold">2</span> Previsualización</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center p-4 bg-blue-50 rounded-lg">
@@ -261,7 +261,7 @@ export default function ImportarPage() {
               </div>
             </div>
 
-            <Button onClick={importar} disabled={importando} className="w-full bg-pink-500 hover:bg-pink-600 h-12 text-base gap-2">
+            <Button onClick={importar} disabled={importando} className="w-full bg-teal-500 hover:bg-teal-600 h-12 text-base gap-2">
               <Upload size={18} /> Importar {data.productos.length} productos
             </Button>
           </CardContent>
@@ -274,7 +274,7 @@ export default function ImportarPage() {
           <CardContent className="pt-6 space-y-4">
             <p className="text-sm font-medium text-gray-700">{progreso.fase}</p>
             <div className="w-full bg-gray-200 rounded-full h-3">
-              <div className="bg-pink-500 h-3 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
+              <div className="bg-teal-500 h-3 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
             </div>
             <p className="text-xs text-gray-500 text-center">{progreso.actual} / {progreso.total} ({pct}%)</p>
             {progreso.errores.length > 0 && (

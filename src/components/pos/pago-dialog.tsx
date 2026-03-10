@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { Cliente, MetodoPago } from '@/types'
@@ -90,9 +90,9 @@ export default function PagoDialog({ carrito, total, subtotal, descuentoGlobal, 
 
         <div className="p-5 space-y-5">
           {/* Total */}
-          <div className="text-center bg-pink-50 rounded-xl py-4">
+          <div className="text-center bg-teal-50 rounded-xl py-4">
             <p className="text-sm text-gray-500 mb-1">Total a cobrar</p>
-            <p className="text-4xl font-bold text-pink-600">{formatPrecio(total)}</p>
+            <p className="text-4xl font-bold text-teal-600">{formatPrecio(total)}</p>
           </div>
 
           {/* Método único */}
@@ -147,7 +147,7 @@ export default function PagoDialog({ carrito, total, subtotal, descuentoGlobal, 
                   <button
                     key={m.key}
                     onClick={() => agregarMetodo(m.key)}
-                    className="text-xs px-2 py-1 rounded border border-dashed border-gray-300 text-gray-500 hover:border-pink-400 hover:text-pink-600"
+                    className="text-xs px-2 py-1 rounded border border-dashed border-gray-300 text-gray-500 hover:border-teal-400 hover:text-teal-600"
                   >
                     + {m.label}
                   </button>
@@ -161,7 +161,7 @@ export default function PagoDialog({ carrito, total, subtotal, descuentoGlobal, 
             {pagos.length === 1 && (
               <button
                 onClick={dividirEnPartes}
-                className="flex-1 text-xs py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-pink-400 hover:text-pink-600 gap-1 flex items-center justify-center"
+                className="flex-1 text-xs py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-teal-400 hover:text-teal-600 gap-1 flex items-center justify-center"
               >
                 <ArrowLeftRight size={12} /> Pago mixto
               </button>
@@ -195,7 +195,7 @@ export default function PagoDialog({ carrito, total, subtotal, descuentoGlobal, 
           <Button
             onClick={confirmar}
             disabled={!listo || loading}
-            className="w-full bg-pink-500 hover:bg-pink-600 h-12 text-base font-semibold gap-2"
+            className="w-full bg-teal-500 hover:bg-teal-600 h-12 text-base font-semibold gap-2"
           >
             <CheckCircle size={18} />
             {loading ? 'Registrando...' : 'Confirmar venta'}

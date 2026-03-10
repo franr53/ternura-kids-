@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -13,25 +13,41 @@ interface Props {
   onCerrar: () => void
 }
 
+function normalizar(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function fuzzyMatch(texto: string, query: string): boolean {
+  const t = normalizar(texto)
+  return normalizar(query).split(/\s+/).filter(Boolean).every(w => t.includes(w))
+}
+
 export default function ClienteSelector({ onSeleccionar, onCerrar }: Props) {
   const supabase = createClient()
   const [busqueda, setBusqueda] = useState('')
-  const [clientes, setClientes] = useState<Cliente[]>([])
+  const [todosClientes, setTodosClientes] = useState<Cliente[]>([])
+  const [loading, setLoading] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
   useEffect(() => {
-    const timer = setTimeout(buscar, 200)
-    return () => clearTimeout(timer)
-  }, [busqueda])
+    async function cargar() {
+      setLoading(true)
+      const { data } = await supabase
+        .from('clientes')
+        .select('*')
+        .eq('activo', true)
+        .order('nombre')
+      setTodosClientes(data || [])
+      setLoading(false)
+    }
+    cargar()
+  }, [])
 
-  async function buscar() {
-    let query = supabase.from('clientes').select('*').eq('activo', true).order('nombre').limit(30)
-    if (busqueda.trim()) query = query.ilike('nombre', `%${busqueda}%`)
-    const { data } = await query
-    setClientes(data || [])
-  }
+  const clientes = busqueda.trim()
+    ? todosClientes.filter(c => fuzzyMatch(c.nombre, busqueda))
+    : todosClientes.slice(0, 8)
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-16 px-4">
@@ -48,17 +64,20 @@ export default function ClienteSelector({ onSeleccionar, onCerrar }: Props) {
           <button onClick={onCerrar} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
         <div className="overflow-y-auto flex-1 divide-y divide-gray-50">
-          {clientes.length === 0 && (
+          {loading && <div className="p-8 text-center text-gray-400 text-sm">Cargando clientes...</div>}
+          {!loading && clientes.length === 0 && (
             <div className="p-8 text-center text-gray-400">
               <Users size={32} className="mx-auto mb-2" />
-              <p className="text-sm">No se encontraron clientes</p>
+              <p className="text-sm">
+                {busqueda.trim() ? `No se encontraron clientes para "${busqueda}"` : 'No hay clientes registrados'}
+              </p>
             </div>
           )}
-          {clientes.map(c => (
+          {!loading && clientes.map(c => (
             <button
               key={c.id}
               onClick={() => onSeleccionar(c)}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-pink-50 transition-colors text-left"
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
             >
               <div>
                 <p className="font-medium text-gray-800 text-sm">{c.nombre}</p>

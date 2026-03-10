@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -190,9 +190,10 @@ export default function NuevoProductoPage() {
           </div>
           <div>
             <Label>Temporada</Label>
-            <Select value={temporada} onValueChange={v => setTemporada(v ?? '')}>
+            <Select value={temporada || '__none__'} onValueChange={v => setTemporada(v === '__none__' ? '' : (v ?? ''))}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="__none__">Sin temporada</SelectItem>
                 <SelectItem value="verano">Verano</SelectItem>
                 <SelectItem value="invierno">Invierno</SelectItem>
                 <SelectItem value="todo_el_año">Todo el año</SelectItem>
@@ -226,8 +227,8 @@ export default function NuevoProductoPage() {
                   disabled={variantes.some(v => v.talle === t)}
                   className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                     variantes.some(v => v.talle === t)
-                      ? 'bg-pink-100 border-pink-300 text-pink-600 cursor-default'
-                      : 'border-gray-300 text-gray-600 hover:border-pink-400 hover:text-pink-600'
+                      ? 'bg-teal-100 border-teal-300 text-teal-600 cursor-default'
+                      : 'border-gray-300 text-gray-600 hover:border-teal-400 hover:text-teal-600'
                   }`}
                 >
                   {t}
@@ -313,7 +314,7 @@ export default function NuevoProductoPage() {
         <Link href="/inventario">
           <Button variant="outline">Cancelar</Button>
         </Link>
-        <Button onClick={guardar} disabled={loading} className="bg-pink-500 hover:bg-pink-600 min-w-[120px]">
+        <Button onClick={guardar} disabled={loading} className="bg-teal-500 hover:bg-teal-600 min-w-[120px]">
           {loading ? 'Guardando...' : 'Guardar producto'}
         </Button>
       </div>

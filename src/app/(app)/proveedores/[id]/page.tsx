@@ -111,7 +111,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
             )}
           </div>
         </div>
-        <Button onClick={guardar} disabled={guardando} className="bg-pink-500 hover:bg-pink-600 gap-2">
+        <Button onClick={guardar} disabled={guardando} className="bg-teal-500 hover:bg-teal-600 gap-2">
           <Save size={16} /> {guardando ? 'Guardando...' : 'Guardar'}
         </Button>
       </div>

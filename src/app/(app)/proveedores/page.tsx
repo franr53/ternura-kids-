@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
@@ -44,7 +44,7 @@ export default function ProveedoresPage() {
           <p className="text-gray-500 text-sm mt-0.5">{proveedores.length} proveedores activos</p>
         </div>
         <Link href="/proveedores/nuevo">
-          <Button className="bg-pink-500 hover:bg-pink-600 gap-2">
+          <Button className="bg-teal-500 hover:bg-teal-600 gap-2">
             <Plus size={18} /> Nuevo proveedor
           </Button>
         </Link>
@@ -122,7 +122,7 @@ export default function ProveedoresPage() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <Link href={`/proveedores/${prov.id}`}>
-                      <Button variant="ghost" size="sm" className="text-pink-600 hover:text-pink-700">Ver</Button>
+                      <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700">Ver</Button>
                     </Link>
                   </td>
                 </tr>

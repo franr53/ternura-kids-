@@ -29,7 +29,28 @@
       "Read(//c/Users/franc/.claude/skills/**)",
       "Read(//c/Users/franc/.claude/skills//**)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(find /c/Users/franc/Documents/TernuraKids/src/app -name \"page.tsx\" -type f -exec basename {} \\\\; | wc -l)",
+      "Bash(ls -la /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/**/page.tsx | wc -l)",
+      "Bash(wc -l /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/clientes/\\\\[id\\\\]/page.tsx /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/inventario/\\\\[id\\\\]/page.tsx /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/proveedores/\\\\[id\\\\]/page.tsx /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/proveedores/ingreso/page.tsx)",
+      "Bash(find /c/Users/franc/Documents/TernuraKids/src/components/ui -type f -name \"*.tsx\" | xargs wc -l | tail -1)",
+      "Bash(taskkill /IM node.exe /F)",
+      "Bash(cmd /c \"taskkill /IM node.exe /F\")",
+      "Bash(cd \"/c/Users/franc/Documents/TernuraKids\" && npm list xlsx 2>&1)",
+      "Bash(cd \"/c/Users/franc/Documents/TernuraKids\" && python \"/c/Users/franc/.claude/skills/senior-fullstack/scripts/code_quality_analyzer.py\" --analyze 2>&1 | head -50)",
+      "Bash(cd \"/c/Users/franc/Documents/TernuraKids\" && python \"/c/Users/franc/.claude/skills/senior-fullstack/scripts/code_quality_analyzer.py\" . --verbose 2>&1)",
+      "Bash(find /c/Users/franc/Documents/TernuraKids/src -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) -exec wc -l {} + | sort -rn | head -20)",
+      "Bash(find /c/Users/franc/Documents/TernuraKids -name \"*.sql\" -o -name \"supabase.json\" -o -name \"migrations\" 2>/dev/null | head -20)",
+      "Bash(wc -l /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/reportes/page.tsx /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/proveedores/ingreso/page.tsx /c/Users/franc/Documents/TernuraKids/src/app/\\\\\\(app\\\\\\)/importar/page.tsx)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && powershell -Command \"\n\\\\$files = Get-ChildItem -Recurse -Path 'src' -Include '*.tsx','*.ts','*.css' | Where-Object { Select-String -Path \\\\$_.FullName -Pattern 'pink-' -Quiet }\n\n\\\\$replacements = @\\(\n  @\\('text-pink-600', 'text-teal-600'\\),\n  @\\('text-pink-700', 'text-teal-700'\\),\n  @\\('text-pink-500', 'text-teal-500'\\),\n  @\\('text-pink-400', 'text-teal-400'\\),\n  @\\('text-pink-300', 'text-teal-300'\\),\n  @\\('hover:text-pink-700', 'hover:text-teal-700'\\),\n  @\\('hover:text-pink-600', 'hover:text-teal-600'\\),\n  @\\('bg-pink-600', 'bg-teal-600'\\),\n  @\\('bg-pink-500', 'bg-teal-500'\\),\n  @\\('bg-pink-200', 'bg-teal-200'\\),\n  @\\('bg-pink-100', 'bg-teal-100'\\),\n  @\\('bg-pink-50', 'bg-teal-50'\\),\n  @\\('hover:bg-pink-700', 'hover:bg-teal-700'\\),\n  @\\('hover:bg-pink-600', 'hover:bg-teal-600'\\),\n  @\\('hover:bg-pink-50', 'hover:bg-teal-50'\\),\n  @\\('border-pink-500', 'border-teal-500'\\),\n  @\\('border-pink-400', 'border-teal-400'\\),\n  @\\('border-pink-300', 'border-teal-300'\\),\n  @\\('border-pink-200', 'border-teal-200'\\),\n  @\\('focus:border-pink-400', 'focus:border-teal-400'\\),\n  @\\('ring-pink-400', 'ring-teal-400'\\),\n  @\\('ring-pink-500', 'ring-teal-500'\\),\n  @\\('from-pink-', 'from-teal-'\\),\n  @\\('to-pink-', 'to-teal-'\\),\n  @\\('via-pink-', 'via-teal-'\\)\n\\)\n\nforeach \\(\\\\$file in \\\\$files\\) {\n  \\\\$content = Get-Content \\\\$file.FullName -Raw -Encoding UTF8\n  \\\\$original = \\\\$content\n  foreach \\(\\\\$r in \\\\$replacements\\) {\n    \\\\$content = \\\\$content -replace [regex]::Escape\\(\\\\$r[0]\\), \\\\$r[1]\n  }\n  if \\(\\\\$content -ne \\\\$original\\) {\n    Set-Content -Path \\\\$file.FullName -Value \\\\$content -Encoding UTF8 -NoNewline\n    Write-Host \\('Updated: ' + \\\\$file.Name\\)\n  }\n}\nWrite-Host 'Done'\n\")",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && powershell -ExecutionPolicy Bypass -File replace_pink.ps1)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && del replace_pink.ps1)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx supabase --version 2>&1 | head -3)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && node -e \"require\\('@ducanh2912/next-pwa'\\); console.log\\('ok'\\)\" 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npm uninstall @ducanh2912/next-pwa 2>&1 | tail -3)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -30)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -20)",
+      "Bash(cd \"C:\\\\Users\\\\franc\\\\Documents\\\\TernuraKids\" && npx tsc --noEmit 2>&1 | head -50)"
     ]
   }
 }

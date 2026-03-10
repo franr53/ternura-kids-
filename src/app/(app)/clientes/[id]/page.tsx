@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, MessageCircle, Plus } from 'lucide-react'
+import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 
@@ -26,6 +27,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [direccion, setDireccion] = useState('')
   const [montoAbono, setMontoAbono] = useState('')
   const [notasAbono, setNotasAbono] = useState('')
+  const [metodoPagoAbono, setMetodoPagoAbono] = useState<'efectivo' | 'transferencia' | 'debito'>('efectivo')
 
   useEffect(() => {
     async function cargar() {
@@ -99,7 +101,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
               <MessageCircle size={16} /> WhatsApp
             </Button>
           )}
-          <Button onClick={guardar} disabled={guardando} className="bg-pink-500 hover:bg-pink-600 gap-2">
+          <Button onClick={guardar} disabled={guardando} className="bg-teal-500 hover:bg-teal-600 gap-2">
             <Save size={16} /> {guardando ? 'Guardando...' : 'Guardar'}
           </Button>
         </div>
@@ -117,19 +119,68 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
         </Card>
 
         {/* Fiado */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">Fiado</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            <div className="text-center py-2">
-              <p className="text-3xl font-bold text-red-500">{formatPrecio(cliente.deuda_total)}</p>
-              <p className="text-xs text-gray-500">deuda actual</p>
+        <Card className={cliente.deuda_total > 0 ? 'border-red-200' : ''}>
+          <CardHeader><CardTitle className="text-base">Cuenta corriente</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="text-center py-2 rounded-xl bg-gray-50">
+              <p className={`text-3xl font-bold ${cliente.deuda_total > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                {formatPrecio(cliente.deuda_total)}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">deuda actual</p>
             </div>
-            <div><Label>Registrar abono</Label>
-              <div className="flex gap-2 mt-1">
-                <Input type="number" value={montoAbono} onChange={e => setMontoAbono(e.target.value)} placeholder="Monto" />
-                <Button onClick={registrarAbono} className="bg-green-500 hover:bg-green-600 gap-1"><Plus size={16} /></Button>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Registrar pago</Label>
+              <Input
+                type="number"
+                value={montoAbono}
+                onChange={e => setMontoAbono(e.target.value)}
+                placeholder="Monto a cobrar"
+                className="text-base"
+              />
+              {montoAbono && parseFloat(montoAbono) > 0 && (
+                <p className="text-xs text-gray-500">
+                  Saldo resultante:{' '}
+                  <span className={`font-semibold ${Math.max(0, cliente.deuda_total - parseFloat(montoAbono)) === 0 ? 'text-green-600' : 'text-red-500'}`}>
+                    {formatPrecio(Math.max(0, cliente.deuda_total - parseFloat(montoAbono)))}
+                  </span>
+                </p>
+              )}
+
+              {/* Método de pago */}
+              <div className="flex gap-1.5">
+                {([
+                  { key: 'efectivo', label: 'Efectivo', icon: <Banknote size={13} /> },
+                  { key: 'transferencia', label: 'Transfer.', icon: <Smartphone size={13} /> },
+                  { key: 'debito', label: 'Débito', icon: <CreditCard size={13} /> },
+                ] as const).map(m => (
+                  <button
+                    key={m.key}
+                    onClick={() => setMetodoPagoAbono(m.key)}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-xs font-medium transition-colors',
+                      metodoPagoAbono === m.key
+                        ? 'bg-green-100 border-green-400 text-green-700'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    {m.icon} {m.label}
+                  </button>
+                ))}
               </div>
-              <Input value={notasAbono} onChange={e => setNotasAbono(e.target.value)} placeholder="Nota (opcional)" className="mt-2 text-sm" />
+
+              <Input
+                value={notasAbono}
+                onChange={e => setNotasAbono(e.target.value)}
+                placeholder="Nota (opcional)"
+                className="text-sm"
+              />
+              <Button
+                onClick={registrarAbono}
+                className="w-full bg-green-500 hover:bg-green-600 gap-2 h-10"
+              >
+                <CheckCircle size={16} /> Confirmar pago
+              </Button>
             </div>
           </CardContent>
         </Card>

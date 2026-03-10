@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -8,34 +8,47 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Search, Plus, Trash2, Printer } from 'lucide-react'
+import { Search, Trash2, Printer } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
+
+type ProductoConProveedor = Producto & {
+  variantes?: Variante[]
+  proveedor?: { nombre: string } | null
+}
 
 interface EtiquetaItem {
   variante_id: string
-  variante: Variante & { producto?: Producto }
+  variante: Variante & { producto?: ProductoConProveedor }
   cantidad: number
 }
 
 export default function EtiquetasPage() {
   const supabase = createClient()
-  const [productos, setProductos] = useState<(Producto & { variantes?: Variante[] })[]>([])
+  const [productos, setProductos] = useState<ProductoConProveedor[]>([])
   const [busqueda, setBusqueda] = useState('')
   const [etiquetas, setEtiquetas] = useState<EtiquetaItem[]>([])
-  const [productoSeleccionado, setProductoSeleccionado] = useState<(Producto & { variantes?: Variante[] }) | null>(null)
+  const [productoSeleccionado, setProductoSeleccionado] = useState<ProductoConProveedor | null>(null)
 
   const cargarProductos = useCallback(async () => {
-    const { data } = await supabase.from('productos').select('*, variantes(*)').eq('activo', true).order('nombre')
+    const { data } = await supabase
+      .from('productos')
+      .select('*, variantes(*), proveedor:proveedores(nombre)')
+      .eq('activo', true)
+      .order('nombre')
     setProductos(data || [])
   }, [supabase])
 
   useEffect(() => { cargarProductos() }, [cargarProductos])
 
+  function normalizar(s: string) {
+    return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  }
+
   const filtrados = busqueda
-    ? productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()))
+    ? productos.filter(p => normalizar(p.nombre).includes(normalizar(busqueda)))
     : []
 
-  function agregarVariante(variante: Variante, producto: Producto) {
+  function agregarVariante(variante: Variante, producto: ProductoConProveedor) {
     const existe = etiquetas.find(e => e.variante_id === variante.id)
     if (existe) return
     setEtiquetas(prev => [...prev, {
@@ -48,7 +61,9 @@ export default function EtiquetasPage() {
   }
 
   function actualizarCantidad(varianteId: string, cantidad: number) {
-    setEtiquetas(prev => prev.map(e => e.variante_id === varianteId ? { ...e, cantidad: Math.max(1, cantidad) } : e))
+    setEtiquetas(prev => prev.map(e =>
+      e.variante_id === varianteId ? { ...e, cantidad: Math.max(1, cantidad) } : e
+    ))
   }
 
   function eliminarEtiqueta(varianteId: string) {
@@ -61,79 +76,155 @@ export default function EtiquetasPage() {
       for (let i = 0; i < e.cantidad; i++) etiquetasExpandidas.push(e)
     })
 
-    const etiquetasHTML = etiquetasExpandidas.map(e => `
+    let barcodeIndex = 0
+    const etiquetasHTML = etiquetasExpandidas.map(e => {
+      const producto = e.variante.producto
+      const precioTarjeta = producto?.precio_venta || 0
+      const precioEfectivo = Math.round(precioTarjeta * 0.8)
+      const marca = producto?.proveedor?.nombre || ''
+      const barcode = e.variante.codigo_barras
+      const bcId = `bc-${barcodeIndex++}`
+
+      return `
       <div class="etiqueta">
-        <div class="nombre">${e.variante.producto?.nombre || ''}</div>
-        <div class="info">
-          <span class="talle">T. ${e.variante.talle}</span>
-          <span class="precio">${formatPrecio(e.variante.producto?.precio_venta || 0)}</span>
+        <div class="top">
+          <div class="nombre">${producto?.nombre || ''}</div>
+          ${marca ? `<div class="marca-top">${marca}</div>` : ''}
+          <div class="talle">T. ${e.variante.talle}</div>
         </div>
-        ${e.variante.codigo_barras ? `<div class="barcode">${e.variante.codigo_barras}</div>` : ''}
-      </div>
-    `).join('')
+        <div class="precios">
+          <div class="precio-row">
+            <span class="precio-label">Tarjeta</span>
+            <span class="precio-valor tarjeta">${formatPrecio(precioTarjeta)}</span>
+          </div>
+          <div class="precio-row destacado">
+            <span class="precio-label">Efectivo</span>
+            <span class="precio-valor efectivo">${formatPrecio(precioEfectivo)}</span>
+          </div>
+        </div>
+        ${barcode ? `
+        <div class="barcode-wrap">
+          <svg id="${bcId}" data-barcode="${barcode}"></svg>
+        </div>
+        ` : '<div class="barcode-placeholder"></div>'}
+        ${marca ? `<div class="marca-bottom">${marca.toUpperCase()}</div>` : ''}
+      </div>`
+    }).join('')
 
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Etiquetas - Ternura Kids</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; background: white; }
+    body { font-family: Arial, sans-serif; background: white; color: #000; }
     .contenedor {
       display: grid;
-      grid-template-columns: repeat(4, 5cm);
+      grid-template-columns: repeat(4, 5.2cm);
       gap: 2mm;
       padding: 5mm;
     }
     .etiqueta {
-      width: 5cm;
-      height: 3cm;
-      border: 1px solid #ccc;
-      padding: 3mm;
+      width: 5.2cm;
+      height: 4.2cm;
+      border: 1px solid #000;
+      padding: 2mm 2.5mm;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
       overflow: hidden;
+      background: white;
     }
+    .top { display: flex; flex-direction: column; gap: 0.5mm; }
     .nombre {
-      font-size: 9pt;
+      font-size: 7.5pt;
       font-weight: bold;
-      line-height: 1.2;
-      max-height: 1.5cm;
+      white-space: nowrap;
       overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.2;
     }
-    .info {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    .marca-top {
+      font-size: 6pt;
+      color: #555;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .talle {
+      font-size: 9pt;
+      font-weight: bold;
+    }
+    .precios {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5mm;
+    }
+    .precio-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .precio-label {
+      font-size: 6.5pt;
+      color: #555;
+    }
+    .precio-valor {
+      font-size: 8pt;
+      font-weight: bold;
+    }
+    .precio-row.destacado .precio-valor.efectivo {
       font-size: 10pt;
-      font-weight: bold;
-      color: #e91e8c;
     }
-    .precio {
-      font-size: 11pt;
-      font-weight: bold;
+    .barcode-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
-    .barcode {
-      font-size: 7pt;
-      color: #666;
+    .barcode-wrap svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    .barcode-placeholder {
+      height: 10mm;
+    }
+    .marca-bottom {
+      font-size: 5.5pt;
       text-align: center;
-      font-family: monospace;
-      border-top: 1px solid #eee;
-      padding-top: 1mm;
+      color: #333;
+      letter-spacing: 0.5px;
     }
     @media print {
       body { margin: 0; }
-      .contenedor { padding: 3mm; }
+      .contenedor { padding: 3mm; gap: 1mm; }
+      @page { margin: 5mm; size: A4; }
     }
   </style>
 </head>
 <body>
   <div class="contenedor">${etiquetasHTML}</div>
-  <script>window.onload = () => window.print();</script>
+  <script>
+    window.onload = function() {
+      document.querySelectorAll('[data-barcode]').forEach(function(el) {
+        try {
+          JsBarcode(el, el.getAttribute('data-barcode'), {
+            format: 'CODE128',
+            width: 1.2,
+            height: 28,
+            displayValue: true,
+            fontSize: 7,
+            margin: 1,
+            lineColor: '#000',
+            background: '#fff',
+          });
+        } catch(e) { console.error('Barcode error:', e); }
+      });
+      setTimeout(function() { window.print(); }, 600);
+    };
+  </script>
 </body>
 </html>`
   }
@@ -160,9 +251,9 @@ export default function EtiquetasPage() {
         <Button
           onClick={imprimirEtiquetas}
           disabled={etiquetas.length === 0}
-          className="bg-pink-500 hover:bg-pink-600 gap-2"
+          className="bg-teal-500 hover:bg-teal-600 gap-2"
         >
-          <Printer size={18} /> Generar PDF ({totalEtiquetas})
+          <Printer size={18} /> Imprimir ({totalEtiquetas})
         </Button>
       </div>
 
@@ -182,14 +273,23 @@ export default function EtiquetasPage() {
               <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto mt-1">
                 {filtrados.map(producto => (
                   <div key={producto.id}>
-                    <div className="px-4 py-2 bg-gray-50 text-xs font-medium text-gray-500">{producto.nombre}</div>
+                    <div className="px-4 py-2 bg-gray-50 text-xs font-medium text-gray-600 flex justify-between">
+                      <span>{producto.nombre}</span>
+                      {producto.proveedor?.nombre && (
+                        <span className="text-gray-400">{producto.proveedor.nombre}</span>
+                      )}
+                    </div>
                     {producto.variantes?.map(v => (
                       <button
                         key={v.id}
-                        className="w-full text-left px-6 py-2 hover:bg-pink-50 text-sm border-b border-gray-50 last:border-0 flex justify-between items-center"
+                        className="w-full text-left px-6 py-2 hover:bg-teal-50 text-sm border-b border-gray-50 last:border-0 flex justify-between items-center"
                         onClick={() => agregarVariante(v, producto)}
                       >
-                        <span>Talle {v.talle} <span className="text-gray-400">(stock: {v.stock})</span></span>
+                        <span>
+                          Talle {v.talle}
+                          <span className="text-gray-400 ml-2">(stock: {v.stock})</span>
+                          {v.codigo_barras && <span className="text-gray-400 font-mono ml-2 text-xs">{v.codigo_barras}</span>}
+                        </span>
                         <span className="font-medium text-gray-700">{formatPrecio(producto.precio_venta)}</span>
                       </button>
                     ))}
@@ -213,8 +313,18 @@ export default function EtiquetasPage() {
                     <p className="font-medium text-gray-800">{e.variante.producto?.nombre}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <Badge variant="outline" className="text-xs">T. {e.variante.talle}</Badge>
-                      <span className="text-sm text-gray-500">{formatPrecio(e.variante.producto?.precio_venta || 0)}</span>
-                      {e.variante.codigo_barras && <span className="text-xs text-gray-400 font-mono">{e.variante.codigo_barras}</span>}
+                      {e.variante.producto?.proveedor?.nombre && (
+                        <span className="text-xs text-gray-400">{e.variante.producto.proveedor.nombre}</span>
+                      )}
+                      <span className="text-sm text-gray-500">
+                        {formatPrecio(e.variante.producto?.precio_venta || 0)}
+                        <span className="text-xs text-gray-400 ml-1">
+                          · ef. {formatPrecio(Math.round((e.variante.producto?.precio_venta || 0) * 0.8))}
+                        </span>
+                      </span>
+                      {e.variante.codigo_barras && (
+                        <span className="text-xs text-gray-400 font-mono">{e.variante.codigo_barras}</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -235,7 +345,7 @@ export default function EtiquetasPage() {
             </div>
             <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between items-center">
               <span className="text-gray-500 text-sm">Total etiquetas a imprimir</span>
-              <Badge className="bg-pink-500">{totalEtiquetas}</Badge>
+              <Badge className="bg-teal-500">{totalEtiquetas}</Badge>
             </div>
           </CardContent>
         </Card>

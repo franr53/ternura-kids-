@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -215,7 +215,7 @@ export default function IngresoMercaderiaPage() {
                 <Label>Precio costo</Label>
                 <Input type="number" value={precioCostoItem} onChange={e => setPrecioCostoItem(e.target.value)} placeholder="0" className="mt-1" />
               </div>
-              <Button onClick={agregarItem} className="bg-pink-500 hover:bg-pink-600">
+              <Button onClick={agregarItem} className="bg-teal-500 hover:bg-teal-600">
                 <Plus size={16} className="mr-1" /> Agregar
               </Button>
             </div>
@@ -267,7 +267,7 @@ export default function IngresoMercaderiaPage() {
 
       <div className="flex gap-3 justify-end">
         <Link href="/proveedores"><Button variant="outline">Cancelar</Button></Link>
-        <Button onClick={guardar} disabled={guardando || items.length === 0} className="bg-pink-500 hover:bg-pink-600">
+        <Button onClick={guardar} disabled={guardando || items.length === 0} className="bg-teal-500 hover:bg-teal-600">
           {guardando ? 'Guardando...' : 'Registrar ingreso'}
         </Button>
       </div>

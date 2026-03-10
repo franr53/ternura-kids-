@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
@@ -112,7 +112,7 @@ export default function ReportesPage() {
               <Label>Hasta</Label>
               <Input type="date" value={hasta} onChange={e => setHasta(e.target.value)} className="mt-1 w-40" />
             </div>
-            <Button onClick={buscarVentas} disabled={loadingVentas} className="bg-pink-500 hover:bg-pink-600 gap-2">
+            <Button onClick={buscarVentas} disabled={loadingVentas} className="bg-teal-500 hover:bg-teal-600 gap-2">
               <Search size={16} /> {loadingVentas ? 'Buscando...' : 'Buscar'}
             </Button>
             {ventas.length > 0 && (
@@ -126,9 +126,9 @@ export default function ReportesPage() {
             <>
               {/* Resumen */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
-                <div className="bg-pink-50 rounded-lg p-3">
+                <div className="bg-teal-50 rounded-lg p-3">
                   <p className="text-xs text-gray-500">Total período</p>
-                  <p className="text-xl font-bold text-pink-600">{formatPrecio(totalVentas)}</p>
+                  <p className="text-xl font-bold text-teal-600">{formatPrecio(totalVentas)}</p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <p className="text-xs text-gray-500">N° ventas</p>
