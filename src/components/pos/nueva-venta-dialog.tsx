@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Cliente, Producto, Variante, MetodoPago } from '@/types'
+import { Cliente, Producto, Proveedor, Variante, MetodoPago } from '@/types'
 import { ItemCarrito } from '@/app/(app)/pos/page'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -60,6 +60,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   // Data
   const [todasVariantes, setTodasVariantes] = useState<VarianteConProducto[]>([])
   const [todosClientes, setTodosClientes] = useState<Cliente[]>([])
+  const [proveedoresConDeuda, setProveedoresConDeuda] = useState<Proveedor[]>([])
   const [loadingData, setLoadingData] = useState(true)
 
   // Venta state
@@ -72,6 +73,9 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   const [busProducto, setBusProducto] = useState('')
   const [busCliente, setBusCliente] = useState('')
   const [mostrarDropCliente, setMostrarDropCliente] = useState(false)
+
+  // Transferencia a proveedor
+  const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
 
   // UI
   const [loading, setLoading] = useState(false)
@@ -96,16 +100,18 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   useEffect(() => {
     async function cargar() {
       setLoadingData(true)
-      const [{ data: variantes }, { data: clientes }] = await Promise.all([
+      const [{ data: variantes }, { data: clientes }, { data: proveedores }] = await Promise.all([
         supabase
           .from('variantes')
           .select('*, producto:productos(*, categoria:categorias(nombre, color))')
           .order('talle')
           .limit(500),
         supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
+        supabase.from('proveedores').select('*').gt('deuda_total', 0).eq('activo', true).order('nombre'),
       ])
       setTodasVariantes((variantes || []).filter((v) => v.producto?.activo) as VarianteConProducto[])
       setTodosClientes(clientes || [])
+      setProveedoresConDeuda((proveedores || []) as Proveedor[])
       setLoadingData(false)
     }
     cargar()
@@ -234,6 +240,21 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
       })
 
       if (!resultado.ok) { toast.error(resultado.error); return }
+
+      // Si la transferencia va a un proveedor, registrar el pago y reducir su deuda
+      if (metodoPago === 'transferencia' && proveedorTransferencia) {
+        const nuevaDeuda = Math.max(0, proveedorTransferencia.deuda_total - total)
+        await Promise.all([
+          supabase.from('pagos_proveedores').insert({
+            proveedor_id: proveedorTransferencia.id,
+            monto: total,
+            metodo: 'transferencia',
+            notas: 'Pago directo de cliente en venta',
+          }),
+          supabase.from('proveedores').update({ deuda_total: nuevaDeuda }).eq('id', proveedorTransferencia.id),
+        ])
+        toast.success(`Deuda de ${proveedorTransferencia.nombre} reducida en ${formatPrecio(total)}`, { duration: 4000 })
+      }
 
       toast.success(`Venta registrada — ${formatPrecio(total)}`)
       onVentaCompletada()
@@ -522,7 +543,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                 {METODOS.map(m => (
                   <button
                     key={m.key}
-                    onClick={() => setMetodoPago(m.key)}
+                    onClick={() => { setMetodoPago(m.key); if (m.key !== 'transferencia') setProveedorTransferencia(null) }}
                     className={cn(
                       'flex flex-col items-center gap-1 p-2 rounded-xl border-2 text-xs font-medium transition-all',
                       metodoPago === m.key
@@ -535,6 +556,42 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                   </button>
                 ))}
               </div>
+
+              {/* Selector proveedor (solo con transferencia) */}
+              {metodoPago === 'transferencia' && proveedoresConDeuda.length > 0 && (
+                <div className="mt-2.5">
+                  {proveedorTransferencia ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
+                      <Smartphone size={13} className="text-blue-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-blue-700 truncate">{proveedorTransferencia.nombre}</p>
+                        <p className="text-xs text-blue-500">
+                          Deuda: {formatPrecio(proveedorTransferencia.deuda_total)} → {formatPrecio(Math.max(0, proveedorTransferencia.deuda_total - total))}
+                        </p>
+                      </div>
+                      <button onClick={() => setProveedorTransferencia(null)} className="text-blue-300 hover:text-blue-600 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      defaultValue=""
+                      onChange={e => {
+                        const prov = proveedoresConDeuda.find(p => p.id === e.target.value)
+                        setProveedorTransferencia(prov || null)
+                      }}
+                      className="w-full h-8 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    >
+                      <option value="">↗ ¿Va al alias de un proveedor?</option>
+                      {proveedoresConDeuda.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.nombre} — debe {formatPrecio(p.deuda_total)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
