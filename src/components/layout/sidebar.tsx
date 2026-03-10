@@ -18,6 +18,7 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
+  Receipt,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ const navItems = [
   { href: '/clientes',     label: 'Clientes',     icon: Users },
   { href: '/proveedores',  label: 'Proveedores',  icon: Truck },
   { href: '/caja',         label: 'Caja',         icon: Wallet },
+  { href: '/gastos',       label: 'Gastos',       icon: Receipt },
   { href: '/etiquetas',    label: 'Etiquetas',    icon: Tag },
   { href: '/reportes',     label: 'Reportes',     icon: BarChart3 },
   { href: '/whatsapp',     label: 'WhatsApp',     icon: MessageCircle },

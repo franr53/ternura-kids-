@@ -136,6 +136,26 @@ export interface FiadoMovimiento {
   cliente?: Cliente
 }
 
+export interface CategoriaGasto {
+  id: string
+  nombre: string
+  color: string
+  creado_en: string
+}
+
+export interface Gasto {
+  id: string
+  fecha: string
+  concepto: string
+  categoria_id?: string
+  monto: number
+  metodo_pago: 'efectivo' | 'transferencia' | 'tarjeta'
+  notas?: string
+  usuario_id?: string
+  creado_en: string
+  categoria?: CategoriaGasto
+}
+
 export interface IngresoMercaderia {
   id: string
   proveedor_id: string
