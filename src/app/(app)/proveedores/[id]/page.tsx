@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, Plus } from 'lucide-react'
+import { ArrowLeft, Save, Plus, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 
@@ -111,9 +111,16 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
             )}
           </div>
         </div>
-        <Button onClick={guardar} disabled={guardando} className="bg-teal-500 hover:bg-teal-600 gap-2">
-          <Save size={16} /> {guardando ? 'Guardando...' : 'Guardar'}
-        </Button>
+        <div className="flex gap-2">
+          <Link href={`/proveedores/ingreso?proveedor=${id}`}>
+            <Button variant="outline" className="gap-2 border-teal-300 text-teal-700 hover:bg-teal-50">
+              <FileText size={16} /> Cargar boleta
+            </Button>
+          </Link>
+          <Button onClick={guardar} disabled={guardando} className="bg-teal-500 hover:bg-teal-600 gap-2">
+            <Save size={16} /> {guardando ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </div>
       </div>
 
       {/* Deuda prominente */}

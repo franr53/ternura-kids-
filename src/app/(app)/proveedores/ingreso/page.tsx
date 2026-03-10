@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Proveedor, Producto, Variante } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -25,10 +25,11 @@ interface ItemIngreso {
 
 export default function IngresoMercaderiaPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [productos, setProductos] = useState<(Producto & { variantes?: Variante[] })[]>([])
-  const [proveedorId, setProveedorId] = useState('')
+  const [proveedorId, setProveedorId] = useState(searchParams.get('proveedor') || '')
   const [numeroRemito, setNumeroRemito] = useState('')
   const [busquedaProducto, setBusquedaProducto] = useState('')
   const [items, setItems] = useState<ItemIngreso[]>([])

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Search, Truck, DollarSign } from 'lucide-react'
+import { Plus, Search, Truck, DollarSign, FileText } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 
 export default function ProveedoresPage() {
@@ -43,11 +43,18 @@ export default function ProveedoresPage() {
           <h1 className="text-2xl font-bold text-gray-800">Proveedores</h1>
           <p className="text-gray-500 text-sm mt-0.5">{proveedores.length} proveedores activos</p>
         </div>
-        <Link href="/proveedores/nuevo">
-          <Button className="bg-teal-500 hover:bg-teal-600 gap-2">
-            <Plus size={18} /> Nuevo proveedor
-          </Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/proveedores/ingreso">
+            <Button variant="outline" className="gap-2 border-teal-300 text-teal-700 hover:bg-teal-50">
+              <FileText size={16} /> Cargar boleta
+            </Button>
+          </Link>
+          <Link href="/proveedores/nuevo">
+            <Button className="bg-teal-500 hover:bg-teal-600 gap-2">
+              <Plus size={18} /> Nuevo proveedor
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}
@@ -120,10 +127,17 @@ export default function ProveedoresPage() {
                       <Badge variant="secondary">Sin deuda</Badge>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <Link href={`/proveedores/${prov.id}`}>
-                      <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700">Ver</Button>
-                    </Link>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Link href={`/proveedores/ingreso?proveedor=${prov.id}`}>
+                        <Button variant="ghost" size="sm" className="text-gray-500 hover:text-teal-600 gap-1 text-xs">
+                          <FileText size={13} /> Boleta
+                        </Button>
+                      </Link>
+                      <Link href={`/proveedores/${prov.id}`}>
+                        <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700">Ver</Button>
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}
