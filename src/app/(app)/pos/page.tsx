@@ -4,10 +4,13 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Cliente, MetodoPago, Variante, Producto } from '@/types'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, TrendingUp, Receipt } from 'lucide-react'
+import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar } from 'lucide-react'
 import { formatPrecio, cn } from '@/lib/utils'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
+
+type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
 
 export interface ItemCarrito {
   varianteId: string
@@ -57,19 +60,44 @@ export default function PosPage() {
   const [loading, setLoading] = useState(true)
   const [mostrarNuevaVenta, setMostrarNuevaVenta] = useState(false)
   const [expandida, setExpandida] = useState<string | null>(null)
+  const [periodo, setPeriodo] = useState<Periodo>('hoy')
+  const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
 
   const cargarVentas = useCallback(async () => {
-    const hoy = new Date()
-    hoy.setHours(0, 0, 0, 0)
-    const { data } = await supabase
+    setLoading(true)
+    const desde = new Date()
+    if (periodo === 'hoy') {
+      desde.setHours(0, 0, 0, 0)
+    } else if (periodo === 'semana') {
+      desde.setDate(desde.getDate() - desde.getDay())
+      desde.setHours(0, 0, 0, 0)
+    } else if (periodo === 'mes') {
+      desde.setDate(1)
+      desde.setHours(0, 0, 0, 0)
+    } else {
+      // fecha custom: rango del día seleccionado
+      const [y, m, d] = fechaCustom.split('-').map(Number)
+      desde.setFullYear(y, m - 1, d)
+      desde.setHours(0, 0, 0, 0)
+    }
+
+    let query = supabase
       .from('ventas')
       .select('id, total, descuento, creado_en, cliente:clientes(nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto)')
       .eq('estado', 'completada')
-      .gte('creado_en', hoy.toISOString())
+      .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
+
+    if (periodo === 'fecha') {
+      const hasta = new Date(desde)
+      hasta.setHours(23, 59, 59, 999)
+      query = query.lte('creado_en', hasta.toISOString())
+    }
+
+    const { data } = await query
     setVentas((data as unknown as VentaHoy[]) || [])
     setLoading(false)
-  }, [supabase])
+  }, [supabase, periodo, fechaCustom])
 
   useEffect(() => { cargarVentas() }, [cargarVentas])
 
@@ -96,10 +124,41 @@ export default function PosPage() {
         </Button>
       </div>
 
-      {/* Stats del día */}
+      {/* Filtros de período */}
+      <div className="px-6 pt-3 pb-0 flex items-center gap-2 shrink-0 flex-wrap">
+        {(['hoy', 'semana', 'mes', 'fecha'] as Periodo[]).map(p => (
+          <button
+            key={p}
+            onClick={() => setPeriodo(p)}
+            className={cn(
+              'text-xs font-semibold px-3 py-1.5 rounded-full border transition-all',
+              periodo === p
+                ? 'bg-teal-500 border-teal-500 text-white'
+                : 'border-gray-200 text-gray-500 hover:border-teal-300 bg-white'
+            )}
+          >
+            {p === 'hoy' ? 'Hoy' : p === 'semana' ? 'Esta semana' : p === 'mes' ? 'Este mes' : 'Fecha'}
+          </button>
+        ))}
+        {periodo === 'fecha' && (
+          <div className="flex items-center gap-1.5">
+            <Calendar size={14} className="text-gray-400" />
+            <Input
+              type="date"
+              value={fechaCustom}
+              onChange={e => setFechaCustom(e.target.value)}
+              className="h-7 text-xs w-36 border-gray-200"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Stats del período */}
       <div className="px-6 py-4 grid grid-cols-3 gap-3 shrink-0">
         <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center shadow-sm">
-          <p className="text-xs font-medium text-gray-400 mb-1">Total del día</p>
+          <p className="text-xs font-medium text-gray-400 mb-1">
+            {periodo === 'hoy' ? 'Total del día' : periodo === 'semana' ? 'Total semana' : periodo === 'mes' ? 'Total mes' : 'Total del día'}
+          </p>
           <p className="text-2xl font-bold text-teal-600 leading-none">{formatPrecio(totalDia)}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center shadow-sm">

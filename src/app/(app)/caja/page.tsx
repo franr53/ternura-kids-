@@ -250,9 +250,24 @@ export default function CajaPage() {
 
       {caja.estado === 'cerrada' && (
         <Card className="border-gray-200 bg-gray-50">
-          <CardContent className="pt-4 pb-4 text-center">
-            <Lock size={24} className="mx-auto text-gray-400 mb-2" />
-            <p className="text-gray-500 text-sm">Caja cerrada{caja.cerrada_en ? ` a las ${new Date(caja.cerrada_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+          <CardContent className="pt-5 pb-5 text-center space-y-3">
+            <Lock size={24} className="mx-auto text-gray-400" />
+            <p className="text-gray-500 text-sm">
+              Caja cerrada{caja.cerrada_en ? ` a las ${new Date(caja.cerrada_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+            </p>
+            <div className="pt-1 space-y-2">
+              <Label className="text-sm text-gray-600">Abrir nueva caja</Label>
+              <Input
+                type="number"
+                value={montoInicial}
+                onChange={e => setMontoInicial(e.target.value)}
+                placeholder="Monto inicial en efectivo"
+                className="max-w-xs mx-auto"
+              />
+              <Button onClick={abrirCaja} disabled={abriendo} className="bg-teal-500 hover:bg-teal-600 gap-2">
+                <Plus size={15} /> {abriendo ? 'Abriendo...' : 'Abrir nueva caja'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
