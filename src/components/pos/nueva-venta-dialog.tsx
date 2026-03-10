@@ -76,19 +76,22 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   // UI
   const [loading, setLoading] = useState(false)
 
-  // Edición de precio
+  // Edición de precio — sin interrumpir la venta
   const [editandoPrecioIdx, setEditandoPrecioIdx] = useState<number | null>(null)
   const [precioTemporal, setPrecioTemporal] = useState('')
-  const [modalPrecio, setModalPrecio] = useState<{
-    idx: number
-    precioAnterior: number
-    nuevoPrecio: number
+  const [preciosCambiados, setPreciosCambiados] = useState<Array<{
     varianteId: string
     productoId: string
     productoNombre: string
     talle: string
-  } | null>(null)
-  const [aplicandoPrecio, setAplicandoPrecio] = useState(false)
+    precioAnterior: number
+    nuevoPrecio: number
+    decision: 'pendiente' | 'variante' | 'todas_variantes' | 'producto' | 'ignorar'
+  }>>([])
+
+  // Post-venta: revisión de precios
+  const [etapaPostVenta, setEtapaPostVenta] = useState(false)
+  const [aplicandoDecision, setAplicandoDecision] = useState<number | null>(null)
 
   useEffect(() => {
     async function cargar() {
@@ -169,50 +172,46 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     const item = carrito[idx]
     if (nuevo === item.precio) { setEditandoPrecioIdx(null); return }
     setEditandoPrecioIdx(null)
-    setModalPrecio({
-      idx,
-      precioAnterior: item.precio,
-      nuevoPrecio: nuevo,
-      varianteId: item.varianteId,
-      productoId: item.productoId || '',
-      productoNombre: item.productoNombre,
-      talle: item.talle,
+    // Aplica inmediatamente al carrito sin interrumpir
+    setCarrito(prev => prev.map((it, i) => i === idx ? { ...it, precio: nuevo } : it))
+    // Registra el cambio para revisar después de la venta
+    setPreciosCambiados(prev => {
+      const existe = prev.findIndex(p => p.varianteId === item.varianteId)
+      const cambio = {
+        varianteId: item.varianteId,
+        productoId: item.productoId || '',
+        productoNombre: item.productoNombre,
+        talle: item.talle,
+        precioAnterior: item.precio,
+        nuevoPrecio: nuevo,
+        decision: 'pendiente' as const,
+      }
+      if (existe >= 0) {
+        return prev.map((p, i) => i === existe ? { ...cambio, precioAnterior: p.precioAnterior } : p)
+      }
+      return [...prev, cambio]
     })
   }
 
-  function aplicarSoloVenta() {
-    if (!modalPrecio) return
-    setCarrito(prev => prev.map((item, i) =>
-      i === modalPrecio.idx ? { ...item, precio: modalPrecio.nuevoPrecio } : item
-    ))
-    setModalPrecio(null)
-    toast.success('Precio actualizado solo para esta venta')
-  }
-
-  async function aplicarPrecio(alcance: 'variante' | 'todas_variantes' | 'producto') {
-    if (!modalPrecio) return
-    setAplicandoPrecio(true)
-    const { nuevoPrecio, varianteId, productoId, idx } = modalPrecio
+  async function aplicarDecision(i: number, decision: 'variante' | 'todas_variantes' | 'producto' | 'ignorar') {
+    const cambio = preciosCambiados[i]
+    setAplicandoDecision(i)
     try {
-      if (alcance === 'variante') {
-        await supabase.from('variantes').update({ precio_venta: nuevoPrecio }).eq('id', varianteId)
-        toast.success(`Precio de T.${modalPrecio.talle} actualizado`)
-      } else if (alcance === 'todas_variantes') {
-        await supabase.from('variantes').update({ precio_venta: nuevoPrecio }).eq('producto_id', productoId)
-        toast.success('Precio de todas las tallas actualizado')
-      } else {
-        await supabase.from('productos').update({ precio_venta: nuevoPrecio }).eq('id', productoId)
-        await supabase.from('variantes').update({ precio_venta: null }).eq('producto_id', productoId)
-        toast.success('Precio base del producto actualizado')
+      if (decision !== 'ignorar') {
+        if (decision === 'variante') {
+          await supabase.from('variantes').update({ precio_venta: cambio.nuevoPrecio }).eq('id', cambio.varianteId)
+        } else if (decision === 'todas_variantes') {
+          await supabase.from('variantes').update({ precio_venta: cambio.nuevoPrecio }).eq('producto_id', cambio.productoId)
+        } else {
+          await supabase.from('productos').update({ precio_venta: cambio.nuevoPrecio }).eq('id', cambio.productoId)
+          await supabase.from('variantes').update({ precio_venta: null }).eq('producto_id', cambio.productoId)
+        }
       }
-      setCarrito(prev => prev.map((item, i) =>
-        i === idx ? { ...item, precio: nuevoPrecio } : item
-      ))
+      setPreciosCambiados(prev => prev.map((p, j) => j === i ? { ...p, decision } : p))
     } catch {
       toast.error('Error al actualizar el precio')
     } finally {
-      setAplicandoPrecio(false)
-      setModalPrecio(null)
+      setAplicandoDecision(null)
     }
   }
 
@@ -238,7 +237,12 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
       toast.success(`Venta registrada — ${formatPrecio(total)}`)
       onVentaCompletada()
-      onCerrar()
+      // Si hubo cambios de precio, mostrar revisión; si no, cerrar directo
+      if (preciosCambiados.length > 0) {
+        setEtapaPostVenta(true)
+      } else {
+        onCerrar()
+      }
     } finally {
       setLoading(false)
     }
@@ -523,70 +527,106 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
           </div>
         </div>
 
-        {/* Modal cambio de precio */}
-        {modalPrecio && (
-          <div className="absolute inset-0 z-10 bg-black/40 flex items-center justify-center rounded-2xl">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4">
-              <div className="flex items-start gap-3 mb-4">
+        {/* Pantalla post-venta: revisión de precios cambiados */}
+        {etapaPostVenta && (
+          <div className="absolute inset-0 z-10 bg-white rounded-2xl flex flex-col">
+            {/* Header post-venta */}
+            <div className="px-6 py-5 border-b border-gray-100">
+              <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
-                  <Pencil size={18} className="text-teal-600" />
+                  <CheckCircle size={20} className="text-teal-600" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-800 text-base">Cambio de precio</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    <span className="font-medium text-gray-700">{modalPrecio.productoNombre}</span>
-                    {modalPrecio.talle && <span className="text-gray-400"> · T. {modalPrecio.talle}</span>}
+                  <h2 className="text-base font-bold text-gray-800">Venta registrada</h2>
+                  <p className="text-sm text-gray-500">
+                    Modificaste el precio de {preciosCambiados.length} {preciosCambiados.length === 1 ? 'producto' : 'productos'} en esta venta.
+                    ¿Querés actualizar el inventario?
                   </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-sm text-gray-400 line-through">{formatPrecio(modalPrecio.precioAnterior)}</span>
-                    <ArrowRight size={14} className="text-gray-300" />
-                    <span className="text-sm font-bold text-teal-600">{formatPrecio(modalPrecio.nuevoPrecio)}</span>
-                  </div>
                 </div>
               </div>
+            </div>
 
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">¿Dónde aplicar el cambio?</p>
+            {/* Lista de cambios */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+              {preciosCambiados.map((cambio, i) => {
+                const resuelto = cambio.decision !== 'pendiente'
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      'rounded-2xl border-2 p-4 transition-all',
+                      resuelto ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-teal-100 bg-white'
+                    )}
+                  >
+                    {/* Info del cambio */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-sm font-bold text-gray-800">{cambio.productoNombre}</p>
+                        <p className="text-xs text-gray-400">Talle {cambio.talle}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-400 line-through">{formatPrecio(cambio.precioAnterior)}</span>
+                        <ArrowRight size={13} className="text-gray-300" />
+                        <span className="text-sm font-bold text-teal-600">{formatPrecio(cambio.nuevoPrecio)}</span>
+                      </div>
+                    </div>
 
-              <div className="space-y-2">
-                <button
-                  onClick={aplicarSoloVenta}
-                  disabled={aplicandoPrecio}
-                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
-                >
-                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Solo esta venta</p>
-                  <p className="text-xs text-gray-400 mt-0.5">No modifica el inventario</p>
-                </button>
-                <button
-                  onClick={() => aplicarPrecio('variante')}
-                  disabled={aplicandoPrecio}
-                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
-                >
-                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Esta talla (T. {modalPrecio.talle})</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Actualiza solo esta variante en el inventario</p>
-                </button>
-                <button
-                  onClick={() => aplicarPrecio('todas_variantes')}
-                  disabled={aplicandoPrecio}
-                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
-                >
-                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Todas las tallas</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Actualiza todas las variantes de {modalPrecio.productoNombre}</p>
-                </button>
-                <button
-                  onClick={() => aplicarPrecio('producto')}
-                  disabled={aplicandoPrecio}
-                  className="w-full text-left px-4 py-3 rounded-xl border-2 border-gray-200 hover:border-teal-400 hover:bg-teal-50 transition-all group"
-                >
-                  <p className="text-sm font-semibold text-gray-800 group-hover:text-teal-700">Precio base del producto</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Actualiza el producto y resetea precios de variantes</p>
-                </button>
-              </div>
+                    {resuelto ? (
+                      <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <CheckCircle size={13} className="text-green-500" />
+                        {cambio.decision === 'ignorar' && 'Sin cambios en inventario'}
+                        {cambio.decision === 'variante' && `T. ${cambio.talle} actualizada`}
+                        {cambio.decision === 'todas_variantes' && 'Todas las tallas actualizadas'}
+                        {cambio.decision === 'producto' && 'Precio base actualizado'}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {([
+                          { key: 'variante', label: `Solo T. ${cambio.talle}`, desc: 'Esta variante' },
+                          { key: 'todas_variantes', label: 'Todas las tallas', desc: 'Todo el producto' },
+                          { key: 'producto', label: 'Precio base', desc: 'Producto + variantes' },
+                          { key: 'ignorar', label: 'No actualizar', desc: 'Solo fue para esta venta' },
+                        ] as const).map(op => (
+                          <button
+                            key={op.key}
+                            onClick={() => aplicarDecision(i, op.key)}
+                            disabled={aplicandoDecision === i}
+                            className={cn(
+                              'text-left px-3 py-2.5 rounded-xl border transition-all',
+                              op.key === 'ignorar'
+                                ? 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                : 'border-teal-100 hover:border-teal-400 hover:bg-teal-50'
+                            )}
+                          >
+                            <p className={cn('text-xs font-semibold', op.key === 'ignorar' ? 'text-gray-500' : 'text-gray-800')}>
+                              {op.label}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">{op.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
 
-              <button
-                onClick={() => setModalPrecio(null)}
-                className="mt-4 w-full text-center text-sm text-gray-400 hover:text-gray-600 py-2"
+            {/* Footer post-venta */}
+            <div className="px-6 py-4 border-t border-gray-100">
+              <Button
+                onClick={onCerrar}
+                disabled={preciosCambiados.some(p => p.decision === 'pendiente')}
+                className="w-full bg-teal-500 hover:bg-teal-600 h-11"
               >
-                Cancelar
+                {preciosCambiados.some(p => p.decision === 'pendiente')
+                  ? 'Tomá una decisión en cada cambio'
+                  : 'Listo, cerrar'}
+              </Button>
+              <button
+                onClick={onCerrar}
+                className="w-full text-center text-xs text-gray-400 hover:text-gray-600 mt-2 py-1"
+              >
+                Decidir más tarde (cerrar igual)
               </button>
             </div>
           </div>
