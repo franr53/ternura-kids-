@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { CategoriaGasto, Gasto } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -10,48 +10,22 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import {
   Plus, X, Settings2, Trash2, Banknote, Smartphone,
-  CreditCard, Calendar, TrendingUp, TrendingDown, Minus,
+  CreditCard, TrendingUp, TrendingDown,
 } from 'lucide-react'
-import { formatPrecio, cn } from '@/lib/utils'
+import { formatPrecio, cn, calcularRango, Periodo } from '@/lib/utils'
 
-type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
-type MetodoPago = 'efectivo' | 'transferencia' | 'tarjeta'
-
-const METODO_CONFIG: Record<MetodoPago, { label: string; icon: React.ReactNode; color: string }> = {
-  efectivo:      { label: 'Efectivo',      icon: <Banknote size={13} />,    color: 'bg-green-100 border-green-400 text-green-700' },
-  transferencia: { label: 'Transferencia', icon: <Smartphone size={13} />,  color: 'bg-blue-100 border-blue-400 text-blue-700' },
-  tarjeta:       { label: 'Tarjeta',       icon: <CreditCard size={13} />,  color: 'bg-indigo-100 border-indigo-400 text-indigo-700' },
+const METODO_CONFIG: Record<Gasto['metodo_pago'], { label: string; icon: React.ReactNode; color: string }> = {
+  efectivo:      { label: 'Efectivo',      icon: <Banknote size={13} />,   color: 'bg-green-100 border-green-400 text-green-700' },
+  transferencia: { label: 'Transferencia', icon: <Smartphone size={13} />, color: 'bg-blue-100 border-blue-400 text-blue-700' },
+  tarjeta:       { label: 'Tarjeta',       icon: <CreditCard size={13} />, color: 'bg-indigo-100 border-indigo-400 text-indigo-700' },
 }
 
-function calcularRango(periodo: Periodo, fechaCustom: string): { desde: Date; hasta: Date } {
-  const ahora = new Date()
-  const hasta = new Date(ahora)
-  hasta.setHours(23, 59, 59, 999)
-
-  if (periodo === 'hoy') {
-    const desde = new Date(ahora)
-    desde.setHours(0, 0, 0, 0)
-    return { desde, hasta }
-  }
-  if (periodo === 'semana') {
-    const desde = new Date(ahora)
-    desde.setDate(desde.getDate() - desde.getDay())
-    desde.setHours(0, 0, 0, 0)
-    return { desde, hasta }
-  }
-  if (periodo === 'mes') {
-    const desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
-    return { desde, hasta }
-  }
-  // fecha custom
-  const [y, m, d] = fechaCustom.split('-').map(Number)
-  const desde = new Date(y, m - 1, d, 0, 0, 0, 0)
-  const hastaCustom = new Date(y, m - 1, d, 23, 59, 59, 999)
-  return { desde, hasta: hastaCustom }
+const periodoLabel: Record<Periodo, string> = {
+  hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', fecha: 'Fecha'
 }
 
 export default function GastosPage() {
-  const supabase = createClient()
+  const supabase = useRef(createClient()).current
 
   // Data
   const [gastos, setGastos] = useState<Gasto[]>([])
@@ -68,7 +42,7 @@ export default function GastosPage() {
   const [concepto, setConcepto] = useState('')
   const [monto, setMonto] = useState('')
   const [categoriaId, setCategoriaId] = useState('')
-  const [metodo, setMetodo] = useState<MetodoPago>('efectivo')
+  const [metodo, setMetodo] = useState<Gasto['metodo_pago']>('efectivo')
   const [notas, setNotas] = useState('')
   const [fechaGasto, setFechaGasto] = useState(() => new Date().toISOString().split('T')[0])
   const [guardando, setGuardando] = useState(false)
@@ -79,10 +53,17 @@ export default function GastosPage() {
   const [nuevaCatColor, setNuevaCatColor] = useState('#4EC3BD')
   const [guardandoCat, setGuardandoCat] = useState(false)
 
-  // Cargar perfil para saber si es admin
+  // Cargar perfil (solo una vez)
   useEffect(() => {
-    supabase.from('perfiles').select('rol').single().then(({ data }) => {
-      setEsAdmin(data?.rol === 'admin')
+    supabase.from('perfiles').select('rol').single().then(({ data, error }) => {
+      if (!error) setEsAdmin(data?.rol === 'admin')
+    })
+  }, [supabase])
+
+  // Cargar categorías (solo una vez, no dependen del período)
+  useEffect(() => {
+    supabase.from('categorias_gastos').select('*').order('nombre').then(({ data }) => {
+      if (data) setCategorias(data)
     })
   }, [supabase])
 
@@ -90,14 +71,13 @@ export default function GastosPage() {
     setLoading(true)
     const { desde, hasta } = calcularRango(periodo, fechaCustom)
 
-    const [{ data: gastosData }, { data: catsData }, { data: ventasData }] = await Promise.all([
+    const [{ data: gastosData }, { data: ventasData }] = await Promise.all([
       supabase
         .from('gastos')
         .select('*, categoria:categorias_gastos(*)')
         .gte('fecha', desde.toISOString().split('T')[0])
         .lte('fecha', hasta.toISOString().split('T')[0])
         .order('creado_en', { ascending: false }),
-      supabase.from('categorias_gastos').select('*').order('nombre'),
       supabase
         .from('ventas')
         .select('total')
@@ -107,7 +87,6 @@ export default function GastosPage() {
     ])
 
     setGastos((gastosData as unknown as Gasto[]) || [])
-    setCategorias(catsData || [])
     setTotalVentas((ventasData || []).reduce((s: number, v: { total: number }) => s + v.total, 0))
     setLoading(false)
   }, [supabase, periodo, fechaCustom])
@@ -169,22 +148,27 @@ export default function GastosPage() {
     toast.success('Categoría eliminada')
   }
 
-  // Cálculos
-  const totalGastos = gastos.reduce((s, g) => s + g.monto, 0)
+  // Cálculos derivados (memoizados)
+  const totalGastos = useMemo(() => gastos.reduce((s, g) => s + g.monto, 0), [gastos])
   const neto = totalVentas - totalGastos
 
-  // Agrupado por categoría
-  const porCategoria = categorias.map(cat => ({
-    cat,
-    total: gastos.filter(g => g.categoria_id === cat.id).reduce((s, g) => s + g.monto, 0),
-  })).filter(x => x.total > 0).sort((a, b) => b.total - a.total)
-
-  const sinCategoria = gastos.filter(g => !g.categoria_id).reduce((s, g) => s + g.monto, 0)
-  const maxCategoria = Math.max(...porCategoria.map(x => x.total), sinCategoria || 0, 1)
-
-  const periodoLabel: Record<Periodo, string> = {
-    hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', fecha: 'Fecha'
-  }
+  const { porCategoria, sinCategoria, maxCategoria } = useMemo(() => {
+    const totalesPorCat = new Map<string, number>()
+    let sinCat = 0
+    for (const g of gastos) {
+      if (g.categoria_id) {
+        totalesPorCat.set(g.categoria_id, (totalesPorCat.get(g.categoria_id) || 0) + g.monto)
+      } else {
+        sinCat += g.monto
+      }
+    }
+    const porCat = categorias
+      .map(cat => ({ cat, total: totalesPorCat.get(cat.id) || 0 }))
+      .filter(x => x.total > 0)
+      .sort((a, b) => b.total - a.total)
+    const maxCat = Math.max(...porCat.map(x => x.total), sinCat || 0, 1)
+    return { porCategoria: porCat, sinCategoria: sinCat, maxCategoria: maxCat }
+  }, [gastos, categorias])
 
   return (
     <div className="h-full flex flex-col bg-gray-50 overflow-hidden">
@@ -262,7 +246,7 @@ export default function GastosPage() {
               <div className="col-span-2">
                 <Label className="text-xs text-gray-500 mb-1.5 block">Método de pago</Label>
                 <div className="flex gap-2">
-                  {(Object.entries(METODO_CONFIG) as [MetodoPago, typeof METODO_CONFIG[MetodoPago]][]).map(([key, cfg]) => (
+                  {(Object.entries(METODO_CONFIG) as [Gasto['metodo_pago'], typeof METODO_CONFIG[Gasto['metodo_pago']]][]).map(([key, cfg]) => (
                     <button
                       key={key}
                       onClick={() => setMetodo(key)}
@@ -365,7 +349,7 @@ export default function GastosPage() {
             ) : (
               <div>
                 {gastos.map((gasto, i) => {
-                  const cfg = METODO_CONFIG[gasto.metodo_pago as MetodoPago]
+                  const cfg = METODO_CONFIG[gasto.metodo_pago]
                   const fechaDisplay = new Date(gasto.fecha + 'T12:00:00').toLocaleDateString('es-AR', {
                     day: 'numeric', month: 'short',
                   })
