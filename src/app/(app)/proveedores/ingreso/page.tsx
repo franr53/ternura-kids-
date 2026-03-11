@@ -157,7 +157,9 @@ export default function IngresoMercaderiaPage() {
   useEffect(() => { cargarDatos() }, [cargarDatos])
 
   const productosFiltrados = busquedaProducto
-    ? productos.filter(p => p.nombre.toLowerCase().includes(busquedaProducto.toLowerCase()))
+    ? productos.filter(p =>
+        normalizar(busquedaProducto).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
+      )
     : []
 
   function seleccionarProducto(producto: Producto & { variantes?: Variante[] }) {

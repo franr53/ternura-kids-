@@ -45,7 +45,9 @@ export default function EtiquetasPage() {
   }
 
   const filtrados = busqueda
-    ? productos.filter(p => normalizar(p.nombre).includes(normalizar(busqueda)))
+    ? productos.filter(p =>
+        normalizar(busqueda).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
+      )
     : []
 
   function agregarVariante(variante: Variante, producto: ProductoConProveedor) {
@@ -79,35 +81,25 @@ export default function EtiquetasPage() {
     let barcodeIndex = 0
     const etiquetasHTML = etiquetasExpandidas.map(e => {
       const producto = e.variante.producto
-      const precioTarjeta = producto?.precio_venta || 0
-      const precioEfectivo = Math.round(precioTarjeta * 0.8)
-      const marca = producto?.proveedor?.nombre || ''
+      const precioLista = producto?.precio_venta || 0
+      const precioEfectivo = Math.round(precioLista * 0.8)
       const barcode = e.variante.codigo_barras
       const bcId = `bc-${barcodeIndex++}`
+      const nombre = (producto?.nombre || '').toUpperCase()
 
       return `
       <div class="etiqueta">
-        <div class="top">
-          <div class="nombre">${producto?.nombre || ''}</div>
-          ${marca ? `<div class="marca-top">${marca}</div>` : ''}
-          <div class="talle">T. ${e.variante.talle}</div>
-        </div>
-        <div class="precios">
-          <div class="precio-row">
-            <span class="precio-label">Tarjeta</span>
-            <span class="precio-valor tarjeta">${formatPrecio(precioTarjeta)}</span>
-          </div>
-          <div class="precio-row destacado">
-            <span class="precio-label">Efectivo</span>
-            <span class="precio-valor efectivo">${formatPrecio(precioEfectivo)}</span>
-          </div>
-        </div>
+        <div class="nombre">${nombre}</div>
+        <div class="talle">TALLE: ${e.variante.talle}</div>
         ${barcode ? `
         <div class="barcode-wrap">
           <svg id="${bcId}" data-barcode="${barcode}"></svg>
         </div>
         ` : '<div class="barcode-placeholder"></div>'}
-        ${marca ? `<div class="marca-bottom">${marca.toUpperCase()}</div>` : ''}
+        <div class="precios">
+          <span class="precio-lista">LISTA: ${formatPrecio(precioLista)}</span>
+          <span class="precio-efec">EFEC: <strong>${formatPrecio(precioEfectivo)}</strong></span>
+        </div>
       </div>`
     }).join('')
 
@@ -122,61 +114,30 @@ export default function EtiquetasPage() {
     body { font-family: Arial, sans-serif; background: white; color: #000; }
     .contenedor {
       display: grid;
-      grid-template-columns: repeat(4, 5.2cm);
-      gap: 2mm;
-      padding: 5mm;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      padding: 4mm;
     }
     .etiqueta {
-      width: 5.2cm;
-      height: 4.2cm;
-      border: 1px solid #000;
-      padding: 2mm 2.5mm;
+      border: 1px solid #ccc;
+      padding: 3mm 3.5mm 2mm;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      overflow: hidden;
+      gap: 1.5mm;
       background: white;
-    }
-    .top { display: flex; flex-direction: column; gap: 0.5mm; }
-    .nombre {
-      font-size: 7.5pt;
-      font-weight: bold;
-      white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
-      line-height: 1.2;
     }
-    .marca-top {
-      font-size: 6pt;
-      color: #555;
+    .nombre {
+      font-size: 8.5pt;
+      font-weight: bold;
+      line-height: 1.2;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .talle {
-      font-size: 9pt;
-      font-weight: bold;
-    }
-    .precios {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5mm;
-    }
-    .precio-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-    }
-    .precio-label {
-      font-size: 6.5pt;
-      color: #555;
-    }
-    .precio-valor {
       font-size: 8pt;
       font-weight: bold;
-    }
-    .precio-row.destacado .precio-valor.efectivo {
-      font-size: 10pt;
     }
     .barcode-wrap {
       display: flex;
@@ -189,17 +150,26 @@ export default function EtiquetasPage() {
       display: block;
     }
     .barcode-placeholder {
-      height: 10mm;
+      height: 14mm;
     }
-    .marca-bottom {
-      font-size: 5.5pt;
-      text-align: center;
-      color: #333;
-      letter-spacing: 0.5px;
+    .precios {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding-top: 1mm;
+    }
+    .precio-lista {
+      font-size: 7.5pt;
+    }
+    .precio-efec {
+      font-size: 7.5pt;
+    }
+    .precio-efec strong {
+      font-size: 9pt;
     }
     @media print {
       body { margin: 0; }
-      .contenedor { padding: 3mm; gap: 1mm; }
+      .contenedor { padding: 3mm; gap: 0; }
       @page { margin: 5mm; size: A4; }
     }
   </style>
@@ -212,11 +182,11 @@ export default function EtiquetasPage() {
         try {
           JsBarcode(el, el.getAttribute('data-barcode'), {
             format: 'CODE128',
-            width: 1.2,
-            height: 28,
+            width: 1.4,
+            height: 36,
             displayValue: true,
-            fontSize: 7,
-            margin: 1,
+            fontSize: 8,
+            margin: 2,
             lineColor: '#000',
             background: '#fff',
           });

@@ -76,6 +76,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
   // Transferencia a proveedor
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
+  const [selectProvKey, setSelectProvKey] = useState(0)
 
   // UI
   const [loading, setLoading] = useState(false)
@@ -463,7 +464,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                     value={busCliente}
                     onChange={e => { setBusCliente(e.target.value); setMostrarDropCliente(true) }}
                     onFocus={() => setMostrarDropCliente(true)}
-                    onBlur={() => setTimeout(() => setMostrarDropCliente(false), 150)}
+                    onBlur={() => setMostrarDropCliente(false)}
                     className="pl-8 text-sm h-9"
                   />
                   {mostrarDropCliente && (
@@ -474,7 +475,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                         resultadosCliente.map(c => (
                           <button
                             key={c.id}
-                            onMouseDown={() => { setCliente(c); setBusCliente(''); setMostrarDropCliente(false) }}
+                            onPointerDown={e => { e.preventDefault(); setCliente(c); setBusCliente(''); setMostrarDropCliente(false) }}
                             className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-50 text-left border-b border-gray-50 last:border-0"
                           >
                             <div className="min-w-0">
@@ -575,10 +576,11 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                     </div>
                   ) : (
                     <select
-                      defaultValue=""
+                      key={selectProvKey}
+                      value=""
                       onChange={e => {
                         const prov = todosProveedores.find(p => p.id === e.target.value)
-                        setProveedorTransferencia(prov || null)
+                        if (prov) { setProveedorTransferencia(prov); setSelectProvKey(k => k + 1) }
                       }}
                       className="w-full h-8 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     >
