@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Categoria, Proveedor } from '@/types'
@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { ArrowLeft, Plus, Trash2, ChevronRight, ChevronLeft, CheckCircle2, Package } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, ChevronRight, ChevronLeft, CheckCircle2, Package, Search, X } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 
@@ -34,6 +34,31 @@ interface ProductoGuardado {
   precioVenta: number
 }
 
+interface VarianteExistente {
+  id: string
+  talle: string
+  codigo_barras: string
+  stock: number
+  stock_minimo: number
+  esNueva?: boolean
+}
+
+interface ProductoExistente {
+  id: string
+  nombre: string
+  precio_venta: number
+  precio_costo: number
+  categoria_id: string | null
+  proveedor_id: string | null
+  proveedor: { nombre: string } | null
+  categoria: { nombre: string; sistema_talles: string } | null
+  variantes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number }[]
+}
+
+function normalizar(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
 export default function NuevoProductoPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -42,10 +67,18 @@ export default function NuevoProductoPage() {
   const [loading, setLoading] = useState(false)
 
   // Wizard state
-  const [paso, setPaso] = useState<1 | 2 | 3>(1)
+  const [paso, setPaso] = useState<0 | 1 | 2 | 3>(0)
   const [direccion, setDireccion] = useState<'forward' | 'backward'>('forward')
   const [productosGuardados, setProductosGuardados] = useState(0)
   const [ultimoProducto, setUltimoProducto] = useState<ProductoGuardado | null>(null)
+
+  // Paso 0 — búsqueda existente
+  const [busquedaExistente, setBusquedaExistente] = useState('')
+  const [todosProductos, setTodosProductos] = useState<ProductoExistente[]>([])
+  const [productoEditando, setProductoEditando] = useState<ProductoExistente | null>(null)
+  const [variantesEditando, setVariantesEditando] = useState<VarianteExistente[]>([])
+  const [talleNuevo, setTalleNuevo] = useState('')
+  const [loadingEditar, setLoadingEditar] = useState(false)
 
   // Paso 1
   const [nombre, setNombre] = useState('')
@@ -66,23 +99,111 @@ export default function NuevoProductoPage() {
     ? (((parseFloat(precioVenta) - parseFloat(precioCosto)) / parseFloat(precioCosto)) * 100).toFixed(0)
     : null
 
-  useEffect(() => {
-    async function cargar() {
-      const [{ data: cats }, { data: provs }] = await Promise.all([
-        supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
-        supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
-      ])
-      setCategorias(cats || [])
-      setProveedores(provs || [])
-    }
-    cargar()
+  const cargarTodo = useCallback(async () => {
+    const [{ data: cats }, { data: provs }, { data: prods }] = await Promise.all([
+      supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
+      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+      supabase.from('productos').select('*, variantes(*), proveedor:proveedores(nombre), categoria:categorias(nombre,sistema_talles)').eq('activo', true).order('nombre'),
+    ])
+    setCategorias(cats || [])
+    setProveedores(provs || [])
+    setTodosProductos((prods || []) as ProductoExistente[])
   }, [supabase])
 
-  function irA(nuevoPaso: 1 | 2 | 3, dir: 'forward' | 'backward') {
+  useEffect(() => { cargarTodo() }, [cargarTodo])
+
+  function irA(nuevoPaso: 0 | 1 | 2 | 3, dir: 'forward' | 'backward') {
     setDireccion(dir)
     setPaso(nuevoPaso)
   }
 
+  // ── Paso 0 helpers ────────────────────────────────────────────
+  const productosFiltrados = busquedaExistente.trim()
+    ? todosProductos.filter(p =>
+        normalizar(busquedaExistente).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
+      )
+    : []
+
+  function seleccionarProducto(p: ProductoExistente) {
+    setProductoEditando(p)
+    setVariantesEditando(p.variantes.map(v => ({
+      id: v.id,
+      talle: v.talle,
+      codigo_barras: v.codigo_barras || '',
+      stock: v.stock,
+      stock_minimo: v.stock_minimo,
+    })))
+    setBusquedaExistente(p.nombre)
+  }
+
+  function cancelarEdicion() {
+    setProductoEditando(null)
+    setVariantesEditando([])
+    setBusquedaExistente('')
+    setTalleNuevo('')
+  }
+
+  function actualizarVarianteEditando(idx: number, campo: keyof VarianteExistente, valor: string | number) {
+    setVariantesEditando(prev => prev.map((v, i) => i === idx ? { ...v, [campo]: valor } : v))
+  }
+
+  function agregarTalleNuevo() {
+    const t = talleNuevo.trim()
+    if (!t || variantesEditando.some(v => v.talle === t)) return
+    setVariantesEditando(prev => [...prev, { id: '', talle: t, codigo_barras: '', stock: 0, stock_minimo: 2, esNueva: true }])
+    setTalleNuevo('')
+  }
+
+  function agregarTalleSugeridoEnEdicion(talle: string) {
+    if (variantesEditando.some(v => v.talle === talle)) return
+    setVariantesEditando(prev => [...prev, { id: '', talle, codigo_barras: '', stock: 0, stock_minimo: 2, esNueva: true }])
+  }
+
+  function eliminarVarianteEditando(idx: number) {
+    setVariantesEditando(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  async function guardarCambiosExistente() {
+    if (!productoEditando) return
+    setLoadingEditar(true)
+
+    const nuevas = variantesEditando.filter(v => v.esNueva)
+    const existentes = variantesEditando.filter(v => !v.esNueva)
+
+    // Insertar nuevas variantes
+    if (nuevas.length > 0) {
+      const { error } = await supabase.from('variantes').insert(
+        nuevas.map(v => ({
+          producto_id: productoEditando.id,
+          talle: v.talle,
+          codigo_barras: v.codigo_barras || null,
+          stock: v.stock,
+          stock_minimo: v.stock_minimo,
+        }))
+      )
+      if (error) { toast.error(`Error al agregar talles: ${error.message}`); setLoadingEditar(false); return }
+    }
+
+    // Actualizar variantes existentes
+    for (const v of existentes) {
+      const { error } = await supabase.from('variantes')
+        .update({ codigo_barras: v.codigo_barras || null, stock: v.stock, stock_minimo: v.stock_minimo })
+        .eq('id', v.id)
+      if (error) { toast.error(`Error al actualizar talle ${v.talle}: ${error.message}`); setLoadingEditar(false); return }
+    }
+
+    toast.success(`${productoEditando.nombre} actualizado`)
+    await cargarTodo()
+    cancelarEdicion()
+    setLoadingEditar(false)
+  }
+
+  function crearNuevo() {
+    setNombre(busquedaExistente.trim())
+    irA(1, 'forward')
+  }
+
+  // ── Paso 1 / 2 helpers ────────────────────────────────────────
   function agregarVariante(talle: string) {
     const t = talle.trim()
     if (!t || variantes.some(v => v.talle === t)) return
@@ -154,6 +275,7 @@ export default function NuevoProductoPage() {
       categoriaNombre: categoriaSeleccionada?.nombre || '',
     })
     setProductosGuardados(n => n + 1)
+    await cargarTodo()
     setLoading(false)
     irA(3, 'forward')
   }
@@ -167,10 +289,12 @@ export default function NuevoProductoPage() {
     setTemporada('')
     setVariantes([])
     setTalleManual('')
-    irA(1, 'backward')
+    setBusquedaExistente('')
+    setProductoEditando(null)
+    irA(0, 'backward')
   }
 
-  // Estilo de card base
+  // ── Estilos base ──────────────────────────────────────────────
   const cardStyle = {
     background: 'white',
     border: '1px solid #e5e7eb',
@@ -181,62 +305,331 @@ export default function NuevoProductoPage() {
 
   const inputStyle = 'h-10 rounded-xl border-gray-200 text-sm focus:ring-teal-400'
 
+  // Talles sugeridos para el producto que se está editando
+  const tallesSugeridosEdicion = productoEditando?.categoria?.sistema_talles
+    ? (TALLES_POR_SISTEMA[productoEditando.categoria.sistema_talles] || [])
+    : []
+
   return (
     <div className="min-h-full bg-gray-50 pb-16">
       <div className="max-w-2xl mx-auto px-4 pt-6 space-y-6 overflow-x-hidden">
 
         {/* Header */}
         <div className="flex items-center gap-3">
-          <Link href="/inventario">
-            <button className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50 transition-colors">
+          {paso === 0 ? (
+            <Link href="/inventario">
+              <button className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50 transition-colors">
+                <ArrowLeft size={16} className="text-gray-500" />
+              </button>
+            </Link>
+          ) : (
+            <button
+              onClick={() => irA(paso === 1 ? 0 : paso === 2 ? 1 : 0, 'backward')}
+              className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50 transition-colors"
+            >
               <ArrowLeft size={16} className="text-gray-500" />
             </button>
-          </Link>
+          )}
           <div className="flex-1">
             <h1 className="text-xl font-black text-gray-900 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
-              Nuevo producto
+              {paso === 0 ? 'Inventario' : 'Nuevo producto'}
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              {productosGuardados > 0 && `${productosGuardados} producto${productosGuardados > 1 ? 's' : ''} cargado${productosGuardados > 1 ? 's' : ''} esta sesión · `}
-              Paso {paso} de 3
+              {productosGuardados > 0 && `${productosGuardados} producto${productosGuardados > 1 ? 's' : ''} cargado${productosGuardados > 1 ? 's' : ''} · `}
+              {paso === 0 ? 'Buscá o creá un producto' : `Paso ${paso} de 3`}
             </p>
           </div>
         </div>
 
-        {/* Indicador de progreso */}
-        <div className="flex items-center gap-0">
-          {[
-            { n: 1, label: 'Datos' },
-            { n: 2, label: 'Talles' },
-            { n: 3, label: '¡Listo!' },
-          ].map((p, i) => (
-            <div key={p.n} className="flex items-center flex-1 last:flex-none">
-              <div className="flex flex-col items-center gap-1">
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all"
-                  style={{
-                    background: paso >= p.n ? '#4EC3BD' : '#f3f4f6',
-                    color: paso >= p.n ? 'white' : '#9ca3af',
-                    boxShadow: paso === p.n ? '0 0 0 4px rgba(78,195,189,0.2)' : 'none',
-                  }}
-                >
-                  {paso > p.n ? <CheckCircle2 size={16} /> : p.n}
+        {/* Indicador de progreso — solo pasos 1-3 */}
+        {paso >= 1 && (
+          <div className="flex items-center gap-0">
+            {[
+              { n: 1, label: 'Datos' },
+              { n: 2, label: 'Talles' },
+              { n: 3, label: '¡Listo!' },
+            ].map((p, i) => (
+              <div key={p.n} className="flex items-center flex-1 last:flex-none">
+                <div className="flex flex-col items-center gap-1">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all"
+                    style={{
+                      background: paso >= p.n ? '#4EC3BD' : '#f3f4f6',
+                      color: paso >= p.n ? 'white' : '#9ca3af',
+                      boxShadow: paso === p.n ? '0 0 0 4px rgba(78,195,189,0.2)' : 'none',
+                    }}
+                  >
+                    {paso > p.n ? <CheckCircle2 size={16} /> : p.n}
+                  </div>
+                  <span className="text-[10px] font-medium" style={{ color: paso >= p.n ? '#4EC3BD' : '#9ca3af' }}>
+                    {p.label}
+                  </span>
                 </div>
-                <span className="text-[10px] font-medium" style={{ color: paso >= p.n ? '#4EC3BD' : '#9ca3af' }}>
-                  {p.label}
-                </span>
+                {i < 2 && (
+                  <div
+                    className="flex-1 h-0.5 mx-2 mb-4 rounded transition-all"
+                    style={{ background: paso > p.n ? '#4EC3BD' : '#e5e7eb' }}
+                  />
+                )}
               </div>
-              {i < 2 && (
-                <div
-                  className="flex-1 h-0.5 mx-2 mb-4 rounded transition-all"
-                  style={{ background: paso > p.n ? '#4EC3BD' : '#e5e7eb' }}
+            ))}
+          </div>
+        )}
+
+        {/* ── PASO 0: BUSCAR O CREAR ────────────────────────────── */}
+        {paso === 0 && (
+          <div className={direccion === 'forward' ? 'tk-slide-forward' : 'tk-slide-backward'}>
+
+            {/* Buscador */}
+            <div style={cardStyle}>
+              <h2 className="text-base font-bold text-gray-800 mb-4">
+                ¿El producto ya existe?
+              </h2>
+
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <Input
+                  value={busquedaExistente}
+                  onChange={e => { setBusquedaExistente(e.target.value); setProductoEditando(null) }}
+                  placeholder="Buscá por nombre del producto..."
+                  className={`pl-9 pr-9 ${inputStyle}`}
+                  autoFocus
                 />
+                {busquedaExistente && (
+                  <button
+                    onClick={cancelarEdicion}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+
+                {/* Dropdown resultados */}
+                {productosFiltrados.length > 0 && !productoEditando && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-2xl shadow-lg z-20 mt-1 overflow-hidden max-h-72 overflow-y-auto">
+                    {productosFiltrados.map(p => {
+                      const stockTotal = p.variantes.reduce((s, v) => s + v.stock, 0)
+                      return (
+                        <button
+                          key={p.id}
+                          className="w-full text-left px-4 py-3 hover:bg-teal-50 border-b border-gray-50 last:border-0 flex justify-between items-center transition-colors"
+                          onClick={() => seleccionarProducto(p)}
+                        >
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">{p.nombre}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              {p.variantes.length} talle{p.variantes.length !== 1 ? 's' : ''}
+                              {p.proveedor?.nombre && ` · ${p.proveedor.nombre}`}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-gray-700">{formatPrecio(p.precio_venta)}</p>
+                            <p className="text-xs" style={{ color: stockTotal > 0 ? '#4EC3BD' : '#f97316' }}>
+                              {stockTotal} en stock
+                            </p>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Sin resultados */}
+              {busquedaExistente.trim() && productosFiltrados.length === 0 && !productoEditando && (
+                <div className="mt-3 p-3 rounded-xl flex items-center justify-between" style={{ background: '#fafafa', border: '1px dashed #e5e7eb' }}>
+                  <p className="text-sm text-gray-500">
+                    No se encontró <span className="font-semibold">"{busquedaExistente}"</span>
+                  </p>
+                  <button
+                    onClick={crearNuevo}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                    style={{ background: 'rgba(78,195,189,0.1)', color: '#0d9488' }}
+                  >
+                    <Plus size={13} /> Crear nuevo
+                  </button>
+                </div>
               )}
             </div>
-          ))}
-        </div>
 
-        {/* ── PASO 1: DATOS ─────────────────────────────────── */}
+            {/* Panel de edición del producto seleccionado */}
+            {productoEditando && (
+              <div className="tk-slide-forward mt-4" style={{ ...cardStyle, padding: '20px' }}>
+
+                {/* Header del producto */}
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">{productoEditando.nombre}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      {productoEditando.proveedor?.nombre && (
+                        <span className="text-xs text-gray-400">{productoEditando.proveedor.nombre}</span>
+                      )}
+                      {productoEditando.categoria?.nombre && (
+                        <Badge variant="outline" className="text-xs">{productoEditando.categoria.nombre}</Badge>
+                      )}
+                      <span className="text-xs font-semibold" style={{ color: '#4EC3BD' }}>
+                        {formatPrecio(productoEditando.precio_venta)}
+                      </span>
+                    </div>
+                  </div>
+                  <button onClick={cancelarEdicion} className="text-gray-300 hover:text-gray-500">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* Chips talles sugeridos para agregar */}
+                {tallesSugeridosEdicion.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Talles sugeridos</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {tallesSugeridosEdicion.map(t => {
+                        const existe = variantesEditando.some(v => v.talle === t)
+                        return (
+                          <button
+                            key={t}
+                            onClick={() => !existe && agregarTalleSugeridoEnEdicion(t)}
+                            disabled={existe}
+                            className="px-2.5 py-1 rounded-full text-xs font-bold border transition-all disabled:cursor-default"
+                            style={{
+                              background: existe ? 'rgba(78,195,189,0.1)' : 'white',
+                              borderColor: existe ? '#4EC3BD' : '#e5e7eb',
+                              color: existe ? '#0d9488' : '#6b7280',
+                            }}
+                          >
+                            {t} {existe ? '✓' : '+'}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tabla de variantes */}
+                <div className="mb-3">
+                  <div className="grid grid-cols-12 gap-2 text-[10px] text-gray-400 font-semibold uppercase tracking-wider px-1 mb-2">
+                    <div className="col-span-2">Talle</div>
+                    <div className="col-span-4">Código</div>
+                    <div className="col-span-2 text-center">Stock</div>
+                    <div className="col-span-2 text-center">Mín.</div>
+                    <div className="col-span-2"></div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {variantesEditando.map((v, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-12 gap-2 items-center px-2 py-1.5 rounded-xl"
+                        style={{
+                          background: v.esNueva ? 'rgba(78,195,189,0.06)' : '#fafafa',
+                          border: v.esNueva ? '1px solid rgba(78,195,189,0.25)' : '1px solid transparent',
+                        }}
+                      >
+                        <div className="col-span-2">
+                          <Badge className="w-full justify-center bg-teal-50 text-teal-700 border-teal-200 text-xs font-bold">
+                            {v.talle}
+                          </Badge>
+                        </div>
+                        <div className="col-span-4">
+                          <Input
+                            placeholder="Código..."
+                            value={v.codigo_barras}
+                            onChange={e => actualizarVarianteEditando(idx, 'codigo_barras', e.target.value)}
+                            className="h-7 text-xs border-gray-200 rounded-lg"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            type="number"
+                            value={v.stock}
+                            onChange={e => actualizarVarianteEditando(idx, 'stock', parseInt(e.target.value) || 0)}
+                            className="h-7 text-xs border-gray-200 rounded-lg text-center"
+                            min={0}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            type="number"
+                            value={v.stock_minimo}
+                            onChange={e => actualizarVarianteEditando(idx, 'stock_minimo', parseInt(e.target.value) || 0)}
+                            className="h-7 text-xs border-gray-200 rounded-lg text-center"
+                            min={0}
+                          />
+                        </div>
+                        <div className="col-span-2 flex justify-end">
+                          {v.esNueva && (
+                            <button
+                              onClick={() => eliminarVarianteEditando(idx)}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Agregar talle manual */}
+                <div className="flex gap-2 mb-4">
+                  <Input
+                    placeholder="Agregar talle (ej: T3, 37...)"
+                    value={talleNuevo}
+                    onChange={e => setTalleNuevo(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && agregarTalleNuevo()}
+                    className="h-9 text-sm rounded-xl border-gray-200"
+                  />
+                  <button
+                    onClick={agregarTalleNuevo}
+                    className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-600 hover:border-teal-300 hover:text-teal-600 transition-all text-sm flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+
+                {/* Botones guardar / cancelar */}
+                <div className="flex gap-2 pt-3" style={{ borderTop: '1px solid #f3f4f6' }}>
+                  <button
+                    onClick={cancelarEdicion}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={guardarCambiosExistente}
+                    disabled={loadingEditar}
+                    className="flex-1 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                    style={{
+                      background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
+                      boxShadow: '0 4px 14px rgba(78,195,189,0.3)',
+                    }}
+                  >
+                    {loadingEditar ? 'Guardando...' : <><CheckCircle2 size={15} /> Guardar cambios</>}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* CTA crear nuevo (siempre visible abajo) */}
+            {!productoEditando && (
+              <div className="mt-4">
+                <button
+                  onClick={crearNuevo}
+                  className="w-full py-3 rounded-2xl font-bold text-sm transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
+                  style={{
+                    background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
+                    color: 'white',
+                    fontFamily: 'var(--font-sans)',
+                    boxShadow: '0 4px 14px rgba(78,195,189,0.3)',
+                  }}
+                >
+                  <Plus size={18} /> Crear producto nuevo
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── PASO 1: DATOS ─────────────────────────────────────── */}
         {paso === 1 && (
           <div className={direccion === 'forward' ? 'tk-slide-forward' : 'tk-slide-backward'} style={cardStyle}>
             <h2 className="text-base font-bold text-gray-800 mb-5" style={{ fontFamily: 'var(--font-sans)' }}>
@@ -340,7 +733,13 @@ export default function NuevoProductoPage() {
             </div>
 
             {/* Botón siguiente */}
-            <div className="flex justify-end mt-6 pt-4" style={{ borderTop: '1px solid #f3f4f6' }}>
+            <div className="flex justify-between mt-6 pt-4" style={{ borderTop: '1px solid #f3f4f6' }}>
+              <button
+                onClick={() => irA(0, 'backward')}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors"
+              >
+                <ChevronLeft size={15} /> Volver
+              </button>
               <button
                 onClick={siguientePaso}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all hover:scale-105 active:scale-95"
@@ -357,7 +756,7 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
-        {/* ── PASO 2: TALLES ────────────────────────────────── */}
+        {/* ── PASO 2: TALLES ────────────────────────────────────── */}
         {paso === 2 && (
           <div className={direccion === 'forward' ? 'tk-slide-forward' : 'tk-slide-backward'} style={cardStyle}>
             <h2 className="text-base font-bold text-gray-800 mb-1" style={{ fontFamily: 'var(--font-sans)' }}>
@@ -513,7 +912,7 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
-        {/* ── PASO 3: CONFIRMACIÓN ──────────────────────────── */}
+        {/* ── PASO 3: CONFIRMACIÓN ──────────────────────────────── */}
         {paso === 3 && ultimoProducto && (
           <div className={direccion === 'forward' ? 'tk-slide-forward' : 'tk-slide-backward'}>
 
