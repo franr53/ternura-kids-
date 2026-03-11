@@ -28,8 +28,20 @@ export interface Proveedor {
   email?: string
   direccion?: string
   notas?: string
+  alias_cbu?: string
   deuda_total: number
   activo: boolean
+  creado_en: string
+}
+
+export interface HistorialPrecio {
+  id: string
+  producto_id: string
+  precio_costo_anterior?: number
+  precio_venta_anterior?: number
+  precio_costo_nuevo?: number
+  precio_venta_nuevo?: number
+  usuario_id?: string
   creado_en: string
 }
 

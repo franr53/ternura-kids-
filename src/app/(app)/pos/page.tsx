@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Cliente, MetodoPago, Variante, Producto } from '@/types'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { toast } from 'sonner'
 import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar } from 'lucide-react'
 import { formatPrecio, cn } from '@/lib/utils'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
@@ -47,11 +45,11 @@ const METODO_ICON: Record<string, React.ReactNode> = {
   fiado:         <HandCoins size={12} />,
 }
 const METODO_COLOR: Record<string, string> = {
-  efectivo:      'bg-green-100 text-green-700',
+  efectivo:      'bg-teal-100 text-teal-700',
   transferencia: 'bg-blue-100 text-blue-700',
-  debito:        'bg-indigo-100 text-indigo-700',
+  debito:        'bg-amber-100 text-amber-700',
   credito:       'bg-purple-100 text-purple-700',
-  fiado:         'bg-orange-100 text-orange-700',
+  fiado:         'bg-red-100 text-red-600',
 }
 
 export default function PosPage() {
@@ -75,7 +73,6 @@ export default function PosPage() {
       desde.setDate(1)
       desde.setHours(0, 0, 0, 0)
     } else {
-      // fecha custom: rango del día seleccionado
       const [y, m, d] = fechaCustom.split('-').map(Number)
       desde.setFullYear(y, m - 1, d)
       desde.setHours(0, 0, 0, 0)
@@ -113,29 +110,42 @@ export default function PosPage() {
       {/* Header */}
       <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-lg font-bold text-gray-800">Punto de Venta</h1>
+          <h1
+            className="text-xl font-black text-gray-900 leading-none"
+            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.3px' }}
+          >
+            Punto de Venta
+          </h1>
           <p className="text-xs text-gray-400 capitalize mt-0.5">{fechaHoy}</p>
         </div>
-        <Button
+        <button
           onClick={() => setMostrarNuevaVenta(true)}
-          className="bg-teal-500 hover:bg-teal-600 gap-2 h-10 px-5 font-semibold shadow-sm shadow-teal-100"
+          className="flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95"
+          style={{
+            background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
+            color: 'white',
+            fontFamily: 'var(--font-sans)',
+            boxShadow: '0 4px 16px rgba(78,195,189,0.35)',
+          }}
         >
-          <Plus size={16} /> Nueva venta
-        </Button>
+          <Plus size={16} />
+          Nueva venta
+        </button>
       </div>
 
-      {/* Filtros de período */}
-      <div className="px-6 pt-3 pb-0 flex items-center gap-2 shrink-0 flex-wrap">
+      {/* Filtros */}
+      <div className="px-6 pt-4 pb-0 flex items-center gap-2 shrink-0 flex-wrap">
         {(['hoy', 'semana', 'mes', 'fecha'] as Periodo[]).map(p => (
           <button
             key={p}
             onClick={() => setPeriodo(p)}
             className={cn(
-              'text-xs font-semibold px-3 py-1.5 rounded-full border transition-all',
+              'text-xs font-semibold px-3.5 py-1.5 rounded-full border transition-all',
               periodo === p
-                ? 'bg-teal-500 border-teal-500 text-white'
-                : 'border-gray-200 text-gray-500 hover:border-teal-300 bg-white'
+                ? 'bg-teal-500 border-teal-500 text-white shadow-sm shadow-teal-100'
+                : 'bg-white border-gray-200 text-gray-500 hover:border-teal-300 hover:text-teal-600'
             )}
+            style={{ fontFamily: 'var(--font-sans)' }}
           >
             {p === 'hoy' ? 'Hoy' : p === 'semana' ? 'Esta semana' : p === 'mes' ? 'Este mes' : 'Fecha'}
           </button>
@@ -153,41 +163,62 @@ export default function PosPage() {
         )}
       </div>
 
-      {/* Stats del período */}
+      {/* Stats */}
       <div className="px-6 py-4 grid grid-cols-3 gap-3 shrink-0">
         <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center shadow-sm">
-          <p className="text-xs font-medium text-gray-400 mb-1">
-            {periodo === 'hoy' ? 'Total del día' : periodo === 'semana' ? 'Total semana' : periodo === 'mes' ? 'Total mes' : 'Total del día'}
+          <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide" style={{ fontFamily: 'var(--font-sans)' }}>
+            {periodo === 'hoy' ? 'Total del día' : periodo === 'semana' ? 'Total semana' : periodo === 'mes' ? 'Total mes' : 'Total'}
           </p>
-          <p className="text-2xl font-bold text-teal-600 leading-none">{formatPrecio(totalDia)}</p>
+          <p className="text-2xl font-black text-teal-600 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
+            {formatPrecio(totalDia)}
+          </p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center shadow-sm">
-          <p className="text-xs font-medium text-gray-400 mb-1">Ventas</p>
-          <p className="text-2xl font-bold text-gray-800 leading-none">{cantVentas}</p>
+          <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide" style={{ fontFamily: 'var(--font-sans)' }}>
+            Ventas
+          </p>
+          <p className="text-2xl font-black text-gray-800 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
+            {cantVentas}
+          </p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center shadow-sm">
-          <p className="text-xs font-medium text-gray-400 mb-1">Promedio</p>
-          <p className="text-2xl font-bold text-gray-800 leading-none">{formatPrecio(promedio)}</p>
+          <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide" style={{ fontFamily: 'var(--font-sans)' }}>
+            Promedio
+          </p>
+          <p className="text-2xl font-black text-gray-800 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
+            {formatPrecio(promedio)}
+          </p>
         </div>
       </div>
 
       {/* Lista de ventas */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-2">
+      <div className="flex-1 overflow-y-auto px-6 pb-24 space-y-2">
         {loading ? (
-          <div className="flex items-center justify-center h-40 text-gray-300">
-            <p className="text-sm">Cargando...</p>
+          <div className="flex items-center justify-center h-40 gap-1.5">
+            {[0,1,2].map(i => (
+              <div
+                key={i}
+                className="w-1.5 h-5 rounded-full bg-teal-300 animate-bounce"
+                style={{ animationDelay: `${i * 0.12}s` }}
+              />
+            ))}
           </div>
         ) : ventas.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-300 select-none">
-            <ShoppingCart size={56} strokeWidth={1} />
-            <p className="text-base font-medium mt-4 text-gray-400">Sin ventas hoy todavía</p>
-            <p className="text-sm text-gray-300 mt-1">Tocá "Nueva venta" para empezar</p>
-            <Button
+          <div className="flex flex-col items-center justify-center h-64 select-none">
+            <div className="w-16 h-16 rounded-2xl bg-teal-50 flex items-center justify-center mb-4">
+              <ShoppingCart size={32} strokeWidth={1.5} className="text-teal-300" />
+            </div>
+            <p className="text-base font-bold text-gray-500 mb-1" style={{ fontFamily: 'var(--font-display)' }}>
+              Sin ventas todavía
+            </p>
+            <p className="text-sm text-gray-400 mb-5">Tocá &ldquo;Nueva venta&rdquo; para empezar</p>
+            <button
               onClick={() => setMostrarNuevaVenta(true)}
-              className="mt-5 bg-teal-500 hover:bg-teal-600 gap-2"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm bg-teal-500 text-white hover:bg-teal-600 transition-colors"
+              style={{ fontFamily: 'var(--font-sans)' }}
             >
               <Plus size={15} /> Nueva venta
-            </Button>
+            </button>
           </div>
         ) : (
           ventas.map((venta) => {
@@ -205,21 +236,18 @@ export default function PosPage() {
                 key={venta.id}
                 className={cn(
                   'bg-white rounded-2xl border transition-all shadow-sm overflow-hidden',
-                  abierta ? 'border-teal-200' : 'border-gray-100'
+                  abierta ? 'border-teal-200 shadow-teal-50' : 'border-gray-100'
                 )}
               >
-                {/* Fila principal */}
                 <button
                   className="w-full flex items-center gap-4 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
                   onClick={() => setExpandida(abierta ? null : venta.id)}
                 >
-                  {/* Hora */}
                   <div className="flex items-center gap-1.5 text-gray-400 shrink-0 w-14">
                     <Clock size={12} />
                     <span className="text-xs font-mono">{hora}</span>
                   </div>
 
-                  {/* Cliente + resumen artículos */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       {venta.cliente ? (
@@ -231,40 +259,45 @@ export default function PosPage() {
                         <span className="text-sm text-gray-400">Sin cliente</span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 truncate mt-0.5">{resumen || `${items.length} artículo${items.length !== 1 ? 's' : ''}`}</p>
+                    <p className="text-xs text-gray-400 truncate mt-0.5">
+                      {resumen || `${items.length} artículo${items.length !== 1 ? 's' : ''}`}
+                    </p>
                   </div>
 
-                  {/* Métodos de pago */}
                   <div className="flex gap-1 shrink-0">
                     {pagos.map((p, i) => (
-                      <span key={i} className={cn('flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium', METODO_COLOR[p.metodo] || 'bg-gray-100 text-gray-500')}>
+                      <span
+                        key={i}
+                        className={cn('flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold', METODO_COLOR[p.metodo] || 'bg-gray-100 text-gray-500')}
+                      >
                         {METODO_ICON[p.metodo]}
                         {pagos.length > 1 && <span>{formatPrecio(p.monto)}</span>}
                       </span>
                     ))}
                   </div>
 
-                  {/* Total */}
                   <div className="text-right shrink-0 min-w-[80px]">
-                    <p className="font-bold text-gray-800 text-sm">{formatPrecio(venta.total)}</p>
+                    <p className="font-bold text-gray-800 text-sm" style={{ fontFamily: 'var(--font-display)' }}>
+                      {formatPrecio(venta.total)}
+                    </p>
                     {venta.descuento > 0 && (
                       <p className="text-[10px] text-teal-500">−{formatPrecio(venta.descuento)}</p>
                     )}
                   </div>
 
-                  {abierta ? <ChevronDown size={15} className="text-gray-300 shrink-0" /> : <ChevronRight size={15} className="text-gray-300 shrink-0" />}
+                  {abierta
+                    ? <ChevronDown size={15} className="text-teal-400 shrink-0" />
+                    : <ChevronRight size={15} className="text-gray-300 shrink-0" />
+                  }
                 </button>
 
-                {/* Detalle de artículos */}
                 {abierta && items.length > 0 && (
-                  <div className="border-t border-gray-50 px-4 py-3 bg-teal-50/30">
+                  <div className="border-t border-gray-50 px-4 py-3 bg-teal-50/40">
                     <div className="space-y-2">
                       {items.map((item, j) => (
                         <div key={j} className="flex items-center justify-between">
                           <div className="flex-1 min-w-0">
-                            <span className="text-sm text-gray-700 font-medium">
-                              {item.variante?.producto?.nombre || '—'}
-                            </span>
+                            <span className="text-sm text-gray-700 font-medium">{item.variante?.producto?.nombre || '—'}</span>
                             {item.variante?.talle && (
                               <span className="text-xs text-gray-400 ml-2">T. {item.variante.talle}</span>
                             )}
@@ -273,10 +306,14 @@ export default function PosPage() {
                             {item.cantidad > 1 ? (
                               <div>
                                 <p className="text-xs text-gray-400">{item.cantidad} × {formatPrecio(item.precio_unitario)}</p>
-                                <p className="text-sm font-semibold text-gray-800">{formatPrecio(item.precio_unitario * item.cantidad)}</p>
+                                <p className="text-sm font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
+                                  {formatPrecio(item.precio_unitario * item.cantidad)}
+                                </p>
                               </div>
                             ) : (
-                              <p className="text-sm font-semibold text-gray-800">{formatPrecio(item.precio_unitario)}</p>
+                              <p className="text-sm font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
+                                {formatPrecio(item.precio_unitario)}
+                              </p>
                             )}
                           </div>
                         </div>
@@ -284,7 +321,9 @@ export default function PosPage() {
                     </div>
                     <div className="mt-3 pt-2 border-t border-teal-100 flex justify-between">
                       <span className="text-xs text-gray-400">{items.length} artículo{items.length !== 1 ? 's' : ''}</span>
-                      <span className="text-sm font-bold text-teal-700">{formatPrecio(venta.total)}</span>
+                      <span className="text-sm font-bold text-teal-700" style={{ fontFamily: 'var(--font-display)' }}>
+                        {formatPrecio(venta.total)}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -294,14 +333,19 @@ export default function PosPage() {
         )}
       </div>
 
-      {/* Botón flotante cuando hay ventas */}
+      {/* FAB */}
       {ventas.length > 0 && (
-        <div className="fixed bottom-6 right-6">
+        <div className="fixed bottom-6 right-6 z-10">
           <button
             onClick={() => setMostrarNuevaVenta(true)}
-            className="w-14 h-14 bg-teal-500 hover:bg-teal-600 text-white rounded-full shadow-lg shadow-teal-200 flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+            className="w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+            style={{
+              background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
+              color: 'white',
+              boxShadow: '0 6px 24px rgba(78,195,189,0.45)',
+            }}
           >
-            <Plus size={24} />
+            <Plus size={24} strokeWidth={2.5} />
           </button>
         </div>
       )}

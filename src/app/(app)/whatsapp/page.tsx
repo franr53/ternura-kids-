@@ -5,29 +5,46 @@ import { createClient } from '@/lib/supabase/client'
 import { Cliente } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
-import { MessageCircle, Search, Send, CheckSquare, Square } from 'lucide-react'
+import { MessageCircle, Search, Send, CheckSquare, Square, Eye, AlertCircle } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 
+const LOTE_MAX = 10
 const MSG_DEUDORES = 'Hola {nombre}! Te recordamos que tenés una deuda de {deuda} en Ternura Kids. Podés pasar a abonar cuando quieras. Gracias!'
 const MSG_CAMPAÑA = 'Hola {nombre}! Tenemos novedades en Ternura Kids. Te esperamos!'
 
+function tieneTelefonoValido(cliente: Cliente): boolean {
+  if (!cliente.telefono) return false
+  const digits = cliente.telefono.replace(/\D/g, '')
+  return digits.length >= 7 && digits.length <= 15
+}
+
 function reemplazarVariables(template: string, cliente: Cliente): string {
+  const hoy = new Date().toLocaleDateString('es-AR')
   return template
     .replace(/{nombre}/g, cliente.nombre)
     .replace(/{deuda}/g, formatPrecio(cliente.deuda_total || 0))
+    .replace(/{fecha}/g, hoy)
 }
 
 function abrirWhatsApp(cliente: Cliente, mensaje: string) {
-  if (!cliente.telefono) { toast.error(`${cliente.nombre} no tiene teléfono`); return }
-  const tel = cliente.telefono.replace(/\D/g, '')
+  const tel = cliente.telefono!.replace(/\D/g, '')
   const msg = reemplazarVariables(mensaje, cliente)
   window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, '_blank')
+}
+
+function enviarLote(clientes: Cliente[], mensaje: string, lote: number) {
+  const inicio = lote * LOTE_MAX
+  const fin = inicio + LOTE_MAX
+  const slice = clientes.slice(inicio, fin)
+  slice.forEach((c, i) => {
+    setTimeout(() => abrirWhatsApp(c, mensaje), i * 600)
+  })
+  toast.success(`Abriendo WhatsApp para ${slice.length} clientes...`)
 }
 
 export default function WhatsAppPage() {
@@ -40,6 +57,7 @@ export default function WhatsAppPage() {
   const [msgDeudores, setMsgDeudores] = useState(MSG_DEUDORES)
   const [msgCampaña, setMsgCampaña] = useState(MSG_CAMPAÑA)
   const [busqueda, setBusqueda] = useState('')
+  const [loteActual, setLoteActual] = useState(0)
 
   const cargarDatos = useCallback(async () => {
     setLoading(true)
@@ -71,34 +89,42 @@ export default function WhatsAppPage() {
   }
 
   function toggleTodosDeudores() {
-    if (selectedDeudores.size === deudores.length) {
+    const conTel = deudores.filter(tieneTelefonoValido)
+    if (selectedDeudores.size === conTel.length) {
       setSelectedDeudores(new Set())
     } else {
-      setSelectedDeudores(new Set(deudores.map(d => d.id)))
+      setSelectedDeudores(new Set(conTel.map(d => d.id)))
     }
   }
 
   function enviarASeleccionadosDeudores() {
-    const seleccionados = deudores.filter(d => selectedDeudores.has(d.id))
-    if (seleccionados.length === 0) { toast.error('Seleccioná al menos un cliente'); return }
-    seleccionados.forEach((c, i) => {
-      setTimeout(() => abrirWhatsApp(c, msgDeudores), i * 500)
-    })
-  }
-
-  function enviarCampaña() {
-    const seleccionados = clientesFiltrados.filter(c => selectedClientes.has(c.id))
-    if (seleccionados.length === 0) { toast.error('Seleccioná al menos un cliente'); return }
-    seleccionados.forEach((c, i) => {
-      setTimeout(() => abrirWhatsApp(c, msgCampaña), i * 500)
-    })
+    const seleccionados = deudores.filter(d => selectedDeudores.has(d.id) && tieneTelefonoValido(d))
+    if (seleccionados.length === 0) { toast.error('Seleccioná al menos un cliente con teléfono válido'); return }
+    enviarLote(seleccionados, msgDeudores, 0)
   }
 
   const clientesFiltrados = clientes.filter(c =>
     busqueda === '' || c.nombre.toLowerCase().includes(busqueda.toLowerCase())
   )
 
-  const clientePreview = clientesFiltrados.find(c => selectedClientes.has(c.id)) || clientesFiltrados[0]
+  const seleccionadosCampaña = clientesFiltrados.filter(c => selectedClientes.has(c.id) && tieneTelefonoValido(c))
+  const totalLotes = Math.ceil(seleccionadosCampaña.length / LOTE_MAX)
+  const clientePreview = seleccionadosCampaña[0] || clientesFiltrados[0]
+
+  function enviarLoteActual() {
+    if (seleccionadosCampaña.length === 0) { toast.error('Seleccioná al menos un cliente con teléfono'); return }
+    enviarLote(seleccionadosCampaña, msgCampaña, loteActual)
+    if (loteActual < totalLotes - 1) setLoteActual(prev => prev + 1)
+  }
+
+  function probarMensaje() {
+    const primero = seleccionadosCampaña[0] || clientesFiltrados.find(tieneTelefonoValido)
+    if (!primero) { toast.error('No hay clientes con teléfono para probar'); return }
+    abrirWhatsApp(primero, msgCampaña)
+  }
+
+  const conTelDeudores = deudores.filter(tieneTelefonoValido).length
+  const sinTelDeudores = deudores.length - conTelDeudores
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -121,10 +147,17 @@ export default function WhatsAppPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Clientes con deuda ({deudores.length})</CardTitle>
+                <div>
+                  <CardTitle className="text-base">Clientes con deuda ({deudores.length})</CardTitle>
+                  {sinTelDeudores > 0 && (
+                    <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                      <AlertCircle size={12} /> {sinTelDeudores} sin teléfono válido
+                    </p>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={toggleTodosDeudores}>
-                    {selectedDeudores.size === deudores.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                    {selectedDeudores.size === conTelDeudores ? 'Deseleccionar todos' : 'Seleccionar todos'}
                   </Button>
                   <Button
                     onClick={enviarASeleccionadosDeudores}
@@ -132,7 +165,7 @@ export default function WhatsAppPage() {
                     className="bg-green-500 hover:bg-green-600 gap-2 text-sm"
                     size="sm"
                   >
-                    <Send size={14} /> Enviar a {selectedDeudores.size} seleccionados
+                    <Send size={14} /> Enviar a {selectedDeudores.size}
                   </Button>
                 </div>
               </div>
@@ -144,33 +177,37 @@ export default function WhatsAppPage() {
                 <div className="text-center py-8 text-gray-400">No hay clientes con deuda</div>
               ) : (
                 <div className="space-y-2">
-                  {deudores.map(cliente => (
-                    <div
-                      key={cliente.id}
-                      onClick={() => toggleDeudor(cliente.id)}
-                      className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedDeudores.has(cliente.id) ? 'border-green-300 bg-green-50' : 'border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="text-green-600">
-                        {selectedDeudores.has(cliente.id) ? <CheckSquare size={18} /> : <Square size={18} className="text-gray-300" />}
+                  {deudores.map(cliente => {
+                    const valido = tieneTelefonoValido(cliente)
+                    return (
+                      <div
+                        key={cliente.id}
+                        onClick={() => valido && toggleDeudor(cliente.id)}
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                          !valido ? 'opacity-50 cursor-not-allowed border-gray-100' :
+                          selectedDeudores.has(cliente.id) ? 'border-green-300 bg-green-50 cursor-pointer' : 'border-gray-200 hover:bg-gray-50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="text-green-600">
+                          {valido && selectedDeudores.has(cliente.id) ? <CheckSquare size={18} /> : <Square size={18} className="text-gray-300" />}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-800">{cliente.nombre}</p>
+                          <p className="text-xs text-gray-500">{cliente.telefono || 'Sin teléfono'}</p>
+                        </div>
+                        <Badge variant="destructive">{formatPrecio(cliente.deuda_total)}</Badge>
+                        {valido && (
+                          <button
+                            onClick={e => { e.stopPropagation(); abrirWhatsApp(cliente, msgDeudores) }}
+                            className="p-1.5 rounded-full bg-green-100 hover:bg-green-200 text-green-600"
+                            title="Enviar WhatsApp"
+                          >
+                            <MessageCircle size={14} />
+                          </button>
+                        )}
                       </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-800">{cliente.nombre}</p>
-                        <p className="text-xs text-gray-500">{cliente.telefono || 'Sin teléfono'}</p>
-                      </div>
-                      <Badge variant="destructive">{formatPrecio(cliente.deuda_total)}</Badge>
-                      {cliente.telefono && (
-                        <button
-                          onClick={e => { e.stopPropagation(); abrirWhatsApp(cliente, msgDeudores) }}
-                          className="p-1.5 rounded-full bg-green-100 hover:bg-green-200 text-green-600"
-                          title="Enviar WhatsApp"
-                        >
-                          <MessageCircle size={14} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </CardContent>
@@ -184,8 +221,12 @@ export default function WhatsAppPage() {
                 onChange={e => setMsgDeudores(e.target.value)}
                 rows={4}
                 className="font-mono text-sm"
+                maxLength={4096}
               />
-              <p className="text-xs text-gray-400">Variables disponibles: <code className="bg-gray-100 px-1 rounded">{'{nombre}'}</code> <code className="bg-gray-100 px-1 rounded">{'{deuda}'}</code></p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-400">Variables: <code className="bg-gray-100 px-1 rounded">{'{nombre}'}</code> <code className="bg-gray-100 px-1 rounded">{'{deuda}'}</code> <code className="bg-gray-100 px-1 rounded">{'{fecha}'}</code></p>
+                <p className={`text-xs ${msgDeudores.length > 3800 ? 'text-red-500' : 'text-gray-400'}`}>{msgDeudores.length}/4096</p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -196,7 +237,14 @@ export default function WhatsAppPage() {
             {/* Lista de clientes */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Clientes</CardTitle>
+                <CardTitle className="text-base">
+                  Clientes
+                  {selectedClientes.size > 0 && (
+                    <span className="ml-2 text-sm font-normal text-gray-500">
+                      {seleccionadosCampaña.length} con teléfono válido seleccionados
+                    </span>
+                  )}
+                </CardTitle>
                 <div className="relative mt-2">
                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <Input
@@ -209,24 +257,28 @@ export default function WhatsAppPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-1.5 max-h-80 overflow-y-auto">
-                  {clientesFiltrados.map(c => (
-                    <div
-                      key={c.id}
-                      onClick={() => toggleCliente(c.id)}
-                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors text-sm ${
-                        selectedClientes.has(c.id) ? 'border-green-300 bg-green-50' : 'border-gray-100 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="text-green-600">
-                        {selectedClientes.has(c.id) ? <CheckSquare size={16} /> : <Square size={16} className="text-gray-300" />}
+                  {clientesFiltrados.map(c => {
+                    const valido = tieneTelefonoValido(c)
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => valido && toggleCliente(c.id)}
+                        className={`flex items-center gap-2 p-2 rounded-lg border transition-colors text-sm ${
+                          !valido ? 'opacity-40 cursor-not-allowed border-gray-100' :
+                          selectedClientes.has(c.id) ? 'border-green-300 bg-green-50 cursor-pointer' : 'border-gray-100 hover:bg-gray-50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="text-green-600">
+                          {valido && selectedClientes.has(c.id) ? <CheckSquare size={16} /> : <Square size={16} className="text-gray-300" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-800 truncate">{c.nombre}</p>
+                          <p className="text-xs text-gray-400">{c.telefono || 'Sin teléfono'}</p>
+                        </div>
+                        {c.deuda_total > 0 && <Badge variant="destructive" className="text-xs">{formatPrecio(c.deuda_total)}</Badge>}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-800 truncate">{c.nombre}</p>
-                        <p className="text-xs text-gray-400">{c.telefono || 'Sin teléfono'}</p>
-                      </div>
-                      {c.deuda_total > 0 && <Badge variant="destructive" className="text-xs">{formatPrecio(c.deuda_total)}</Badge>}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -242,8 +294,12 @@ export default function WhatsAppPage() {
                     rows={5}
                     className="font-mono text-sm"
                     placeholder="Escribí tu mensaje..."
+                    maxLength={4096}
                   />
-                  <p className="text-xs text-gray-400">Variables: <code className="bg-gray-100 px-1 rounded">{'{nombre}'}</code> <code className="bg-gray-100 px-1 rounded">{'{deuda}'}</code></p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-400">Variables: <code className="bg-gray-100 px-1 rounded">{'{nombre}'}</code> <code className="bg-gray-100 px-1 rounded">{'{deuda}'}</code> <code className="bg-gray-100 px-1 rounded">{'{fecha}'}</code></p>
+                    <p className={`text-xs ${msgCampaña.length > 3800 ? 'text-red-500' : 'text-gray-400'}`}>{msgCampaña.length}/4096</p>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -259,13 +315,37 @@ export default function WhatsAppPage() {
                 </Card>
               )}
 
-              <Button
-                onClick={enviarCampaña}
-                disabled={selectedClientes.size === 0}
-                className="w-full bg-green-500 hover:bg-green-600 gap-2"
-              >
-                <Send size={16} /> Abrir WhatsApp para {selectedClientes.size} seleccionados
-              </Button>
+              <div className="space-y-2">
+                {seleccionadosCampaña.length > LOTE_MAX && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-700 flex items-start gap-2">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium">{seleccionadosCampaña.length} clientes seleccionados — se envía de a {LOTE_MAX}</p>
+                      <p className="text-xs mt-0.5">Lote {loteActual + 1} de {totalLotes}. Hacé clic varias veces para enviar todos los lotes.</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={probarMensaje}
+                    className="gap-2 border-green-300 text-green-700 hover:bg-green-50"
+                  >
+                    <Eye size={16} /> Probar
+                  </Button>
+                  <Button
+                    onClick={enviarLoteActual}
+                    disabled={seleccionadosCampaña.length === 0}
+                    className="flex-1 bg-green-500 hover:bg-green-600 gap-2"
+                  >
+                    <Send size={16} />
+                    {totalLotes > 1
+                      ? `Enviar lote ${loteActual + 1}/${totalLotes} (${Math.min(LOTE_MAX, seleccionadosCampaña.length - loteActual * LOTE_MAX)} clientes)`
+                      : `Abrir WhatsApp para ${seleccionadosCampaña.length} clientes`
+                    }
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </TabsContent>

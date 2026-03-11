@@ -21,6 +21,7 @@ export default function NuevoProveedorPage() {
   const [email, setEmail] = useState('')
   const [direccion, setDireccion] = useState('')
   const [notas, setNotas] = useState('')
+  const [aliasCbu, setAliasCbu] = useState('')
 
   async function guardar() {
     if (!nombre.trim()) { toast.error('El nombre es obligatorio'); return }
@@ -31,6 +32,7 @@ export default function NuevoProveedorPage() {
       email: email || null,
       direccion: direccion || null,
       notas: notas || null,
+      alias_cbu: aliasCbu || null,
       deuda_total: 0,
       activo: true,
     })
@@ -63,6 +65,10 @@ export default function NuevoProveedorPage() {
           <div>
             <Label>Dirección</Label>
             <Input value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dirección" className="mt-1" />
+          </div>
+          <div>
+            <Label>Alias / CBU para transferencias</Label>
+            <Input value={aliasCbu} onChange={e => setAliasCbu(e.target.value)} placeholder="Ej: proveedor.textil o CBU 0000..." className="mt-1" />
           </div>
           <div>
             <Label>Notas</Label>
