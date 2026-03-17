@@ -1,14 +1,21 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Categoria, Proveedor } from '@/types'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import { ArrowLeft, Plus, Minus, CheckCircle2, Package, ChevronRight, Search, X } from 'lucide-react'
+import { ArrowLeft, Plus, Minus, CheckCircle2, Package, ChevronRight, Search, X, RefreshCw, Sparkles, FileDown, MessageCircle, Phone, Tag } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
+import {
+  type EtiquetaData,
+  generarPDFEtiquetas,
+  abrirWhatsAppEtiquetas,
+  getWhatsAppTel,
+  setWhatsAppTel,
+} from '@/lib/etiquetas-pdf'
 
 // ── Constantes del dominio ─────────────────────────────────────
 const TALLES_POR_SISTEMA: Record<string, string[]> = {
@@ -37,8 +44,75 @@ const ESTILOS_POR_TIPO: Record<string, string[]> = {
 
 const GENEROS = ['Nena', 'Nene', 'Unisex']
 
+// Prefijos de código de barras por tipo+estilo (patrón real del stock)
+const PREFIJOS_TIPO: Record<string, string> = {
+  // Remera
+  'Remera MC':         'RMC',
+  'Remera ML':         'RML',
+  'Remera Sin Manga':  'RSM',
+  'Remera':            'REM',
+  // Buzo
+  'Buzo Con Friza':    'BCF',
+  'Buzo Sin Friza':    'BSF',
+  'Buzo Canguro':      'BCG',
+  'Buzo Abierto':      'BAB',
+  'Buzo':              'BUZ',
+  // Campera
+  'Campera Con Capucha':   'CCH',
+  'Campera Inflable':      'CIN',
+  'Campera Rompevientos':  'CRV',
+  'Campera Polar':         'CPL',
+  'Campera':               'CAM',
+  // Pantalón
+  'Pantalón Jeans':    'PJN',
+  'Pantalón Recto':    'PRC',
+  'Pantalón Cargo':    'PCG',
+  'Pantalón Con Puño': 'PCP',
+  'Pantalón Jogging':  'PJG',
+  'Pantalón Con Friza':'PCF',
+  'Pantalón Sin Friza':'PSF',
+  'Pantalón':          'PAN',
+  // Vestido
+  'Vestido Corto':       'VSC',
+  'Vestido Largo':       'VSL',
+  'Vestido Con Volados': 'VSV',
+  'Vestido':             'VST',
+  // Resto
+  'Pollera':    'POL',
+  'Musculosa':  'MUS',
+  'Body':       'BOD',
+  'Calza':      'CLZ',
+  'Short Jeans':     'SJN',
+  'Short Deportivo': 'SDP',
+  'Short Con Vuelo': 'SCV',
+  'Short':      'SHT',
+  'Bermuda Jeans':      'BJN',
+  'Bermuda Cargo':      'BCR',
+  'Bermuda Deportiva':  'BDP',
+  'Bermuda':    'BRM',
+  'Conjunto Remera + Short':    'CRS',
+  'Conjunto Remera + Pantalón': 'CRP',
+  'Conjunto Buzo + Calza':      'CBC',
+  'Conjunto':   'CNJ',
+  'Camisa':     'CMS',
+  'Chomba':     'CHO',
+  'Pijama':     'PJM',
+  'Medias':     'MDS',
+}
+
 // ── Tipos ──────────────────────────────────────────────────────
-type QuizStep = 'marca' | 'tipo' | 'producto' | 'nombre_nuevo' | 'precio' | 'talle' | 'cantidad' | 'listo'
+type QuizStep = 'inicio' | 'buscar_existente' | 'marca' | 'tipo' | 'producto' | 'nombre_nuevo' | 'precio' | 'precio_existente' | 'talle' | 'listo'
+
+interface TalleSeleccion {
+  cantidad: number
+  varianteId: string | null
+  esNueva: boolean
+  barcode: string
+  precioCosto: string
+  precioVenta: string
+}
+
+const MARGEN_SUGERIDO = 2.5
 
 interface ProductoExistente {
   id: string
@@ -47,7 +121,7 @@ interface ProductoExistente {
   precio_costo: number
   categoria_id: string | null
   proveedor_id: string | null
-  variantes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number }[]
+  variantes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number | null; precio_costo: number | null }[]
 }
 
 // ── Utilidades ─────────────────────────────────────────────────
@@ -56,8 +130,30 @@ function generarPrefijo(nombre: string): string {
 }
 
 function normalizarTalleParaCodigo(talle: string): string {
-  const clean = talle.replace(/[^a-z0-9]/gi, '').toUpperCase()
-  return clean.length === 1 ? '0' + clean : clean.slice(0, 4)
+  return talle.replace(/[^a-z0-9]/gi, '').toUpperCase()
+}
+
+function categoriaACodigo(nombre: string): string {
+  const n = nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  if (n.includes('bebe') || n.includes('bb')) return 'BB'
+  if (n.includes('colegia')) return 'COL'
+  if (n.includes('nina') || n.includes('nena') || n.includes('mujer') || n.includes('femenin')) return 'NA'
+  if (n.includes('nino') || n.includes('nene') || n.includes('varon') || n.includes('mascul')) return 'NO'
+  if (n.includes('accesorio')) return 'ACC'
+  return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
+}
+
+function abreviaturaMarca(nombre: string): string {
+  return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
+}
+
+function generarCodigoBarras(tipo: string, estilo: string, catNombre: string, marcaNombre: string, talle: string): string {
+  const clave = [tipo, estilo].filter(Boolean).join(' ')
+  const tipoPrefix = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipo] || generarPrefijo(clave || tipo)
+  const catCode   = categoriaACodigo(catNombre)
+  const marcaCode = abreviaturaMarca(marcaNombre)
+  const talleCode = normalizarTalleParaCodigo(talle)
+  return `${tipoPrefix}${catCode}${marcaCode}${talleCode}`
 }
 
 function normalizar(s: string) {
@@ -68,7 +164,6 @@ function normalizar(s: string) {
 export default function NuevoProductoPage() {
   const router = useRouter()
   const supabase = createClient()
-  const cantidadRef = useRef<HTMLInputElement>(null)
 
   // Datos cargados en mount
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
@@ -76,18 +171,17 @@ export default function NuevoProductoPage() {
   const [todosProductos, setTodosProductos] = useState<ProductoExistente[]>([])
 
   // Wizard state
-  const [step, setStep] = useState<QuizStep>('marca')
+  const [step, setStep] = useState<QuizStep>('inicio')
   const [dir, setDir] = useState<'forward' | 'backward'>('forward')
+  const [vinoDeExistente, setVinoDeExistente] = useState(false)
 
   // Selecciones
   const [marca, setMarca] = useState<Proveedor | null>(null)
   const [tipo, setTipo] = useState<Categoria | null>(null)
   const [producto, setProducto] = useState<ProductoExistente | null>(null)
   const [esProductoNuevo, setEsProductoNuevo] = useState(false)
-  const [talleSeleccionado, setTalleSeleccionado] = useState('')
-  const [esVarianteNueva, setEsVarianteNueva] = useState(false)
-  const [varianteExistenteId, setVarianteExistenteId] = useState<string | null>(null)
-  const [cantidad, setCantidad] = useState(1)
+  const [tallesSeleccionados, setTallesSeleccionados] = useState<Record<string, TalleSeleccion>>({})
+  // Keep single barcode for backward compat (used in listo step display)
   const [barcode, setBarcode] = useState('')
 
   // Para nuevos productos
@@ -98,6 +192,8 @@ export default function NuevoProductoPage() {
   const [otroTipoPrenda, setOtroTipoPrenda] = useState('')
   const [precioCosto, setPrecioCosto] = useState('')
   const [precioVenta, setPrecioVenta] = useState('')
+  const [precioVentaEditado, setPrecioVentaEditado] = useState(false)
+  const [quiereCambiarPrecio, setQuiereCambiarPrecio] = useState(false)
   const [temporada, setTemporada] = useState('todo_el_año')
 
   // Modal marca
@@ -115,18 +211,33 @@ export default function NuevoProductoPage() {
 
   // Búsqueda de productos
   const [busquedaProducto, setBusquedaProducto] = useState('')
+  const [busquedaExistente, setBusquedaExistente] = useState('')
 
   // Sesión
   const [articulosCargados, setArticulosCargados] = useState(0)
   const [ultimoGuardado, setUltimoGuardado] = useState<{ nombre: string; talle: string; cantidad: number } | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Sesión acumulada para etiquetas
+  interface ProductoCargado {
+    nombre: string
+    marca: string
+    talles: { talle: string; cantidad: number; codigoBarras?: string; precioVenta: number }[]
+  }
+  const [productosCargados, setProductosCargados] = useState<ProductoCargado[]>([])
+  const [modalFinAbierto, setModalFinAbierto] = useState(false)
+  const [telefonoWA, setTelefonoWA] = useState('')
+  const [generandoPDF, setGenerandoPDF] = useState(false)
+
+  // Cargar teléfono de localStorage en mount
+  useEffect(() => { setTelefonoWA(getWhatsAppTel()) }, [])
+
   // ── Carga de datos ─────────────────────────────────────────────
   const cargarTodo = useCallback(async () => {
     const [{ data: provs }, { data: cats }, { data: prods }] = await Promise.all([
       supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
-      supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo)').eq('activo', true).order('nombre'),
+      supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo,precio_venta,precio_costo)').eq('activo', true).order('nombre'),
     ])
     setProveedores(provs || [])
     setCategorias(cats || [])
@@ -145,10 +256,8 @@ export default function NuevoProductoPage() {
     }
   }, [step])
 
-  // Auto-focus cantidad
-  useEffect(() => {
-    if (step === 'cantidad') setTimeout(() => cantidadRef.current?.focus(), 300)
-  }, [step])
+  // Reset talles al entrar al paso talle
+  // (no need for auto-focus since talle step uses chip buttons)
 
   // ── Navegación ─────────────────────────────────────────────────
   function irA(newStep: QuizStep, newDir: 'forward' | 'backward') {
@@ -160,20 +269,28 @@ export default function NuevoProductoPage() {
 
   function goBack() {
     const prev: Record<QuizStep, QuizStep | null> = {
-      marca: null,
+      inicio: null,
+      buscar_existente: 'inicio',
+      marca: 'inicio',
       tipo: 'marca',
       producto: 'tipo',
       nombre_nuevo: 'producto',
       precio: 'nombre_nuevo',
-      talle: esProductoNuevo ? 'precio' : 'producto',
-      cantidad: 'talle',
-      listo: 'cantidad',
+      precio_existente: vinoDeExistente ? 'buscar_existente' : 'producto',
+      talle: esProductoNuevo ? 'precio' : 'precio_existente',
+      listo: 'talle',
     }
     const p = prev[step]
     if (p) irA(p, 'backward')
   }
 
   // ── Datos derivados ────────────────────────────────────────────
+  const productosExistentesFiltrados = busquedaExistente.trim().length >= 2
+    ? todosProductos.filter(p =>
+        normalizar(busquedaExistente).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
+      ).slice(0, 20)
+    : []
+
   const marcasFiltradas = busquedaMarca.trim()
     ? proveedores.filter(p =>
         normalizar(busquedaMarca).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
@@ -202,6 +319,23 @@ export default function NuevoProductoPage() {
     ? (((parseFloat(precioVenta) - parseFloat(precioCosto)) / parseFloat(precioCosto)) * 100).toFixed(0)
     : null
 
+  const precioLista = parseFloat(precioVenta) || 0
+  const precioEfectivo = Math.round(precioLista * 0.8)
+
+  function handleCostoChange(valor: string) {
+    setPrecioCosto(valor)
+    const costo = parseFloat(valor)
+    if (!isNaN(costo) && costo > 0 && !precioVentaEditado) {
+      const sugerido = Math.round(costo * MARGEN_SUGERIDO / 100) * 100
+      setPrecioVenta(String(sugerido))
+    }
+  }
+
+  function handleVentaChange(valor: string) {
+    setPrecioVenta(valor)
+    setPrecioVentaEditado(true)
+  }
+
   // Nombre construido por el builder
   const tipoPrendaFinal = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
   const nombreGenerado = [tipoPrendaFinal, estiloPrenda || '', generoPrenda || '']
@@ -210,34 +344,69 @@ export default function NuevoProductoPage() {
   // Cuándo mostrar cada sección del builder
   const builderTipoOk = tipoPrendaFinal.length > 0
   const builderEstiloOk = builderTipoOk && estiloPrenda !== null
-  const builderGeneroOk = builderEstiloOk && generoPrenda !== null
+  const esCalzado = tipo?.sistema_talles === 'calzado'
+  const builderGeneroOk = builderEstiloOk && (generoPrenda !== null || esCalzado)
   const estilosDisponibles = ESTILOS_POR_TIPO[tipoPrenda] || []
 
+  // Auto-omitir género para calzado
+  useEffect(() => {
+    if (esCalzado && generoPrenda === null) setGeneroPrenda('')
+  }, [esCalzado, generoPrenda])
+
   // ── Generación de barcode ──────────────────────────────────────
-  async function calcularBarcode(nombreProd: string, talle: string) {
-    const prefix = generarPrefijo(nombreProd)
-    const talleCode = normalizarTalleParaCodigo(talle)
-    const base = `${prefix}${talleCode}`
-    const { data } = await supabase
-      .from('variantes').select('codigo_barras')
-      .like('codigo_barras', `${base}%`)
-      .order('codigo_barras', { ascending: false }).limit(10)
-    let maxSeq = 0
-    data?.forEach(row => {
-      if (row.codigo_barras) {
-        const num = parseInt(row.codigo_barras.slice(base.length))
-        if (!isNaN(num) && num > maxSeq) maxSeq = num
-      }
-    })
+  async function calcularBarcodeParaTalle(talle: string): Promise<string> {
+    // Si la variante ya existe, usar su código
     const varExist = tallesExistentes.find(v => v.talle === talle)
-    setBarcode(varExist?.codigo_barras || `${base}${String(maxSeq + 1).padStart(3, '0')}`)
+    if (varExist?.codigo_barras) return varExist.codigo_barras
+
+    if (esProductoNuevo && tipoPrenda && tipo && marca) {
+      const tipoPrendaStr = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
+      const estiloStr = estiloPrenda || ''
+      return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle)
+    } else {
+      const nombreProd = producto?.nombre || ''
+      const prefix = generarPrefijo(nombreProd)
+      const talleCode = normalizarTalleParaCodigo(talle)
+      const base = `${prefix}${talleCode}`
+      const { data } = await supabase
+        .from('variantes').select('codigo_barras')
+        .like('codigo_barras', `${base}%`)
+        .order('codigo_barras', { ascending: false }).limit(10)
+      let maxSeq = 0
+      data?.forEach(row => {
+        if (row.codigo_barras) {
+          const num = parseInt(row.codigo_barras.slice(base.length))
+          if (!isNaN(num) && num > maxSeq) maxSeq = num
+        }
+      })
+      return `${base}${maxSeq > 0 ? String(maxSeq + 1).padStart(3, '0') : ''}`
+    }
   }
 
   // ── Handlers de selección ──────────────────────────────────────
+  function seleccionarProductoExistente(p: ProductoExistente) {
+    // Setear marca y tipo desde el producto para que el barcode y breadcrumbs funcionen
+    const prov = proveedores.find(v => v.id === p.proveedor_id) || null
+    const cat  = categorias.find(c => c.id === p.categoria_id) || null
+    setMarca(prov)
+    setTipo(cat)
+    setProducto(p)
+    setEsProductoNuevo(false)
+    setVinoDeExistente(true)
+    setQuiereCambiarPrecio(false)
+    setPrecioCosto(String(p.precio_costo || ''))
+    setPrecioVenta(String(p.precio_venta || ''))
+    setPrecioVentaEditado(false)
+    setTallesSeleccionados({}); setBarcode('')
+    setBusquedaExistente('')
+    irA('precio_existente', 'forward')
+  }
+
   function seleccionarMarca(p: Proveedor) {
     setMarca(p)
     setTipo(null); setProducto(null); setEsProductoNuevo(false)
-    setTalleSeleccionado(''); setBarcode('')
+    setVinoDeExistente(false)
+    setTallesSeleccionados({}); setBarcode('')
     setModalMarcaAbierto(false)
     setBusquedaMarca('')
     irA('tipo', 'forward')
@@ -246,16 +415,20 @@ export default function NuevoProductoPage() {
   function seleccionarTipo(c: Categoria) {
     setTipo(c)
     setProducto(null); setEsProductoNuevo(false)
-    setTalleSeleccionado(''); setBarcode('')
+    setTallesSeleccionados({}); setBarcode('')
     irA('producto', 'forward')
   }
 
   function seleccionarProducto(p: ProductoExistente) {
     setProducto(p)
     setEsProductoNuevo(false)
-    setTalleSeleccionado(''); setBarcode('')
+    setQuiereCambiarPrecio(false)
+    setPrecioCosto(String(p.precio_costo || ''))
+    setPrecioVenta(String(p.precio_venta || ''))
+    setPrecioVentaEditado(false)
+    setTallesSeleccionados({}); setBarcode('')
     setBusquedaProducto('')
-    irA('talle', 'forward')
+    irA('precio_existente', 'forward')
   }
 
   function seleccionarNuevoProducto() {
@@ -263,18 +436,46 @@ export default function NuevoProductoPage() {
     setProducto(null)
     setNombreNuevoProducto('')
     setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setOtroTipoPrenda('')
-    setPrecioCosto(''); setPrecioVenta(''); setTemporada('todo_el_año')
+    setPrecioCosto(''); setPrecioVenta(''); setPrecioVentaEditado(false); setTemporada('todo_el_año')
     irA('nombre_nuevo', 'forward')
   }
 
-  async function seleccionarTalle(talle: string, varianteId: string | null, esNueva: boolean) {
-    setTalleSeleccionado(talle)
-    setVarianteExistenteId(varianteId)
-    setEsVarianteNueva(esNueva)
-    setCantidad(1)
-    const nombreProd = esProductoNuevo ? nombreNuevoProducto : (producto?.nombre || '')
-    await calcularBarcode(nombreProd, talle)
-    irA('cantidad', 'forward')
+  async function toggleTalle(talle: string, varianteId: string | null, esNueva: boolean) {
+    // Pre-fill prices: variant-level > product-level > form-level
+    const varExist = tallesExistentes.find(v => v.talle === talle)
+    const defaultCosto = varExist?.precio_costo != null ? String(varExist.precio_costo)
+      : producto?.precio_costo ? String(producto.precio_costo) : precioCosto
+    const defaultVenta = varExist?.precio_venta != null ? String(varExist.precio_venta)
+      : producto?.precio_venta ? String(producto.precio_venta) : precioVenta
+
+    setTallesSeleccionados(prev => {
+      if (prev[talle]) {
+        const next = { ...prev }
+        delete next[talle]
+        return next
+      }
+      return { ...prev, [talle]: { cantidad: 1, varianteId, esNueva, barcode: '', precioCosto: defaultCosto, precioVenta: defaultVenta } }
+    })
+    // Calcular barcode en background
+    const bc = await calcularBarcodeParaTalle(talle)
+    setTallesSeleccionados(prev => {
+      if (!prev[talle]) return prev
+      return { ...prev, [talle]: { ...prev[talle], barcode: bc } }
+    })
+  }
+
+  function setCantidadTalle(talle: string, cant: number) {
+    setTallesSeleccionados(prev => {
+      if (!prev[talle]) return prev
+      return { ...prev, [talle]: { ...prev[talle], cantidad: Math.max(1, cant) } }
+    })
+  }
+
+  function setPrecioTalle(talle: string, campo: 'precioCosto' | 'precioVenta', valor: string) {
+    setTallesSeleccionados(prev => {
+      if (!prev[talle]) return prev
+      return { ...prev, [talle]: { ...prev[talle], [campo]: valor } }
+    })
   }
 
   // ── Creación inline (modal marca) ──────────────────────────────
@@ -305,7 +506,9 @@ export default function NuevoProductoPage() {
   async function confirmarCrearTalle() {
     const talle = inputCrear.trim()
     if (!talle) return
-    await seleccionarTalle(talle, null, true)
+    setModoCrear(null)
+    setInputCrear('')
+    await toggleTalle(talle, null, true)
   }
 
   // ── Builder: confirmar nombre ──────────────────────────────────
@@ -318,9 +521,21 @@ export default function NuevoProductoPage() {
 
   // ── Guardar ────────────────────────────────────────────────────
   async function guardar() {
-    if (!talleSeleccionado) return
+    const entries = Object.entries(tallesSeleccionados)
+    if (entries.length === 0) return
     setLoading(true)
     try {
+      // Actualizar precio si el usuario lo pidió en producto existente
+      if (quiereCambiarPrecio && !esProductoNuevo && producto) {
+        const { error: errPrecio } = await supabase.from('productos').update({
+          precio_costo: parseFloat(precioCosto) || producto.precio_costo,
+          precio_venta: parseFloat(precioVenta) || producto.precio_venta,
+        }).eq('id', producto.id)
+        if (errPrecio) throw new Error(errPrecio.message)
+      }
+
+      let productoId = producto?.id || null
+
       if (esProductoNuevo) {
         const { data: prod, error: errProd } = await supabase.from('productos').insert({
           nombre: nombreNuevoProducto.trim(),
@@ -331,29 +546,51 @@ export default function NuevoProductoPage() {
           temporada: temporada || null,
         }).select().single()
         if (errProd || !prod) throw new Error(errProd?.message)
-        const { error: errV } = await supabase.from('variantes').insert({
-          producto_id: prod.id, talle: talleSeleccionado, codigo_barras: barcode || null, stock: cantidad, stock_minimo: 2,
-        })
-        if (errV) throw new Error(errV.message)
+        productoId = prod.id
+      }
 
-      } else if (esVarianteNueva || !varianteExistenteId) {
-        const { error } = await supabase.from('variantes').insert({
-          producto_id: producto!.id, talle: talleSeleccionado, codigo_barras: barcode || null, stock: cantidad, stock_minimo: 2,
-        })
-        if (error) throw new Error(error.message)
+      for (const [talle, sel] of entries) {
+        const talleCosto = parseFloat(sel.precioCosto) || null
+        const talleVenta = parseFloat(sel.precioVenta) || null
 
-      } else {
-        const { error } = await supabase.rpc('incrementar_stock', { p_variante_id: varianteExistenteId, p_cantidad: cantidad })
-        if (error) throw new Error(error.message)
-        const varExist = tallesExistentes.find(v => v.id === varianteExistenteId)
-        if (barcode && !varExist?.codigo_barras) {
-          await supabase.from('variantes').update({ codigo_barras: barcode }).eq('id', varianteExistenteId)
+        if (esProductoNuevo || sel.esNueva || !sel.varianteId) {
+          const { error } = await supabase.from('variantes').insert({
+            producto_id: productoId!, talle, codigo_barras: sel.barcode || null, stock: sel.cantidad, stock_minimo: 2,
+            precio_costo: talleCosto, precio_venta: talleVenta,
+          })
+          if (error) throw new Error(error.message)
+        } else {
+          const { error } = await supabase.rpc('incrementar_stock', { p_variante_id: sel.varianteId, p_cantidad: sel.cantidad })
+          if (error) throw new Error(error.message)
+          // Actualizar precio y barcode de la variante existente
+          const updateData: Record<string, unknown> = {}
+          if (talleCosto != null) updateData.precio_costo = talleCosto
+          if (talleVenta != null) updateData.precio_venta = talleVenta
+          const varExist = tallesExistentes.find(v => v.id === sel.varianteId)
+          if (sel.barcode && !varExist?.codigo_barras) updateData.codigo_barras = sel.barcode
+          if (Object.keys(updateData).length > 0) {
+            await supabase.from('variantes').update(updateData).eq('id', sel.varianteId)
+          }
         }
       }
 
       const nombreFinal = esProductoNuevo ? nombreNuevoProducto : (producto?.nombre || '')
-      setUltimoGuardado({ nombre: nombreFinal, talle: talleSeleccionado, cantidad })
-      setArticulosCargados(n => n + 1)
+      const marcaFinal = marca?.nombre || ''
+      const totalUnidades = entries.reduce((s, [, sel]) => s + sel.cantidad, 0)
+      const tallesResumen = entries.map(([t, sel]) => `${t} (×${sel.cantidad})`).join(', ')
+      setUltimoGuardado({ nombre: nombreFinal, talle: tallesResumen, cantidad: totalUnidades })
+      setArticulosCargados(n => n + entries.length)
+      // Acumular para etiquetas
+      setProductosCargados(prev => [...prev, {
+        nombre: nombreFinal,
+        marca: marcaFinal,
+        talles: entries.map(([t, sel]) => ({
+          talle: t,
+          cantidad: sel.cantidad,
+          codigoBarras: sel.barcode || undefined,
+          precioVenta: parseFloat(sel.precioVenta) || parseFloat(precioVenta) || 0,
+        })),
+      }])
       await cargarTodo()
       irA('listo', 'forward')
     } catch (e: unknown) {
@@ -364,26 +601,27 @@ export default function NuevoProductoPage() {
   }
 
   // ── Reset helpers ──────────────────────────────────────────────
-  function cargarOtroTalle() { setTalleSeleccionado(''); setBarcode(''); setCantidad(1); irA('talle', 'backward') }
+  function cargarOtroTalle() { setTallesSeleccionados({}); setBarcode(''); irA('talle', 'backward') }
   function cargarOtroProducto() {
     setProducto(null); setEsProductoNuevo(false)
-    setTalleSeleccionado(''); setBarcode(''); setCantidad(1); setBusquedaProducto('')
+    setTallesSeleccionados({}); setBarcode(''); setBusquedaProducto('')
     irA('producto', 'backward')
   }
   function empezarDeNuevo() {
     setMarca(null); setTipo(null); setProducto(null); setEsProductoNuevo(false)
-    setTalleSeleccionado(''); setBarcode(''); setCantidad(1); setBusquedaProducto('')
-    irA('marca', 'backward')
+    setVinoDeExistente(false)
+    setTallesSeleccionados({}); setBarcode(''); setBusquedaProducto(''); setBusquedaExistente('')
+    irA('inicio', 'backward')
   }
 
   // ── Breadcrumbs ────────────────────────────────────────────────
   type BC = { label: string; goTo: QuizStep }
   const breadcrumbs: BC[] = []
-  if (marca && step !== 'marca') breadcrumbs.push({ label: marca.nombre, goTo: 'marca' })
-  if (tipo && !['marca','tipo'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'tipo' })
+  if (marca && !['inicio','buscar_existente','marca'].includes(step)) breadcrumbs.push({ label: marca.nombre, goTo: 'marca' })
+  if (tipo && !['inicio','buscar_existente','marca','tipo'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'tipo' })
   const prodNombre = esProductoNuevo ? nombreNuevoProducto : producto?.nombre
-  if (prodNombre && !['marca','tipo','producto','nombre_nuevo','precio'].includes(step)) {
-    breadcrumbs.push({ label: prodNombre, goTo: 'producto' })
+  if (prodNombre && !['inicio','buscar_existente','marca','tipo','producto','nombre_nuevo','precio','precio_existente'].includes(step)) {
+    breadcrumbs.push({ label: prodNombre, goTo: vinoDeExistente ? 'buscar_existente' : 'producto' })
   }
 
   // ── UI helpers ─────────────────────────────────────────────────
@@ -455,7 +693,7 @@ export default function NuevoProductoPage() {
 
         {/* Header */}
         <div className="flex items-center gap-3">
-          {step === 'marca' ? (
+          {step === 'inicio' ? (
             <Link href="/inventario">
               <button className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50">
                 <ArrowLeft size={16} className="text-gray-500" />
@@ -486,6 +724,98 @@ export default function NuevoProductoPage() {
                 {i < breadcrumbs.length - 1 && <ChevronRight size={12} className="text-gray-300" />}
               </span>
             ))}
+          </div>
+        )}
+
+        {/* ── PASO INICIO ────────────────────────────────────────── */}
+        {step === 'inicio' && (
+          <div className={animClass}>
+            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Carga de stock</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué ingresó?</h2>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                <button
+                  onClick={() => { setVinoDeExistente(true); setBusquedaExistente(''); irA('buscar_existente', 'forward') }}
+                  className="flex items-center gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all hover:border-teal-400 hover:bg-teal-50 active:scale-[0.98]"
+                  style={{ borderColor: '#e5e7eb', background: 'white' }}
+                >
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(78,195,189,0.1)' }}>
+                    <RefreshCw size={20} style={{ color: '#4EC3BD' }} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-800 text-sm">Un artículo que ya tenía</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Reponer stock de un producto existente</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setVinoDeExistente(false); irA('marca', 'forward') }}
+                  className="flex items-center gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all hover:border-teal-400 hover:bg-teal-50 active:scale-[0.98]"
+                  style={{ borderColor: '#e5e7eb', background: 'white' }}
+                >
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(78,195,189,0.1)' }}>
+                    <Sparkles size={20} style={{ color: '#4EC3BD' }} />
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-800 text-sm">Un artículo nuevo</p>
+                    <p className="text-xs text-gray-400 mt-0.5">No estaba en el sistema todavía</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── PASO BUSCAR EXISTENTE ───────────────────────────────── */}
+        {step === 'buscar_existente' && (
+          <div className={animClass}>
+            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Reponer stock</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué artículo?</h2>
+              </div>
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <Input
+                  value={busquedaExistente}
+                  onChange={e => setBusquedaExistente(e.target.value)}
+                  placeholder="Buscar por nombre..."
+                  className="h-11 pl-9 rounded-xl border-gray-200 text-sm"
+                  autoFocus
+                />
+              </div>
+              {busquedaExistente.trim().length >= 2 && productosExistentesFiltrados.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-3">Sin resultados para "{busquedaExistente}"</p>
+              )}
+              {productosExistentesFiltrados.length > 0 && (
+                <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                  {productosExistentesFiltrados.map(p => {
+                    const prov = proveedores.find(v => v.id === p.proveedor_id)
+                    const stockTotal = p.variantes.reduce((s, v) => s + v.stock, 0)
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => seleccionarProductoExistente(p)}
+                        className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all hover:border-teal-300 hover:bg-teal-50 active:scale-[0.98] text-left"
+                        style={{ borderColor: '#e5e7eb', background: 'white' }}
+                      >
+                        <div>
+                          <p className="font-semibold text-sm text-gray-800">{p.nombre}</p>
+                          {prov && <p className="text-xs text-gray-400 mt-0.5">{prov.nombre}</p>}
+                        </div>
+                        <span className="text-xs font-semibold ml-3 flex-shrink-0 px-2 py-0.5 rounded-full" style={{ background: stockTotal > 0 ? 'rgba(78,195,189,0.1)' : 'rgba(249,115,22,0.1)', color: stockTotal > 0 ? '#0d9488' : '#ea580c' }}>
+                          {stockTotal} uds
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {busquedaExistente.trim().length < 2 && (
+                <p className="text-xs text-gray-400 text-center py-2">Escribí al menos 2 letras para buscar</p>
+              )}
+            </div>
           </div>
         )}
 
@@ -659,8 +989,8 @@ export default function NuevoProductoPage() {
                 </div>
               )}
 
-              {/* Sección 3: Género */}
-              {builderEstiloOk && (
+              {/* Sección 3: Género (se oculta para calzado) */}
+              {builderEstiloOk && !esCalzado && (
                 <div className="tk-slide-forward">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="h-px flex-1 bg-gray-100" />
@@ -682,7 +1012,7 @@ export default function NuevoProductoPage() {
                   <div className="p-4 rounded-2xl text-center" style={{ background: '#f0fdfb', border: '1px solid rgba(78,195,189,0.25)' }}>
                     <p className="text-xs text-gray-400 mb-1">Nombre generado</p>
                     <p className="text-xl font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>{nombreGenerado}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">Código: <span className="font-mono text-teal-600">{generarPrefijo(nombreGenerado)}XX001</span></p>
+                    <p className="text-[10px] text-gray-400 mt-1">Código: <span className="font-mono text-teal-600">{(() => { const clave = [tipoPrendaFinal, estiloPrenda || ''].filter(Boolean).join(' '); const p = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipoPrendaFinal] || generarPrefijo(tipoPrendaFinal); return `${p}${tipo ? categoriaACodigo(tipo.nombre) : 'XX'}${marca ? abreviaturaMarca(marca.nombre) : 'XX'}` })()}[talle]</span></p>
                   </div>
                   <button
                     onClick={confirmarNombre}
@@ -711,11 +1041,14 @@ export default function NuevoProductoPage() {
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Costo</p>
-                    <Input type="number" value={precioCosto} onChange={e => setPrecioCosto(e.target.value)} placeholder="0" className="h-10 rounded-xl border-gray-200 text-sm" autoFocus />
+                    <Input type="number" value={precioCosto} onChange={e => handleCostoChange(e.target.value)} placeholder="0" className="h-10 rounded-xl border-gray-200 text-sm" autoFocus />
                   </div>
                   <div>
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Venta</p>
-                    <Input type="number" value={precioVenta} onChange={e => setPrecioVenta(e.target.value)} placeholder="0" className="h-10 rounded-xl border-gray-200 text-sm" />
+                    <Input type="number" value={precioVenta} onChange={e => handleVentaChange(e.target.value)} placeholder="0" className="h-10 rounded-xl border-gray-200 text-sm" />
+                    {!precioVentaEditado && precioVenta && precioCosto && (
+                      <span className="inline-block mt-1 text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">sugerido x{MARGEN_SUGERIDO}</span>
+                    )}
                   </div>
                   <div className="h-10 mt-auto flex items-center justify-center rounded-xl" style={{ background: '#f0fdfb', border: '1px solid #ccfbf1' }}>
                     {margen !== null ? (
@@ -726,6 +1059,19 @@ export default function NuevoProductoPage() {
                     ) : <p className="text-xs text-gray-300">%</p>}
                   </div>
                 </div>
+
+                {precioLista > 0 && (
+                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
+                    <div className="flex-1">
+                      <p className="text-xs text-gray-400">Etiqueta</p>
+                      <p className="text-sm font-bold text-gray-800">{formatPrecio(precioLista)}</p>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-gray-400">Efectivo (−20%)</p>
+                      <p className="text-sm font-bold" style={{ color: '#0d9488' }}>{formatPrecio(precioEfectivo)}</p>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Temporada</p>
@@ -751,73 +1097,239 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
-        {/* ── PASO TALLE ─────────────────────────────────────────── */}
+        {/* ── PASO PRECIO_EXISTENTE ─────────────────────────────── */}
+        {step === 'precio_existente' && producto && (
+          <div className={animClass}>
+            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Reponer stock</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Cambió el precio?</h2>
+                <p className="text-sm font-bold mt-0.5" style={{ color: '#4EC3BD' }}>
+                  {producto.nombre}
+                  {marca && <span className="font-normal text-gray-400"> — {marca.nombre}</span>}
+                </p>
+              </div>
+
+              {/* Precio actual */}
+              <div className="rounded-xl p-4 space-y-2" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Precio actual</p>
+                <div className="flex items-center gap-4">
+                  <div>
+                    <p className="text-xs text-gray-400">Costo</p>
+                    <p className="text-sm font-bold text-gray-800">{formatPrecio(producto.precio_costo)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Venta</p>
+                    <p className="text-sm font-bold text-gray-800">{formatPrecio(producto.precio_venta)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 pt-1 border-t border-gray-100">
+                  <div>
+                    <p className="text-xs text-gray-400">Etiqueta</p>
+                    <p className="text-sm font-semibold text-gray-700">{formatPrecio(producto.precio_venta)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Efectivo (−20%)</p>
+                    <p className="text-sm font-semibold" style={{ color: '#0d9488' }}>{formatPrecio(Math.round(producto.precio_venta * 0.8))}</p>
+                  </div>
+                </div>
+              </div>
+
+              {!quiereCambiarPrecio ? (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => irA('talle', 'forward')}
+                    className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
+                    style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
+                  >
+                    Mantener precio → Elegir talle
+                  </button>
+                  <button
+                    onClick={() => {
+                      setQuiereCambiarPrecio(true)
+                      setPrecioCosto(String(producto.precio_costo || ''))
+                      setPrecioVenta(String(producto.precio_venta || ''))
+                      setPrecioVentaEditado(false)
+                    }}
+                    className="w-full py-2.5 rounded-2xl font-semibold text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    Actualizar precio
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3 tk-slide-forward">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Costo nuevo</p>
+                      <Input type="number" value={precioCosto} onChange={e => handleCostoChange(e.target.value)} placeholder="0" className="h-10 rounded-xl border-gray-200 text-sm" autoFocus />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Venta nueva</p>
+                      <Input type="number" value={precioVenta} onChange={e => handleVentaChange(e.target.value)} placeholder="0" className="h-10 rounded-xl border-gray-200 text-sm" />
+                      {!precioVentaEditado && precioVenta && precioCosto && (
+                        <span className="inline-block mt-1 text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">sugerido x{MARGEN_SUGERIDO}</span>
+                      )}
+                    </div>
+                    <div className="h-10 mt-auto flex items-center justify-center rounded-xl" style={{ background: '#f0fdfb', border: '1px solid #ccfbf1' }}>
+                      {margen !== null ? (
+                        <div className="text-center">
+                          <p className="text-base font-black leading-none" style={{ color: Number(margen) >= 30 ? '#0d9488' : Number(margen) >= 15 ? '#d97706' : '#ef4444', fontFamily: 'var(--font-display)' }}>{margen}%</p>
+                          <p className="text-[9px] text-gray-400">margen</p>
+                        </div>
+                      ) : <p className="text-xs text-gray-300">%</p>}
+                    </div>
+                  </div>
+
+                  {precioLista > 0 && (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
+                      <div className="flex-1">
+                        <p className="text-xs text-gray-400">Etiqueta</p>
+                        <p className="text-sm font-bold text-gray-800">{formatPrecio(precioLista)}</p>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-xs text-gray-400">Efectivo (−20%)</p>
+                        <p className="text-sm font-bold" style={{ color: '#0d9488' }}>{formatPrecio(precioEfectivo)}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => irA('talle', 'forward')}
+                    className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
+                    style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
+                  >
+                    Guardar nuevo precio → Elegir talle
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── PASO TALLE + CANTIDAD (unificado, multi-talle) ──── */}
         {step === 'talle' && (
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué talle?</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre}</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Talles y cantidades</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre} — Tocá para seleccionar</p>
               </div>
               <div className="space-y-4">
+                {/* Talles existentes (producto existente) */}
                 {!esProductoNuevo && tallesExistentes.length > 0 && (
                   <div>
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Talles en stock</p>
                     <div className="grid grid-cols-3 gap-2">
-                      {tallesExistentes.map(v => <Chip key={v.id} label={v.talle} sub={`${v.stock} uds`} onClick={() => seleccionarTalle(v.talle, v.id, false)} />)}
+                      {tallesExistentes.map(v => (
+                        <Chip key={v.id} label={v.talle} sub={tallesSeleccionados[v.talle] ? `✓ ×${tallesSeleccionados[v.talle].cantidad}` : `${v.stock} uds`}
+                          activo={!!tallesSeleccionados[v.talle]}
+                          onClick={() => toggleTalle(v.talle, v.id, false)} />
+                      ))}
                     </div>
                   </div>
                 )}
+                {/* Talles sugeridos / faltantes */}
                 {(esProductoNuevo ? tallesSugeridos : tallesFaltantes).length > 0 && (
                   <div>
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">{esProductoNuevo ? 'Talles sugeridos' : 'Talles faltantes'}</p>
                     <div className="grid grid-cols-3 gap-2">
-                      {(esProductoNuevo ? tallesSugeridos : tallesFaltantes).map(t => <Chip key={t} label={t} sub="+ nuevo" onClick={() => seleccionarTalle(t, null, true)} />)}
+                      {(esProductoNuevo ? tallesSugeridos : tallesFaltantes).map(t => (
+                        <Chip key={t} label={t} sub={tallesSeleccionados[t] ? `✓ ×${tallesSeleccionados[t].cantidad}` : '+ nuevo'}
+                          activo={!!tallesSeleccionados[t]}
+                          onClick={() => toggleTalle(t, null, true)} />
+                      ))}
                     </div>
                   </div>
                 )}
+                {/* Talle personalizado */}
                 {modoCrear === 'talle' ? (
                   <InlineCrear placeholder="Ej: T3, 37, Único..." onConfirm={confirmarCrearTalle} onCancel={() => setModoCrear(null)} loading={loadingCrear} />
                 ) : (
                   <BtnAgregar label="Talle personalizado" onClick={() => setModoCrear('talle')} />
                 )}
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* ── PASO CANTIDAD ──────────────────────────────────────── */}
-        {step === 'cantidad' && (
-          <div className={animClass}>
-            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-5">
-              <div>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Cuántas unidades?</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre} · Talle {talleSeleccionado}</p>
-              </div>
-              <div className="flex items-center gap-3 justify-center">
-                <button onClick={() => setCantidad(n => Math.max(1, n - 1))} className="w-12 h-12 rounded-2xl border-2 border-gray-200 flex items-center justify-center hover:border-teal-300 hover:text-teal-600 transition-all active:scale-90">
-                  <Minus size={20} className="text-gray-500" />
-                </button>
-                <input ref={cantidadRef} type="number" value={cantidad} onChange={e => setCantidad(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-28 h-16 rounded-2xl border-2 text-center text-3xl font-black text-gray-900 focus:outline-none focus:border-teal-400 transition-colors"
-                  style={{ borderColor: '#e5e7eb', fontFamily: 'var(--font-display)' }} min={1} />
-                <button onClick={() => setCantidad(n => n + 1)} className="w-12 h-12 rounded-2xl border-2 border-gray-200 flex items-center justify-center hover:border-teal-300 hover:text-teal-600 transition-all active:scale-90">
-                  <Plus size={20} className="text-gray-500" />
-                </button>
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Código de barras</p>
-                <div className="relative">
-                  <Input value={barcode} onChange={e => setBarcode(e.target.value)} placeholder="Sin código" className="h-10 rounded-xl border-gray-200 text-sm font-mono pr-16" />
-                  {barcode && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(78,195,189,0.1)', color: '#0d9488' }}>auto</span>}
+              {/* Detalle de talles seleccionados: cantidad + precio por talle */}
+              {Object.keys(tallesSeleccionados).length > 0 && (
+                <div className="space-y-3 pt-2 border-t border-gray-100">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Detalle por talle</p>
+                  {Object.entries(tallesSeleccionados).map(([talle, sel]) => {
+                    const talleMargen = sel.precioCosto && sel.precioVenta
+                      ? (((parseFloat(sel.precioVenta) - parseFloat(sel.precioCosto)) / parseFloat(sel.precioCosto)) * 100).toFixed(0)
+                      : null
+                    return (
+                      <div key={talle} className="rounded-xl px-3 py-3 space-y-2" style={{ background: 'rgba(78,195,189,0.05)', border: '1px solid rgba(78,195,189,0.15)' }}>
+                        {/* Header: talle + cantidad + eliminar */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black text-gray-800 min-w-[3rem]">{talle}</span>
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <button onClick={() => setCantidadTalle(talle, sel.cantidad - 1)}
+                              className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center hover:border-teal-300 transition-all active:scale-90 bg-white">
+                              <Minus size={12} className="text-gray-500" />
+                            </button>
+                            <input type="number" value={sel.cantidad}
+                              onChange={e => setCantidadTalle(talle, parseInt(e.target.value) || 1)}
+                              className="w-12 h-7 rounded-lg border text-center text-sm font-black text-gray-900 focus:outline-none focus:border-teal-400"
+                              style={{ borderColor: '#e5e7eb' }} min={1} />
+                            <button onClick={() => setCantidadTalle(talle, sel.cantidad + 1)}
+                              className="w-7 h-7 rounded-lg border border-gray-200 flex items-center justify-center hover:border-teal-300 transition-all active:scale-90 bg-white">
+                              <Plus size={12} className="text-gray-500" />
+                            </button>
+                            <span className="text-[10px] text-gray-400 ml-1">uds</span>
+                          </div>
+                          <button onClick={() => setTallesSeleccionados(prev => { const n = { ...prev }; delete n[talle]; return n })}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-50 transition-colors">
+                            <X size={14} className="text-gray-400 hover:text-red-500" />
+                          </button>
+                        </div>
+                        {/* Precios por talle */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1">
+                            <p className="text-[10px] text-gray-400 mb-0.5">Costo</p>
+                            <input type="number" value={sel.precioCosto}
+                              onChange={e => setPrecioTalle(talle, 'precioCosto', e.target.value)}
+                              placeholder="0" className="w-full h-7 rounded-lg border text-xs text-center font-semibold text-gray-800 focus:outline-none focus:border-teal-400"
+                              style={{ borderColor: '#e5e7eb' }} />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-[10px] text-gray-400 mb-0.5">Venta</p>
+                            <input type="number" value={sel.precioVenta}
+                              onChange={e => setPrecioTalle(talle, 'precioVenta', e.target.value)}
+                              placeholder="0" className="w-full h-7 rounded-lg border text-xs text-center font-semibold text-gray-800 focus:outline-none focus:border-teal-400"
+                              style={{ borderColor: '#e5e7eb' }} />
+                          </div>
+                          {talleMargen !== null && (
+                            <div className="w-12 text-center">
+                              <p className="text-xs font-black leading-none" style={{ color: Number(talleMargen) >= 30 ? '#0d9488' : Number(talleMargen) >= 15 ? '#d97706' : '#ef4444' }}>{talleMargen}%</p>
+                              <p className="text-[8px] text-gray-400">margen</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div className="flex justify-between items-center pt-1">
+                    <span className="text-xs text-gray-400">{Object.keys(tallesSeleccionados).length} talle{Object.keys(tallesSeleccionados).length > 1 ? 's' : ''}</span>
+                    <span className="text-sm font-black" style={{ color: '#0d9488', fontFamily: 'var(--font-display)' }}>
+                      Total: {Object.values(tallesSeleccionados).reduce((s, sel) => s + sel.cantidad, 0)} uds
+                    </span>
+                  </div>
                 </div>
-                <p className="text-[10px] text-gray-400 mt-1">Generado automáticamente · Podés editarlo o borrarlo</p>
-              </div>
-              <button onClick={guardar} disabled={loading}
-                className="w-full py-4 rounded-2xl font-black text-base text-white transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 20px rgba(78,195,189,0.4)', fontFamily: 'var(--font-display)' }}>
-                {loading ? 'Guardando...' : <><CheckCircle2 size={20} /> Guardar {cantidad} unidad{cantidad !== 1 ? 'es' : ''}</>}
-              </button>
+              )}
+
+              {/* Botón guardar */}
+              {Object.keys(tallesSeleccionados).length > 0 && (
+                <button onClick={guardar} disabled={loading}
+                  className="w-full py-4 rounded-2xl font-black text-base text-white transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 20px rgba(78,195,189,0.4)', fontFamily: 'var(--font-display)' }}>
+                  {loading ? 'Guardando...' : (
+                    <>
+                      <CheckCircle2 size={20} />
+                      Guardar {Object.values(tallesSeleccionados).reduce((s, sel) => s + sel.cantidad, 0)} unidad{Object.values(tallesSeleccionados).reduce((s, sel) => s + sel.cantidad, 0) !== 1 ? 'es' : ''} en {Object.keys(tallesSeleccionados).length} talle{Object.keys(tallesSeleccionados).length > 1 ? 's' : ''}
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -835,20 +1347,50 @@ export default function NuevoProductoPage() {
               </div>
               <div className="rounded-2xl p-4 text-left space-y-2" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
                 <div className="flex justify-between"><span className="text-xs text-gray-500">Producto</span><span className="text-sm font-bold text-gray-800">{ultimoGuardado.nombre}</span></div>
-                <div className="flex justify-between"><span className="text-xs text-gray-500">Talle</span><span className="text-xs font-semibold text-gray-700">{ultimoGuardado.talle}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-gray-500">Talles</span><span className="text-xs font-semibold text-gray-700">{ultimoGuardado.talle}</span></div>
                 <div className="flex justify-between"><span className="text-xs text-gray-500">Unidades</span><span className="text-sm font-black" style={{ color: '#4EC3BD', fontFamily: 'var(--font-display)' }}>+{ultimoGuardado.cantidad}</span></div>
-                {barcode && <div className="flex justify-between"><span className="text-xs text-gray-500">Código</span><span className="text-xs font-mono font-semibold text-gray-600">{barcode}</span></div>}
               </div>
+
+              {/* Lista acumulada de la sesión */}
+              {productosCargados.length > 1 && (
+                <details className="text-left">
+                  <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 flex items-center gap-1.5">
+                    <Tag size={12} /> Sesión completa ({productosCargados.length} productos, {productosCargados.reduce((s, p) => s + p.talles.reduce((ss, t) => ss + t.cantidad, 0), 0)} uds)
+                  </summary>
+                  <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
+                    {productosCargados.map((p, i) => {
+                      const uds = p.talles.reduce((s, t) => s + t.cantidad, 0)
+                      return (
+                        <div key={i} className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.1)' }}>
+                          <div>
+                            <p className="text-xs font-semibold text-gray-800">{p.nombre}</p>
+                            {p.marca && <p className="text-[10px] text-gray-400">{p.marca}</p>}
+                          </div>
+                          <span className="text-xs font-bold" style={{ color: '#0d9488' }}>{uds} uds</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </details>
+              )}
+
               <div className="space-y-2">
                 <button onClick={cargarOtroTalle} className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95" style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}>
-                  + Otro talle de {esProductoNuevo ? nombreNuevoProducto : producto?.nombre}
+                  + Más talles de {esProductoNuevo ? nombreNuevoProducto : producto?.nombre}
                 </button>
                 <button onClick={cargarOtroProducto} className="w-full py-3 rounded-2xl font-semibold text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
                   Otro producto de {marca?.nombre}
                 </button>
                 <button onClick={empezarDeNuevo} className="w-full py-2.5 rounded-2xl font-medium text-sm text-gray-500 hover:text-gray-700 transition-colors">
-                  Cambiar de marca
+                  Cargar otro artículo
                 </button>
+                {productosCargados.length > 0 && (
+                  <button onClick={() => setModalFinAbierto(true)}
+                    className="w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
+                    style={{ background: 'rgba(78,195,189,0.1)', color: '#0d9488', border: '2px solid rgba(78,195,189,0.3)' }}>
+                    <Tag size={16} /> Terminé de cargar — Generar etiquetas
+                  </button>
+                )}
                 <button onClick={() => router.push('/inventario')} className="w-full py-2.5 rounded-2xl font-medium text-sm flex items-center justify-center gap-2 text-gray-400 hover:text-gray-600 transition-colors">
                   <Package size={14} /> Ver inventario
                 </button>
@@ -858,6 +1400,136 @@ export default function NuevoProductoPage() {
         )}
 
       </div>
+
+      {/* ── MODAL ETIQUETAS FINAL ────────────────────────────────── */}
+      {modalFinAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setModalFinAbierto(false) }}
+        >
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl tk-slide-forward max-h-[90vh] flex flex-col">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Resumen de carga</h3>
+              <button onClick={() => setModalFinAbierto(false)} className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors">
+                <X size={14} className="text-gray-500" />
+              </button>
+            </div>
+
+            <div className="px-5 pb-5 space-y-4 overflow-y-auto flex-1">
+              {/* Tabla resumen */}
+              <div className="space-y-2">
+                {productosCargados.map((p, i) => (
+                  <div key={i} className="rounded-xl p-3 space-y-1" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.15)' }}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-gray-800">{p.nombre}</p>
+                      {p.marca && <span className="text-[10px] text-gray-400">{p.marca}</span>}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {p.talles.map((t, j) => (
+                        <span key={j} className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(78,195,189,0.1)', color: '#0d9488' }}>
+                          {t.talle} x{t.cantidad}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Totales */}
+              <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-gray-50 border border-gray-100">
+                <span className="text-xs text-gray-500">{productosCargados.length} producto{productosCargados.length > 1 ? 's' : ''}</span>
+                <span className="text-sm font-black" style={{ color: '#0d9488', fontFamily: 'var(--font-display)' }}>
+                  {productosCargados.reduce((s, p) => s + p.talles.reduce((ss, t) => ss + t.cantidad, 0), 0)} etiquetas
+                </span>
+              </div>
+
+              {/* WhatsApp input */}
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-gray-50">
+                <Phone size={14} className="text-gray-400 flex-shrink-0" />
+                <input
+                  value={telefonoWA}
+                  onChange={e => { setTelefonoWA(e.target.value); setWhatsAppTel(e.target.value) }}
+                  placeholder="Nro WhatsApp etiquetas"
+                  className="flex-1 bg-transparent text-sm outline-none text-gray-700 placeholder:text-gray-400"
+                />
+              </div>
+
+              {/* Botones */}
+              <div className="space-y-2">
+                <button
+                  onClick={async () => {
+                    setGenerandoPDF(true)
+                    try {
+                      const items: EtiquetaData[] = productosCargados.flatMap(p =>
+                        p.talles.flatMap(t =>
+                          Array(t.cantidad).fill(null).map(() => ({
+                            nombre: p.nombre,
+                            marca: p.marca,
+                            talle: t.talle,
+                            codigoBarras: t.codigoBarras,
+                            precioLista: t.precioVenta,
+                            precioEfectivo: Math.round(t.precioVenta * 0.8),
+                          }))
+                        )
+                      )
+                      await generarPDFEtiquetas(items)
+                      toast.success('PDF descargado')
+                    } catch (err) {
+                      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+                    } finally {
+                      setGenerandoPDF(false)
+                    }
+                  }}
+                  disabled={generandoPDF}
+                  className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
+                >
+                  <FileDown size={16} /> {generandoPDF ? 'Generando...' : 'Generar PDF'}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!telefonoWA.trim()) { toast.error('Ingresá el número de WhatsApp'); return }
+                    setWhatsAppTel(telefonoWA.trim())
+                    setGenerandoPDF(true)
+                    try {
+                      const items: EtiquetaData[] = productosCargados.flatMap(p =>
+                        p.talles.flatMap(t =>
+                          Array(t.cantidad).fill(null).map(() => ({
+                            nombre: p.nombre,
+                            marca: p.marca,
+                            talle: t.talle,
+                            codigoBarras: t.codigoBarras,
+                            precioLista: t.precioVenta,
+                            precioEfectivo: Math.round(t.precioVenta * 0.8),
+                          }))
+                        )
+                      )
+                      await generarPDFEtiquetas(items)
+                      abrirWhatsAppEtiquetas(telefonoWA.trim())
+                    } catch (err) {
+                      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+                    } finally {
+                      setGenerandoPDF(false)
+                    }
+                  }}
+                  disabled={generandoPDF}
+                  className="w-full py-3 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                  style={{ background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '2px solid rgba(34,197,94,0.3)' }}
+                >
+                  <MessageCircle size={16} /> Enviar por WhatsApp
+                </button>
+                <button
+                  onClick={() => setModalFinAbierto(false)}
+                  className="w-full py-2.5 rounded-2xl font-medium text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL DE MARCA ──────────────────────────────────────── */}
       {modalMarcaAbierto && (

@@ -7,7 +7,7 @@ import { Producto, Categoria, Proveedor } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Package, AlertTriangle, Layers } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatPrecio } from '@/lib/utils'
 
@@ -21,6 +21,10 @@ export default function InventarioPage() {
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
   const [filtroProveedor, setFiltroProveedor] = useState('todos')
   const [filtroStock, setFiltroStock] = useState('todos')
+  const [filtroTemporada, setFiltroTemporada] = useState('todas')
+  const [filtroPrecioMin, setFiltroPrecioMin] = useState('')
+  const [filtroPrecioMax, setFiltroPrecioMax] = useState('')
+  const [orden, setOrden] = useState('nombre_asc')
   const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
 
   const cargarDatos = useCallback(async () => {
@@ -70,16 +74,34 @@ export default function InventarioPage() {
     const stockTotal = p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     const matchStock =
       filtroStock === 'todos' ? true :
+      filtroStock === 'con_stock' ? stockTotal > 0 :
       filtroStock === 'sin_stock' ? stockTotal === 0 :
       filtroStock === 'stock_bajo' ? stockTotal > 0 && p.variantes?.some(v => v.stock <= v.stock_minimo) :
+      filtroStock === 'exceso' ? stockTotal > 10 :
       true
+    const matchTemporada = filtroTemporada === 'todas' || p.temporada === filtroTemporada
+    const precioMin = filtroPrecioMin ? Number(filtroPrecioMin) : 0
+    const precioMax = filtroPrecioMax ? Number(filtroPrecioMax) : Infinity
+    const matchPrecio = p.precio_venta >= precioMin && p.precio_venta <= precioMax
     const matchAnomalia = !filtroAnomalia ? true :
       filtroAnomalia === 'sin_codigo' ? p.variantes?.some(v => !v.codigo_barras) :
       filtroAnomalia === 'cod_duplicado' ? p.variantes?.some(v => v.codigo_barras && codigosDuplicados.has(v.codigo_barras)) :
       filtroAnomalia === 'nombre_repetido' ? nombresRepetidos.has(p.nombre.trim().toLowerCase()) :
       filtroAnomalia === 'precio_invalido' ? (p.precio_venta === 0 || p.precio_venta < p.precio_costo) :
       true
-    return matchBusqueda && matchCategoria && matchProveedor && matchStock && matchAnomalia
+    return matchBusqueda && matchCategoria && matchProveedor && matchStock && matchTemporada && matchPrecio && matchAnomalia
+  }).sort((a, b) => {
+    const stockA = a.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
+    const stockB = b.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
+    switch (orden) {
+      case 'nombre_desc': return b.nombre.localeCompare(a.nombre)
+      case 'precio_asc': return a.precio_venta - b.precio_venta
+      case 'precio_desc': return b.precio_venta - a.precio_venta
+      case 'stock_asc': return stockA - stockB
+      case 'stock_desc': return stockB - stockA
+      case 'recientes': return b.creado_en.localeCompare(a.creado_en)
+      default: return a.nombre.localeCompare(b.nombre)
+    }
   })
 
   // Stats
@@ -87,6 +109,22 @@ export default function InventarioPage() {
   const sinStock = productos.filter(p => (p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0) === 0).length
   const stockBajo = productos.filter(p => p.variantes?.some(v => v.stock > 0 && v.stock <= v.stock_minimo)).length
   const totalAnomalias = Object.values(conteoAnomalias).reduce((a, b) => a + b, 0)
+
+  const hayFiltrosActivos = busqueda !== '' || filtroCategoria !== 'todas' || filtroProveedor !== 'todos' ||
+    filtroStock !== 'todos' || filtroTemporada !== 'todas' || filtroPrecioMin !== '' || filtroPrecioMax !== '' ||
+    orden !== 'nombre_asc' || filtroAnomalia !== null
+
+  function limpiarFiltros() {
+    setBusqueda('')
+    setFiltroCategoria('todas')
+    setFiltroProveedor('todos')
+    setFiltroStock('todos')
+    setFiltroTemporada('todas')
+    setFiltroPrecioMin('')
+    setFiltroPrecioMax('')
+    setOrden('nombre_asc')
+    setFiltroAnomalia(null)
+  }
 
   return (
     <div className="p-6 space-y-5">
@@ -150,44 +188,107 @@ export default function InventarioPage() {
       </div>
 
       {/* Filtros */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <Input
-            placeholder="Buscar por nombre o código de barras..."
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            className="pl-9"
-          />
+      <div className="space-y-2">
+        <div className="flex gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Input
+              placeholder="Buscar por nombre o código de barras..."
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Select value={filtroCategoria} onValueChange={v => setFiltroCategoria(v ?? 'todas')}>
+            <SelectTrigger className="w-44">
+              <span className="text-gray-400 text-xs mr-1">Cat:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas</SelectItem>
+              {categorias.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filtroProveedor} onValueChange={v => setFiltroProveedor(v ?? 'todos')}>
+            <SelectTrigger className="w-44">
+              <span className="text-gray-400 text-xs mr-1">Prov:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos</SelectItem>
+              {proveedores.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={filtroCategoria} onValueChange={v => setFiltroCategoria(v ?? 'todas')}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Categoría" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas las categorías</SelectItem>
-            {categorias.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filtroProveedor} onValueChange={v => setFiltroProveedor(v ?? 'todos')}>
-          <SelectTrigger className="w-44">
-            <SelectValue placeholder="Proveedor" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los proveedores</SelectItem>
-            {proveedores.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filtroStock} onValueChange={v => setFiltroStock(v ?? 'todos')}>
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="Stock" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todo el stock</SelectItem>
-            <SelectItem value="sin_stock">Sin stock</SelectItem>
-            <SelectItem value="stock_bajo">Stock bajo</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex gap-3 flex-wrap items-center">
+          <Select value={filtroStock} onValueChange={v => setFiltroStock(v ?? 'todos')}>
+            <SelectTrigger className="w-44">
+              <span className="text-gray-400 text-xs mr-1">Stock:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos</SelectItem>
+              <SelectItem value="con_stock">Con stock</SelectItem>
+              <SelectItem value="sin_stock">Sin stock</SelectItem>
+              <SelectItem value="stock_bajo">Stock bajo</SelectItem>
+              <SelectItem value="exceso">Alto (&gt;10)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filtroTemporada} onValueChange={v => setFiltroTemporada(v ?? 'todas')}>
+            <SelectTrigger className="w-44">
+              <span className="text-gray-400 text-xs mr-1">Temp:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas</SelectItem>
+              <SelectItem value="verano">Verano</SelectItem>
+              <SelectItem value="invierno">Invierno</SelectItem>
+              <SelectItem value="todo_el_año">Todo el año</SelectItem>
+              <SelectItem value="liquidacion">Liquidación</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-1">
+            <span className="text-gray-400 text-xs">$</span>
+            <Input
+              type="number"
+              placeholder="Mín"
+              value={filtroPrecioMin}
+              onChange={e => setFiltroPrecioMin(e.target.value)}
+              className="w-20"
+            />
+            <span className="text-gray-300">–</span>
+            <Input
+              type="number"
+              placeholder="Máx"
+              value={filtroPrecioMax}
+              onChange={e => setFiltroPrecioMax(e.target.value)}
+              className="w-20"
+            />
+          </div>
+          <Select value={orden} onValueChange={v => setOrden(v ?? 'nombre_asc')}>
+            <SelectTrigger className="w-48">
+              <ArrowUpDown size={14} className="mr-1 text-gray-400 shrink-0" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="nombre_asc">Nombre A-Z</SelectItem>
+              <SelectItem value="nombre_desc">Nombre Z-A</SelectItem>
+              <SelectItem value="precio_asc">Precio menor</SelectItem>
+              <SelectItem value="precio_desc">Precio mayor</SelectItem>
+              <SelectItem value="stock_asc">Menos stock</SelectItem>
+              <SelectItem value="stock_desc">Más stock</SelectItem>
+              <SelectItem value="recientes">Más recientes</SelectItem>
+            </SelectContent>
+          </Select>
+          {hayFiltrosActivos && (
+            <Button variant="ghost" size="sm" onClick={limpiarFiltros} className="text-gray-500 hover:text-gray-700 gap-1">
+              <X size={14} /> Limpiar
+            </Button>
+          )}
+        </div>
+        {hayFiltrosActivos && !loading && (
+          <p className="text-xs text-gray-500">{productosFiltrados.length} de {productos.length} productos</p>
+        )}
       </div>
 
       {/* Filtros de anomalías */}
