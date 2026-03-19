@@ -20,6 +20,123 @@ interface ConteoActual {
   variantes: number; ventas: number; gastos: number; cajas: number
 }
 
+interface ColMapeo {
+  columna: string    // nombre en el Excel
+  ejemplo: string    // valor de la primera fila
+  destino: string    // campo destino (o "— ignorado")
+  usado: boolean     // si se importa o no
+}
+
+// ── Funciones de mapeo por archivo ─────────────────────────────
+const MAPEO_PROVEEDORES: Record<string, string> = {
+  'Proveedor':        'nombre',
+  'Teléfono':         'telefono (si tiene)',
+  'Saldo Inicial':    'deuda_total = $0 (se ignora, arranca en cero)',
+  'Email':            '— ignorado',
+  'Nombre':           '— ignorado (se usa "Proveedor")',
+  'Apellido':         '— ignorado',
+  'Dirección':        '— ignorado',
+  'Localidad':        '— ignorado',
+  'Provincia':        '— ignorado',
+  'DNI':              '— ignorado',
+  'CUIT':             '— ignorado',
+  'Condición de IVA': '— ignorado',
+  'Razón Social':     '— ignorado',
+  'Observaciones':    '— ignorado',
+}
+
+const MAPEO_CLIENTES: Record<string, string> = {
+  'Cliente':          'nombre',
+  'Teléfono':         'telefono',
+  'Teléfono 2':       'telefono (si el principal está vacío)',
+  'Saldo Inicial':    'deuda_total = $0 (se actualiza en Paso 4)',
+  'Nombre':           '— ignorado (se usa "Cliente")',
+  'Apellido':         '— ignorado',
+  'Email':            '— ignorado',
+  'Dirección':        '— ignorado',
+  'Localidad':        '— ignorado',
+  'Provincia':        '— ignorado',
+  'DNI':              '— ignorado',
+  'Observaciones':    '— ignorado',
+}
+
+const MAPEO_PRODUCTOS: Record<string, string> = {
+  'Nombre':              'producto → nombre  ✦  variante → nombre',
+  'Tipo de Producto':    'producto → categoría',
+  'Proveedor':           'producto → proveedor',
+  'Código':              'variante → código de barras',
+  'Stock':               'variante → stock',
+  'Costo':               'producto → precio_costo  ✦  variante → precio_costo',
+  'Precio de Venta':     'producto → precio_venta  ✦  variante → precio_venta',
+  'Activo':              'producto → activo',
+  'Descripción':         '— ignorado',
+  'IVA Compras':         '— ignorado',
+  'IVA Ventas':          '— ignorado',
+  'Imagen':              '— ignorado',
+  'Mostrar en Ventas':   '— ignorado',
+  'Mostrar en Compras':  '— ignorado',
+  'Id':                  '— ignorado (se genera nuevo ID)',
+}
+
+const MAPEO_DEUDAS: Record<string, string> = {
+  'Cliente':           'busca el cliente por nombre',
+  'A Cobrar':          'clientes → deuda_total (último saldo del cliente)',
+  'Emisión':           '— solo para ordenar, no se importa',
+  'Operación':         '— ignorado',
+  'Total Venta':       '— ignorado',
+  'Cobrado':           '— ignorado',
+  'N° de Comprobante': '— ignorado',
+  'Medio de Cobro':    '— ignorado',
+  'Descripción':       '— ignorado',
+  'Categoría':         '— ignorado',
+}
+
+function generarMapeo(
+  row: Record<string, unknown>,
+  mapaConocido: Record<string, string>
+): ColMapeo[] {
+  const columnas = Object.keys(row)
+  return columnas.map(col => {
+    const destino = mapaConocido[col] ?? '— ignorado'
+    const usado = !destino.startsWith('—')
+    const ejemplo = String(row[col] ?? '').trim().slice(0, 40) || '(vacío)'
+    return { columna: col, ejemplo, destino, usado }
+  })
+}
+
+// ── Componente tabla de mapeo ──────────────────────────────────
+function TablaMapeo({ mapeo }: { mapeo: ColMapeo[] }) {
+  return (
+    <div className="rounded-xl overflow-hidden border border-gray-100">
+      <table className="w-full text-xs">
+        <thead>
+          <tr style={{ background: '#f8fdfc' }}>
+            <th className="text-left px-3 py-2 font-semibold text-gray-500 w-1/3">Columna en archivo</th>
+            <th className="text-left px-3 py-2 font-semibold text-gray-500 w-1/4">Ejemplo</th>
+            <th className="text-left px-3 py-2 font-semibold text-gray-500">Va a parar a...</th>
+          </tr>
+        </thead>
+        <tbody>
+          {mapeo.map((col, i) => (
+            <tr key={i} className="border-t border-gray-50"
+              style={{ background: col.usado ? 'white' : '#fafafa' }}>
+              <td className="px-3 py-2 font-semibold" style={{ color: col.usado ? '#0d9488' : '#9ca3af' }}>
+                {col.columna}
+              </td>
+              <td className="px-3 py-2 text-gray-500 font-mono truncate max-w-0" style={{ maxWidth: '8rem' }}>
+                {col.ejemplo}
+              </td>
+              <td className="px-3 py-2" style={{ color: col.usado ? '#374151' : '#d1d5db' }}>
+                {col.destino}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ── Helpers XLSX ───────────────────────────────────────────────
 function leerExcel(file: File): Promise<Record<string, unknown>[]> {
   return new Promise((resolve, reject) => {
@@ -116,6 +233,12 @@ export default function MigracionPage() {
   const [clientes, setClientes] = useState<FilaCliente[] | null>(null)
   const [productos, setProductos] = useState<FilaProducto[] | null>(null)
   const [deudas, setDeudas] = useState<FilaDeuda[] | null>(null)
+
+  // Primera fila de cada archivo (para mostrar el mapeo de columnas)
+  const [mapeoProveedores, setMapeoProveedores] = useState<ColMapeo[] | null>(null)
+  const [mapeoClientes, setMapeoClientes] = useState<ColMapeo[] | null>(null)
+  const [mapeoProductos, setMapeoProductos] = useState<ColMapeo[] | null>(null)
+  const [mapeoDeudas, setMapeoDeudas] = useState<ColMapeo[] | null>(null)
 
   const [cargando, setCargando] = useState<string | null>(null)
   const [resultados, setResultados] = useState<Record<string, string>>({})
@@ -393,13 +516,15 @@ export default function MigracionPage() {
           descripcion='Subí "Listado de Proveedores.xlsx" de Contagram'
           archivo="Listado de Proveedores*.xlsx"
           datos={proveedores}
+          mapeo={mapeoProveedores}
           resultado={resultados.proveedores}
           cargando={cargando === 'proveedores'}
           onFile={async (file) => {
             const rows = await leerExcel(file)
             setProveedores(parsearProveedores(rows))
+            if (rows[0]) setMapeoProveedores(generarMapeo(rows[0], MAPEO_PROVEEDORES))
           }}
-          onClear={() => setProveedores(null)}
+          onClear={() => { setProveedores(null); setMapeoProveedores(null) }}
           onImportar={importarProveedores}
           resumen={proveedores ? `${proveedores.length} proveedores listos para importar` : null}
           preview={proveedores?.slice(0, 5).map(p => p.nombre)}
@@ -413,13 +538,15 @@ export default function MigracionPage() {
           descripcion='Subí "Listado de Clientes.xlsx" de Contagram'
           archivo="Listado de Clientes*.xlsx"
           datos={clientes}
+          mapeo={mapeoClientes}
           resultado={resultados.clientes}
           cargando={cargando === 'clientes'}
           onFile={async (file) => {
             const rows = await leerExcel(file)
             setClientes(parsearClientes(rows))
+            if (rows[0]) setMapeoClientes(generarMapeo(rows[0], MAPEO_CLIENTES))
           }}
-          onClear={() => setClientes(null)}
+          onClear={() => { setClientes(null); setMapeoClientes(null) }}
           onImportar={importarClientes}
           resumen={clientes ? `${clientes.length} clientes listos · deuda = $0 (se actualiza en Paso 4)` : null}
           preview={clientes?.slice(0, 5).map(c => c.nombre)}
@@ -433,13 +560,15 @@ export default function MigracionPage() {
           descripcion='Subí "Listado de Productos.xlsx" de Contagram'
           archivo="Listado de Productos*.xlsx"
           datos={productos}
+          mapeo={mapeoProductos}
           resultado={resultados.productos}
           cargando={cargando === 'productos'}
           onFile={async (file) => {
             const rows = await leerExcel(file)
             setProductos(parsearProductos(rows))
+            if (rows[0]) setMapeoProductos(generarMapeo(rows[0], MAPEO_PRODUCTOS))
           }}
-          onClear={() => setProductos(null)}
+          onClear={() => { setProductos(null); setMapeoProductos(null) }}
           onImportar={importarProductos}
           resumen={productos ? (() => {
             const sinCosto = productos.filter(p => !p.costo).length
@@ -461,13 +590,15 @@ export default function MigracionPage() {
           descripcion='Subí "Informe Movimientos de Clientes.xlsx" de Contagram'
           archivo="Informe*Clientes*.xlsx"
           datos={deudas}
+          mapeo={mapeoDeudas}
           resultado={resultados.deudas}
           cargando={cargando === 'deudas'}
           onFile={async (file) => {
             const rows = await leerExcel(file)
             setDeudas(parsearMovimientosClientes(rows))
+            if (rows[0]) setMapeoDeudas(generarMapeo(rows[0], MAPEO_DEUDAS))
           }}
-          onClear={() => setDeudas(null)}
+          onClear={() => { setDeudas(null); setMapeoDeudas(null) }}
           onImportar={importarDeudas}
           resumen={deudas ? `${deudas.length} clientes con deuda detectada` : null}
           preview={deudas?.slice(0, 5).map(d => `${d.cliente} — $${d.deuda.toLocaleString('es-AR')}`)}
@@ -480,7 +611,7 @@ export default function MigracionPage() {
 
 // ── Componente reutilizable de paso ────────────────────────────
 function PasoMigracion({
-  numero, titulo, icono, descripcion, datos, resultado, cargando,
+  numero, titulo, icono, descripcion, datos, mapeo, resultado, cargando,
   onFile, onClear, onImportar, resumen, preview, advertencia,
 }: {
   numero: number
@@ -489,6 +620,7 @@ function PasoMigracion({
   descripcion: string
   archivo: string
   datos: unknown[] | null
+  mapeo?: ColMapeo[] | null
   resultado?: string
   cargando: boolean
   onFile: (file: File) => Promise<void>
@@ -559,6 +691,18 @@ function PasoMigracion({
                     <X size={12} className="text-gray-400 hover:text-red-500" />
                   </button>
                 </div>
+
+                {/* Tabla de mapeo de columnas */}
+                {mapeo && (
+                  <details className="text-left">
+                    <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 py-1">
+                      Ver mapeo de columnas →
+                    </summary>
+                    <div className="mt-2">
+                      <TablaMapeo mapeo={mapeo} />
+                    </div>
+                  </details>
+                )}
 
                 {advertencia && (
                   <div className="flex items-start gap-2 px-3 py-2 rounded-xl"
