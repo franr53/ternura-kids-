@@ -307,7 +307,7 @@ export default function NuevoProductoPage() {
       nombre_nuevo: 'tipo',
       precio: 'nombre_nuevo',
       precio_existente: 'producto',
-      talle: esProductoNuevo ? 'precio' : 'precio_existente',
+      talle: esProductoNuevo ? 'precio' : 'producto',
       listo: 'talle',
     }
     const p = prev[step]
@@ -457,7 +457,7 @@ export default function NuevoProductoPage() {
     setPrecioVentaEditado(false)
     setTallesSeleccionados({}); setBarcode('')
     setBusquedaProducto('')
-    irA('precio_existente', 'forward')
+    irA('talle', 'forward')
   }
 
   function seleccionarNuevoProducto() {
