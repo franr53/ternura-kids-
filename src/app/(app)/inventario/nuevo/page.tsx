@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Categoria, Proveedor } from '@/types'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import { ArrowLeft, Plus, Minus, CheckCircle2, Package, ChevronRight, Search, X, RefreshCw, Sparkles, FileDown, MessageCircle, Phone, Tag } from 'lucide-react'
+import { ArrowLeft, Plus, Minus, CheckCircle2, Package, ChevronRight, Search, X, RefreshCw, Sparkles, FileDown, MessageCircle, Phone, Tag, Trash2, ChevronUp, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 import {
@@ -124,6 +124,30 @@ interface ProductoExistente {
   variantes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number | null; precio_costo: number | null }[]
 }
 
+// ── Tipos de lote ──────────────────────────────────────────
+interface ItemLote {
+  id: string
+  productoId: string | null
+  esProductoNuevo: boolean
+  nombreProducto: string
+  marcaNombre: string
+  marcaId: string | null
+  categoriaId: string | null
+  temporada: string | null
+  precioCosto: number
+  precioVenta: number
+  quiereCambiarPrecio: boolean
+  talles: Record<string, {
+    cantidad: number
+    varianteId: string | null
+    esNueva: boolean
+    barcode: string
+    precioCosto: string
+    precioVenta: string
+  }>
+  variantesExistentes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number | null; precio_costo: number | null }[]
+}
+
 // ── Utilidades ─────────────────────────────────────────────────
 function generarPrefijo(nombre: string): string {
   return nombre.toUpperCase().split(/\s+/).map(w => w[0]).filter(Boolean).join('').slice(0, 4)
@@ -228,6 +252,12 @@ export default function NuevoProductoPage() {
   const [modalFinAbierto, setModalFinAbierto] = useState(false)
   const [telefonoWA, setTelefonoWA] = useState('')
   const [generandoPDF, setGenerandoPDF] = useState(false)
+
+  // Lote batch
+  const [loteActual, setLoteActual] = useState<ItemLote[]>([])
+  const [loadingConfirmar, setLoadingConfirmar] = useState(false)
+  const [confirmProgress, setConfirmProgress] = useState<{ current: number; total: number } | null>(null)
+  const [panelLoteExpandido, setPanelLoteExpandido] = useState(false)
 
   // Cargar teléfono de localStorage en mount
   useEffect(() => { setTelefonoWA(getWhatsAppTel()) }, [])
@@ -519,85 +549,131 @@ export default function NuevoProductoPage() {
     irA('precio', 'forward')
   }
 
-  // ── Guardar ────────────────────────────────────────────────────
-  async function guardar() {
+  // ── Agregar al lote (sin DB) ────────────────────────────────
+  function agregarAlLote() {
     const entries = Object.entries(tallesSeleccionados)
     if (entries.length === 0) return
-    setLoading(true)
-    try {
-      // Actualizar precio si el usuario lo pidió en producto existente
-      if (quiereCambiarPrecio && !esProductoNuevo && producto) {
-        const { error: errPrecio } = await supabase.from('productos').update({
-          precio_costo: parseFloat(precioCosto) || producto.precio_costo,
-          precio_venta: parseFloat(precioVenta) || producto.precio_venta,
-        }).eq('id', producto.id)
-        if (errPrecio) throw new Error(errPrecio.message)
-      }
+    const nombreFinal = esProductoNuevo ? nombreNuevoProducto.trim() : (producto?.nombre || '')
+    const totalUnidades = entries.reduce((s, [, sel]) => s + sel.cantidad, 0)
+    const item: ItemLote = {
+      id: crypto.randomUUID(),
+      productoId: producto?.id || null,
+      esProductoNuevo,
+      nombreProducto: nombreFinal,
+      marcaNombre: marca?.nombre || '',
+      marcaId: marca?.id || null,
+      categoriaId: tipo?.id || null,
+      temporada: temporada || null,
+      precioCosto: parseFloat(precioCosto) || 0,
+      precioVenta: parseFloat(precioVenta) || 0,
+      quiereCambiarPrecio,
+      talles: Object.fromEntries(entries.map(([t, sel]) => [t, { ...sel }])),
+      variantesExistentes: tallesExistentes,
+    }
+    setLoteActual(prev => [...prev, item])
+    toast.success(`${nombreFinal} agregado al lote (${totalUnidades} uds)`)
+    empezarDeNuevo()
+  }
 
-      let productoId = producto?.id || null
+  // ── Confirmar lote (guardar todo en DB) ─────────────────────
+  async function confirmarLote() {
+    if (loteActual.length === 0) return
+    setLoadingConfirmar(true)
+    setConfirmProgress({ current: 0, total: loteActual.length })
+    type ProductoCargadoLocal = { nombre: string; marca: string; talles: { talle: string; cantidad: number; codigoBarras?: string; precioVenta: number }[] }
+    const cargados: ProductoCargadoLocal[] = []
+    const fallidos: ItemLote[] = []
 
-      if (esProductoNuevo) {
-        const { data: prod, error: errProd } = await supabase.from('productos').insert({
-          nombre: nombreNuevoProducto.trim(),
-          categoria_id: tipo?.id || null,
-          proveedor_id: marca?.id || null,
-          precio_costo: parseFloat(precioCosto) || 0,
-          precio_venta: parseFloat(precioVenta) || 0,
-          temporada: temporada || null,
-        }).select().single()
-        if (errProd || !prod) throw new Error(errProd?.message)
-        productoId = prod.id
-      }
+    for (let i = 0; i < loteActual.length; i++) {
+      const item = loteActual[i]
+      setConfirmProgress({ current: i + 1, total: loteActual.length })
+      try {
+        if (item.quiereCambiarPrecio && !item.esProductoNuevo && item.productoId) {
+          const { error: errPrecio } = await supabase.from('productos').update({
+            precio_costo: item.precioCosto,
+            precio_venta: item.precioVenta,
+          }).eq('id', item.productoId)
+          if (errPrecio) throw new Error(errPrecio.message)
+        }
 
-      for (const [talle, sel] of entries) {
-        const talleCosto = parseFloat(sel.precioCosto) || null
-        const talleVenta = parseFloat(sel.precioVenta) || null
+        let productoId = item.productoId
+        if (item.esProductoNuevo) {
+          const { data: prod, error: errProd } = await supabase.from('productos').insert({
+            nombre: item.nombreProducto,
+            categoria_id: item.categoriaId,
+            proveedor_id: item.marcaId,
+            precio_costo: item.precioCosto,
+            precio_venta: item.precioVenta,
+            temporada: item.temporada,
+          }).select().single()
+          if (errProd || !prod) throw new Error(errProd?.message || 'Error creando producto')
+          productoId = prod.id
+        }
 
-        if (esProductoNuevo || sel.esNueva || !sel.varianteId) {
-          const { error } = await supabase.from('variantes').insert({
-            producto_id: productoId!, talle, codigo_barras: sel.barcode || null, stock: sel.cantidad, stock_minimo: 2,
-            precio_costo: talleCosto, precio_venta: talleVenta,
-          })
-          if (error) throw new Error(error.message)
-        } else {
-          const { error } = await supabase.rpc('incrementar_stock', { p_variante_id: sel.varianteId, p_cantidad: sel.cantidad })
-          if (error) throw new Error(error.message)
-          // Actualizar precio y barcode de la variante existente
-          const updateData: Record<string, unknown> = {}
-          if (talleCosto != null) updateData.precio_costo = talleCosto
-          if (talleVenta != null) updateData.precio_venta = talleVenta
-          const varExist = tallesExistentes.find(v => v.id === sel.varianteId)
-          if (sel.barcode && !varExist?.codigo_barras) updateData.codigo_barras = sel.barcode
-          if (Object.keys(updateData).length > 0) {
-            await supabase.from('variantes').update(updateData).eq('id', sel.varianteId)
+        const entries = Object.entries(item.talles)
+        for (const [talle, sel] of entries) {
+          const talleCosto = parseFloat(sel.precioCosto) || null
+          const talleVenta = parseFloat(sel.precioVenta) || null
+          if (item.esProductoNuevo || sel.esNueva || !sel.varianteId) {
+            const { error } = await supabase.from('variantes').insert({
+              producto_id: productoId!, talle, codigo_barras: sel.barcode || null, stock: sel.cantidad, stock_minimo: 2,
+              precio_costo: talleCosto, precio_venta: talleVenta,
+            })
+            if (error) throw new Error(error.message)
+          } else {
+            const { error } = await supabase.rpc('incrementar_stock', { p_variante_id: sel.varianteId, p_cantidad: sel.cantidad })
+            if (error) throw new Error(error.message)
+            const updateData: Record<string, unknown> = {}
+            if (talleCosto != null) updateData.precio_costo = talleCosto
+            if (talleVenta != null) updateData.precio_venta = talleVenta
+            const varExist = item.variantesExistentes.find(v => v.id === sel.varianteId)
+            if (sel.barcode && !varExist?.codigo_barras) updateData.codigo_barras = sel.barcode
+            if (Object.keys(updateData).length > 0) {
+              await supabase.from('variantes').update(updateData).eq('id', sel.varianteId)
+            }
           }
         }
+        cargados.push({
+          nombre: item.nombreProducto,
+          marca: item.marcaNombre,
+          talles: entries.map(([t, sel]) => ({
+            talle: t,
+            cantidad: sel.cantidad,
+            codigoBarras: sel.barcode || undefined,
+            precioVenta: parseFloat(sel.precioVenta) || item.precioVenta,
+          })),
+        })
+      } catch (e: unknown) {
+        toast.error(`Error en "${item.nombreProducto}": ${e instanceof Error ? e.message : String(e)}`)
+        fallidos.push(item)
       }
-
-      const nombreFinal = esProductoNuevo ? nombreNuevoProducto : (producto?.nombre || '')
-      const marcaFinal = marca?.nombre || ''
-      const totalUnidades = entries.reduce((s, [, sel]) => s + sel.cantidad, 0)
-      const tallesResumen = entries.map(([t, sel]) => `${t} (×${sel.cantidad})`).join(', ')
-      setUltimoGuardado({ nombre: nombreFinal, talle: tallesResumen, cantidad: totalUnidades })
-      setArticulosCargados(n => n + entries.length)
-      // Acumular para etiquetas
-      setProductosCargados(prev => [...prev, {
-        nombre: nombreFinal,
-        marca: marcaFinal,
-        talles: entries.map(([t, sel]) => ({
-          talle: t,
-          cantidad: sel.cantidad,
-          codigoBarras: sel.barcode || undefined,
-          precioVenta: parseFloat(sel.precioVenta) || parseFloat(precioVenta) || 0,
-        })),
-      }])
-      await cargarTodo()
-      irA('listo', 'forward')
-    } catch (e: unknown) {
-      toast.error(`Error al guardar: ${e instanceof Error ? e.message : String(e)}`)
-    } finally {
-      setLoading(false)
     }
+
+    const totalUds = cargados.reduce((s, p) => s + p.talles.reduce((ss, t) => ss + t.cantidad, 0), 0)
+    setArticulosCargados(n => n + cargados.reduce((s, p) => s + p.talles.length, 0))
+    setProductosCargados(prev => [...prev, ...cargados])
+    setUltimoGuardado({
+      nombre: cargados.length === 1 ? cargados[0].nombre : `${cargados.length} artículos`,
+      talle: cargados.length === 1 ? Object.keys(loteActual[0]?.talles || {}).join(', ') : '',
+      cantidad: totalUds,
+    })
+
+    if (fallidos.length > 0) {
+      setLoteActual(fallidos)
+      toast.warning(`${fallidos.length} artículo${fallidos.length > 1 ? 's' : ''} con error — podés reintentar`)
+    } else {
+      setLoteActual([])
+      if (cargados.length > 0) toast.success(`${cargados.length} artículo${cargados.length > 1 ? 's' : ''} guardados correctamente`)
+    }
+    await cargarTodo()
+    setLoadingConfirmar(false)
+    setConfirmProgress(null)
+    irA('listo', 'forward')
+  }
+
+  // ── Eliminar del lote ──────────────────────────────────────
+  function eliminarDelLote(id: string) {
+    setLoteActual(prev => prev.filter(item => item.id !== id))
   }
 
   // ── Reset helpers ──────────────────────────────────────────────
@@ -686,10 +762,72 @@ export default function NuevoProductoPage() {
     )
   }
 
+  // ── Panel de lote ──────────────────────────────────────────────
+  function renderPanelLote() {
+    const totalUds = loteActual.reduce((s, item) => s + Object.values(item.talles).reduce((ss, sel) => ss + sel.cantidad, 0), 0)
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-black text-gray-900 text-sm" style={{ fontFamily: 'var(--font-display)' }}>Carga actual</h3>
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(78,195,189,0.1)', color: '#0d9488' }}>
+            {loteActual.length} art · {totalUds} uds
+          </span>
+        </div>
+        <div className="space-y-2 max-h-80 overflow-y-auto">
+          {loteActual.map(item => (
+            <div key={item.id} className="rounded-xl p-3 space-y-1.5" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-gray-800 truncate">{item.nombreProducto}</p>
+                  {item.marcaNombre && <p className="text-[10px] text-gray-400">{item.marcaNombre}</p>}
+                </div>
+                <button onClick={() => eliminarDelLote(item.id)} className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 flex-shrink-0 transition-colors">
+                  <Trash2 size={12} className="text-gray-400 hover:text-red-500" />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(item.talles).map(([t, sel]) => (
+                  <span key={t} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(78,195,189,0.08)', color: '#0d9488' }}>
+                    {t} ×{sel.cantidad}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={confirmarLote}
+          disabled={loadingConfirmar}
+          className="w-full py-3 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 disabled:opacity-75 transition-all"
+          style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)', fontFamily: 'var(--font-display)' }}
+        >
+          {loadingConfirmar ? (
+            <>
+              <Loader2 size={15} className="animate-spin" />
+              {confirmProgress ? `Guardando ${confirmProgress.current}/${confirmProgress.total}...` : 'Guardando...'}
+            </>
+          ) : (
+            <>
+              <CheckCircle2 size={15} />
+              Confirmar todo ({totalUds} uds)
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => { if (window.confirm('¿Descartar todos los artículos del lote?')) setLoteActual([]) }}
+          className="w-full py-1.5 rounded-xl text-xs font-semibold text-gray-400 hover:text-red-500 transition-colors"
+        >
+          Descartar lote
+        </button>
+      </div>
+    )
+  }
+
   // ─────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-full bg-gray-50 pb-20">
-      <div className="max-w-lg mx-auto px-4 pt-6 space-y-5 overflow-x-hidden">
+    <div className="min-h-full bg-gray-50 pb-24">
+      <div className="max-w-5xl mx-auto px-4 pt-6 lg:flex lg:gap-6 lg:items-start">
+        <div className="flex-1 lg:max-w-lg space-y-5 overflow-x-hidden">
 
         {/* Header */}
         <div className="flex items-center gap-3">
@@ -1317,17 +1455,13 @@ export default function NuevoProductoPage() {
                 </div>
               )}
 
-              {/* Botón guardar */}
+              {/* Botón agregar al lote */}
               {Object.keys(tallesSeleccionados).length > 0 && (
-                <button onClick={guardar} disabled={loading}
-                  className="w-full py-4 rounded-2xl font-black text-base text-white transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                <button onClick={agregarAlLote}
+                  className="w-full py-4 rounded-2xl font-black text-base text-white transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
                   style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 20px rgba(78,195,189,0.4)', fontFamily: 'var(--font-display)' }}>
-                  {loading ? 'Guardando...' : (
-                    <>
-                      <CheckCircle2 size={20} />
-                      Guardar {Object.values(tallesSeleccionados).reduce((s, sel) => s + sel.cantidad, 0)} unidad{Object.values(tallesSeleccionados).reduce((s, sel) => s + sel.cantidad, 0) !== 1 ? 'es' : ''} en {Object.keys(tallesSeleccionados).length} talle{Object.keys(tallesSeleccionados).length > 1 ? 's' : ''}
-                    </>
-                  )}
+                  <Plus size={20} />
+                  Agregar al lote — {Object.values(tallesSeleccionados).reduce((s, sel) => s + sel.cantidad, 0)} uds en {Object.keys(tallesSeleccionados).length} talle{Object.keys(tallesSeleccionados).length > 1 ? 's' : ''}
                 </button>
               )}
             </div>
@@ -1343,19 +1477,21 @@ export default function NuevoProductoPage() {
               </div>
               <div>
                 <h2 className="text-2xl font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¡Guardado!</h2>
-                {articulosCargados > 1 && <p className="text-xs font-bold mt-1" style={{ color: '#4EC3BD' }}>{articulosCargados} artículos cargados esta sesión</p>}
+                <p className="text-xs font-bold mt-1" style={{ color: '#4EC3BD' }}>
+                  {productosCargados.length} artículo{productosCargados.length !== 1 ? 's' : ''} · {productosCargados.reduce((s, p) => s + p.talles.reduce((ss, t) => ss + t.cantidad, 0), 0)} unidades esta sesión
+                </p>
               </div>
               <div className="rounded-2xl p-4 text-left space-y-2" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
-                <div className="flex justify-between"><span className="text-xs text-gray-500">Producto</span><span className="text-sm font-bold text-gray-800">{ultimoGuardado.nombre}</span></div>
-                <div className="flex justify-between"><span className="text-xs text-gray-500">Talles</span><span className="text-xs font-semibold text-gray-700">{ultimoGuardado.talle}</span></div>
-                <div className="flex justify-between"><span className="text-xs text-gray-500">Unidades</span><span className="text-sm font-black" style={{ color: '#4EC3BD', fontFamily: 'var(--font-display)' }}>+{ultimoGuardado.cantidad}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-gray-500">{ultimoGuardado.nombre.includes('artículo') ? 'Lote' : 'Producto'}</span><span className="text-sm font-bold text-gray-800">{ultimoGuardado.nombre}</span></div>
+                {ultimoGuardado.talle && <div className="flex justify-between"><span className="text-xs text-gray-500">Talles</span><span className="text-xs font-semibold text-gray-700">{ultimoGuardado.talle}</span></div>}
+                <div className="flex justify-between"><span className="text-xs text-gray-500">Unidades guardadas</span><span className="text-sm font-black" style={{ color: '#4EC3BD', fontFamily: 'var(--font-display)' }}>+{ultimoGuardado.cantidad}</span></div>
               </div>
 
               {/* Lista acumulada de la sesión */}
-              {productosCargados.length > 1 && (
+              {productosCargados.length > 0 && (
                 <details className="text-left">
                   <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 flex items-center gap-1.5">
-                    <Tag size={12} /> Sesión completa ({productosCargados.length} productos, {productosCargados.reduce((s, p) => s + p.talles.reduce((ss, t) => ss + t.cantidad, 0), 0)} uds)
+                    <Tag size={12} /> Ver detalle ({productosCargados.length} productos, {productosCargados.reduce((s, p) => s + p.talles.reduce((ss, t) => ss + t.cantidad, 0), 0)} uds)
                   </summary>
                   <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
                     {productosCargados.map((p, i) => {
@@ -1375,20 +1511,16 @@ export default function NuevoProductoPage() {
               )}
 
               <div className="space-y-2">
-                <button onClick={cargarOtroTalle} className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95" style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}>
-                  + Más talles de {esProductoNuevo ? nombreNuevoProducto : producto?.nombre}
-                </button>
-                <button onClick={cargarOtroProducto} className="w-full py-3 rounded-2xl font-semibold text-sm border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors">
-                  Otro producto de {marca?.nombre}
-                </button>
-                <button onClick={empezarDeNuevo} className="w-full py-2.5 rounded-2xl font-medium text-sm text-gray-500 hover:text-gray-700 transition-colors">
-                  Cargar otro artículo
+                <button onClick={empezarDeNuevo}
+                  className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
+                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}>
+                  Cargar más artículos
                 </button>
                 {productosCargados.length > 0 && (
                   <button onClick={() => setModalFinAbierto(true)}
                     className="w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95"
                     style={{ background: 'rgba(78,195,189,0.1)', color: '#0d9488', border: '2px solid rgba(78,195,189,0.3)' }}>
-                    <Tag size={16} /> Terminé de cargar — Generar etiquetas
+                    <Tag size={16} /> Generar etiquetas
                   </button>
                 )}
                 <button onClick={() => router.push('/inventario')} className="w-full py-2.5 rounded-2xl font-medium text-sm flex items-center justify-center gap-2 text-gray-400 hover:text-gray-600 transition-colors">
@@ -1399,7 +1531,53 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
+        </div>
+
+        {/* Desktop sidebar panel */}
+        {loteActual.length > 0 && (
+          <div className="hidden lg:block w-72 flex-shrink-0 sticky top-6">
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+              {renderPanelLote()}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Mobile panel — barra fija sobre el nav */}
+      {loteActual.length > 0 && (
+        <div className="lg:hidden fixed bottom-16 left-0 right-0 z-40">
+          {panelLoteExpandido ? (
+            <div className="bg-white shadow-2xl rounded-t-3xl border-t border-gray-100 max-h-[70vh] overflow-y-auto">
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Lote de carga</span>
+                  <button onClick={() => setPanelLoteExpandido(false)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <ChevronUp size={14} className="text-gray-500 rotate-180" />
+                  </button>
+                </div>
+                {renderPanelLote()}
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setPanelLoteExpandido(true)}
+              className="w-full flex items-center justify-between px-5 py-3 text-white"
+              style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' }}
+            >
+              <div className="flex items-center gap-2">
+                <Package size={16} />
+                <span className="text-sm font-bold">
+                  {loteActual.length} artículo{loteActual.length > 1 ? 's' : ''} · {loteActual.reduce((s, item) => s + Object.values(item.talles).reduce((ss, sel) => ss + sel.cantidad, 0), 0)} uds
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold opacity-80">Confirmar</span>
+                <ChevronUp size={14} />
+              </div>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── MODAL ETIQUETAS FINAL ────────────────────────────────── */}
       {modalFinAbierto && (
