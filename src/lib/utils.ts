@@ -5,6 +5,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function formatNombreConTalle(nombre: string, talle: string): string {
+  return `${nombre} T${talle}`
+}
+
 export function formatPrecio(valor: number): string {
   return new Intl.NumberFormat('es-AR', {
     style: 'currency',

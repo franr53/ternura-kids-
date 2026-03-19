@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { Cliente, MetodoPago } from '@/types'
+import { formatPrecio } from '@/lib/utils'
 
 export interface ItemVenta {
   varianteId: string
@@ -14,6 +15,7 @@ export interface ItemVenta {
 export interface PagoVenta {
   metodo: MetodoPago
   monto: number
+  notas?: string
 }
 
 export interface ConfirmarVentaParams {
@@ -24,6 +26,8 @@ export interface ConfirmarVentaParams {
   descuento: number
   total: number
   cliente: Cliente | null
+  proveedorId?: string
+  montoProveedor?: number
 }
 
 export interface ResultadoVenta {
@@ -41,97 +45,95 @@ export async function confirmarVenta({
   descuento,
   total,
   cliente,
+  proveedorId,
+  montoProveedor,
 }: ConfirmarVentaParams): Promise<ResultadoVenta> {
 
-  // 1. Obtener caja abierta del día
-  const { data: caja } = await supabase
-    .from('cajas')
-    .select('id, total_efectivo, total_transferencia, total_debito, total_credito, total_fiado')
-    .eq('estado', 'abierta')
-    .eq('fecha', new Date().toISOString().split('T')[0])
-    .single()
+  // Asegurar enteros — los descuentos pueden producir decimales
+  const rSubtotal = Math.round(subtotal)
+  const rDescuento = Math.round(descuento)
+  const rTotal = Math.round(total)
 
-  // 2. Crear la venta
-  const { data: venta, error } = await supabase
-    .from('ventas')
-    .insert({
-      caja_id: caja?.id || null,
-      cliente_id: cliente?.id || null,
-      descuento,
-      subtotal,
-      total,
-      estado: 'completada',
-    })
-    .select('id')
-    .single()
+  const items = carrito.map(item => ({
+    variante_id: item.varianteId,
+    cantidad: item.cantidad,
+    precio_unitario: Math.round(item.precio),
+    descuento_item: Math.round(item.descuentoItem),
+    subtotal: Math.round(item.precio * (1 - item.descuentoItem / 100) * item.cantidad),
+  }))
 
-  if (error || !venta) {
-    return { ok: false, error: 'Error al registrar la venta' }
+  const pagosRpc = pagos.map(p => ({
+    metodo: p.metodo,
+    monto: Math.round(p.monto),
+    notas: p.notas ?? null,
+  }))
+
+  const fechaHoy = new Date().toISOString().split('T')[0]
+
+  const { data, error } = await supabase.rpc('procesar_venta', {
+    p_caja_fecha: fechaHoy,
+    p_subtotal: rSubtotal,
+    p_descuento: rDescuento,
+    p_total: rTotal,
+    p_items: items,
+    p_pagos: pagosRpc,
+    p_cliente_id: cliente?.id ?? null,
+    p_proveedor_id: proveedorId ?? null,
+    p_monto_proveedor: Math.round(montoProveedor ?? 0),
+  })
+
+  if (error || !data) {
+    return { ok: false, error: error?.message ?? 'Error al registrar la venta' }
   }
 
-  // 3. Insertar items y pagos en paralelo
-  await Promise.all([
-    supabase.from('venta_items').insert(
-      carrito.map(item => ({
-        venta_id: venta.id,
-        variante_id: item.varianteId,
-        cantidad: item.cantidad,
-        precio_unitario: item.precio,
-        descuento_item: item.descuentoItem,
-        subtotal: item.precio * (1 - item.descuentoItem / 100) * item.cantidad,
-      }))
-    ),
-    supabase.from('venta_pagos').insert(
-      pagos.map(p => ({ venta_id: venta.id, metodo: p.metodo, monto: p.monto }))
-    ),
-  ])
+  const ventaId: string = (data as { venta_id: string }).venta_id
 
-  // 4. Actualizar stock de forma atómica (sin race condition)
-  await Promise.all(
-    carrito.map(item =>
-      supabase.rpc('decrementar_stock', {
-        p_variante_id: item.varianteId,
-        p_cantidad: item.cantidad,
-      })
-    )
-  )
-
-  // 5. Registrar fiado si corresponde
-  const pagoFiado = pagos.find(p => p.metodo === 'fiado')
-  if (pagoFiado && cliente) {
-    await Promise.all([
-      supabase.from('fiado_movimientos').insert({
-        cliente_id: cliente.id,
-        venta_id: venta.id,
-        tipo: 'cargo',
-        monto: pagoFiado.monto,
-      }),
-      supabase.from('clientes').update({
-        deuda_total: (cliente.deuda_total || 0) + pagoFiado.monto,
-      }).eq('id', cliente.id),
-    ])
-  }
-
-  // 6. Actualizar caja con todos los métodos de pago en una sola operación
-  if (caja?.id) {
-    const updates: Record<string, number> = {}
-    for (const p of pagos) {
-      const campo = `total_${p.metodo}` as keyof typeof caja
-      updates[campo] = ((caja[campo] as number) || 0) + p.monto
-    }
-    if (Object.keys(updates).length) {
-      await supabase.from('cajas').update(updates).eq('id', caja.id)
-    }
-  }
-
-  // 7. Generar comprobante para WhatsApp
+  // Generar comprobante para WhatsApp
   let comprobante: string | undefined
-  if (cliente?.telefono) {
+  if (cliente) {
     const lineas = carrito
-      .map(i => `  • ${i.productoNombre} T${i.talle} x${i.cantidad} — $${(i.precio * i.cantidad).toLocaleString('es-AR')}`)
+      .map(i => `  • ${i.productoNombre} T${i.talle} x${i.cantidad} — ${formatPrecio(i.precio * i.cantidad)}`)
       .join('\n')
-    comprobante = `🛍️ *Ternura Kids* — Comprobante\n\n${lineas}\n\nTotal: *$${total.toLocaleString('es-AR')}*\n¡Gracias por tu compra! 💕`
+
+    const metodosLabel: Record<MetodoPago, string> = {
+      efectivo: 'Efectivo', transferencia: 'Transferencia',
+      debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
+    }
+    const metodoTexto = pagos.map(p => metodosLabel[p.metodo]).join(' + ')
+
+    const partes: string[] = [`🛍️ *Ternura Kids* — Comprobante\n`, lineas, '']
+
+    if (rSubtotal !== rTotal && rDescuento > 0) {
+      partes.push(`Subtotal: ${formatPrecio(rSubtotal)}`)
+      partes.push(`Descuento: -${formatPrecio(rDescuento)}`)
+    }
+    partes.push(`*Total: ${formatPrecio(rTotal)}*`)
+    partes.push(`Pago: ${metodoTexto}`)
+
+    const pagoFiado = pagos.find(p => p.metodo === 'fiado')
+    if (pagoFiado) {
+      const deudaAnterior = cliente.deuda_total || 0
+      const deudaNueva = deudaAnterior + Math.round(pagoFiado.monto)
+      partes.push('')
+      partes.push(`*Fiado: ${formatPrecio(pagoFiado.monto)}*`)
+      partes.push(`Deuda anterior: ${formatPrecio(deudaAnterior)}`)
+      partes.push(`*Deuda actual: ${formatPrecio(deudaNueva)}*`)
+    }
+
+    const totalPagado = pagos.filter(p => p.metodo !== 'fiado').reduce((s, p) => s + p.monto, 0)
+    if (totalPagado > rTotal && cliente.deuda_total > 0) {
+      const aplicadoDeuda = totalPagado - rTotal
+      const deudaResultante = Math.max(0, (cliente.deuda_total || 0) - aplicadoDeuda)
+      partes.push('')
+      partes.push(`Total compra: ${formatPrecio(rTotal)}`)
+      partes.push(`Pagaste: ${formatPrecio(totalPagado)}`)
+      partes.push(`Aplicado a deuda: ${formatPrecio(aplicadoDeuda)}`)
+      partes.push(`*Deuda actual: ${formatPrecio(deudaResultante)}*`)
+    }
+
+    partes.push('\n¡Gracias por tu compra! 💕')
+    comprobante = partes.join('\n')
   }
 
-  return { ok: true, ventaId: venta.id, comprobante }
+  return { ok: true, ventaId, comprobante }
 }

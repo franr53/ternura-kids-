@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Proveedor, Producto, Variante } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -124,11 +125,30 @@ function parsearLista(texto: string, productos: (Producto & { variantes?: Varian
 }
 
 export default function IngresoMercaderiaPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-400">Cargando...</div>}>
+      <IngresoMercaderiaContent />
+    </Suspense>
+  )
+}
+
+function IngresoMercaderiaContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
-  const [proveedores, setProveedores] = useState<Proveedor[]>([])
-  const [productos, setProductos] = useState<(Producto & { variantes?: Variante[] })[]>([])
+  const { data: datosCache } = useCache<{ proveedores: Proveedor[]; productos: (Producto & { variantes?: Variante[] })[] }>('prov:ingreso', async () => {
+    const [{ data: provs }, { data: prods }] = await Promise.all([
+      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+      supabase.from('productos').select('*, variantes(*)').eq('activo', true).order('nombre'),
+    ])
+    return {
+      proveedores: (provs || []) as Proveedor[],
+      productos: (prods || []) as (Producto & { variantes?: Variante[] })[],
+    }
+  })
+
+  const proveedores = datosCache?.proveedores ?? []
+  const productos = datosCache?.productos ?? []
   const [proveedorId, setProveedorId] = useState(searchParams.get('proveedor') || '')
   const [numeroRemito, setNumeroRemito] = useState('')
   const [busquedaProducto, setBusquedaProducto] = useState('')
@@ -144,17 +164,6 @@ export default function IngresoMercaderiaPage() {
   const [textoLista, setTextoLista] = useState('')
   const [itemsEscaneados, setItemsEscaneados] = useState<ItemEscaneado[]>([])
   const [modoOverlay, setModoOverlay] = useState(false)
-
-  const cargarDatos = useCallback(async () => {
-    const [{ data: provs }, { data: prods }] = await Promise.all([
-      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
-      supabase.from('productos').select('*, variantes(*)').eq('activo', true).order('nombre'),
-    ])
-    setProveedores(provs || [])
-    setProductos(prods || [])
-  }, [supabase])
-
-  useEffect(() => { cargarDatos() }, [cargarDatos])
 
   const productosFiltrados = busquedaProducto
     ? productos.filter(p =>

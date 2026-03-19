@@ -12,7 +12,7 @@ import { formatPrecio } from '@/lib/utils'
 import {
   type EtiquetaData,
   generarPDFEtiquetas,
-  abrirWhatsAppEtiquetas,
+  compartirPDFWhatsApp,
   getWhatsAppTel,
   setWhatsAppTel,
 } from '@/lib/etiquetas-pdf'
@@ -1505,8 +1505,9 @@ export default function NuevoProductoPage() {
                           }))
                         )
                       )
-                      await generarPDFEtiquetas(items)
-                      abrirWhatsAppEtiquetas(telefonoWA.trim())
+                      const blob = await generarPDFEtiquetas(items)
+                      const fecha = new Date().toISOString().slice(0, 10)
+                      await compartirPDFWhatsApp(blob, `etiquetas_${fecha}.pdf`, telefonoWA.trim())
                     } catch (err) {
                       toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
                     } finally {

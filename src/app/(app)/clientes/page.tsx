@@ -1,13 +1,16 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { Suspense, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Cliente } from '@/types'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Plus, Search, Users, AlertCircle, MessageCircle, FileSpreadsheet, ChevronRight } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
+import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 
 function InicialAvatar({ nombre, size = 'sm' }: { nombre: string; size?: 'sm' | 'md' }) {
   const iniciales = nombre.trim().split(' ').slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('')
@@ -26,20 +29,25 @@ function InicialAvatar({ nombre, size = 'sm' }: { nombre: string; size?: 'sm' | 
 }
 
 export default function ClientesPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-400">Cargando...</div>}>
+      <ClientesContent />
+    </Suspense>
+  )
+}
+
+function ClientesContent() {
   const supabase = createClient()
-  const [clientes, setClientes] = useState<Cliente[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busqueda, setBusqueda] = useState('')
-  const [filtro, setFiltro] = useState<'todos' | 'con_deuda'>('todos')
-
-  const cargar = useCallback(async () => {
-    setLoading(true)
+  const { mask } = usePrivacyMode()
+  const searchParams = useSearchParams()
+  const { data: _clientes, loading } = useCache<Cliente[]>('cli:lista', async () => {
     const { data } = await supabase.from('clientes').select('*').eq('activo', true).order('nombre')
-    setClientes(data || [])
-    setLoading(false)
-  }, [supabase])
-
-  useEffect(() => { cargar() }, [cargar])
+    return data || []
+  })
+  const clientes = _clientes ?? []
+  const [busqueda, setBusqueda] = useState('')
+  const filtroInicial = searchParams.get('filtro') === 'con_deuda' ? 'con_deuda' : 'todos'
+  const [filtro, setFiltro] = useState<'todos' | 'con_deuda'>(filtroInicial)
 
   const clientesFiltrados = clientes.filter(c => {
     const matchBusqueda = !busqueda || c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || c.telefono?.includes(busqueda)
@@ -94,7 +102,7 @@ export default function ClientesPage() {
             <AlertCircle size={20} className="text-white" />
           </div>
           <div>
-            <p className="text-2xl font-bold text-white">{formatPrecio(totalDeuda)}</p>
+            <p className="text-2xl font-bold text-white">{mask(formatPrecio(totalDeuda))}</p>
             <p className="text-xs text-teal-100">Deuda total acumulada</p>
           </div>
         </div>
@@ -165,7 +173,7 @@ export default function ClientesPage() {
                   <td className="px-4 py-3 text-right">
                     {cliente.deuda_total > 0 ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-100">
-                        {formatPrecio(cliente.deuda_total)}
+                        {mask(formatPrecio(cliente.deuda_total))}
                       </span>
                     ) : (
                       <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-600 border border-teal-100">

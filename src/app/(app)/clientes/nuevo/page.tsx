@@ -7,9 +7,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { FieldError } from '@/components/ui/field-error'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { validarRequerido, validarMaxLength, validarTelefono } from '@/lib/validations'
 
 export default function NuevoClientePage() {
   const router = useRouter()
@@ -18,12 +20,17 @@ export default function NuevoClientePage() {
   const [nombre, setNombre] = useState('')
   const [telefono, setTelefono] = useState('')
   const [direccion, setDireccion] = useState('')
+  const [errors, setErrors] = useState<Record<string, string | null>>({})
 
   async function guardar() {
-    if (!nombre.trim()) { toast.error('El nombre es obligatorio'); return }
+    const errNombre = validarRequerido(nombre, 'Nombre') || validarMaxLength(nombre, 100, 'Nombre')
+    const errTel = validarTelefono(telefono)
+    setErrors({ nombre: errNombre, telefono: errTel })
+    if (errNombre || errTel) return
+
     setLoading(true)
     const { error } = await supabase.from('clientes').insert({ nombre: nombre.trim(), telefono: telefono || null, direccion: direccion || null })
-    if (error) { toast.error('Error al guardar'); setLoading(false); return }
+    if (error) { toast.error('Error al guardar: ' + error.message); setLoading(false); return }
     toast.success('Cliente creado')
     router.push('/clientes')
   }
@@ -39,11 +46,13 @@ export default function NuevoClientePage() {
         <CardContent className="space-y-4">
           <div>
             <Label>Nombre *</Label>
-            <Input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre completo" className="mt-1" autoFocus />
+            <Input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre completo" className="mt-1" autoFocus maxLength={100} />
+            <FieldError message={errors.nombre} />
           </div>
           <div>
             <Label>Teléfono (WhatsApp)</Label>
             <Input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="Ej: 3516123456" className="mt-1" />
+            <FieldError message={errors.telefono} />
           </div>
           <div>
             <Label>Dirección</Label>

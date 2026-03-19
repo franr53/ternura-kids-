@@ -10,8 +10,9 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { Search, Download, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import { formatPrecio } from '@/lib/utils'
+import { Search, Download, FileSpreadsheet, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 interface VentaReporte {
   id: string
@@ -82,6 +83,7 @@ export default function ReportesPage() {
   const [stockBajo, setStockBajo] = useState<StockBajo[]>([])
   const [loadingVentas, setLoadingVentas] = useState(false)
   const [loadingStock, setLoadingStock] = useState(false)
+  const [filtroTalleStock, setFiltroTalleStock] = useState('')
   const [buscado, setBuscado] = useState(false)
 
   // Temporadas
@@ -190,6 +192,34 @@ export default function ReportesPage() {
     URL.revokeObjectURL(url)
   }
 
+  async function exportarExcel() {
+    if (ventas.length === 0) return
+    const XLSX = await import('xlsx')
+
+    // Hoja 1: Detalle de ventas
+    const detalle = ventas.map(v => ({
+      Fecha: new Date(v.creado_en).toLocaleDateString('es-AR'),
+      Hora: new Date(v.creado_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
+      Cliente: v.cliente?.nombre || 'Sin cliente',
+      Total: v.total,
+      'Métodos de pago': v.pagos?.map(p => `${METODO_LABELS[p.metodo] || p.metodo}: $${p.monto}`).join(' | ') || '',
+    }))
+    const wsDetalle = XLSX.utils.json_to_sheet(detalle)
+
+    // Hoja 2: Resumen por método de pago
+    const resumen = Object.entries(porMetodo).map(([metodo, total]) => ({
+      Método: METODO_LABELS[metodo] || metodo,
+      Total: total,
+    }))
+    resumen.push({ Método: 'TOTAL', Total: totalVentas })
+    const wsResumen = XLSX.utils.json_to_sheet(resumen)
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, wsDetalle, 'Ventas')
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen')
+    XLSX.writeFile(wb, `ventas_${desde}_${hasta}.xlsx`)
+  }
+
   const diffPct = datosTemp && datosTemp.totalAnterior > 0
     ? ((datosTemp.totalFacturado - datosTemp.totalAnterior) / datosTemp.totalAnterior) * 100
     : null
@@ -223,9 +253,14 @@ export default function ReportesPage() {
                   <Search size={16} /> {loadingVentas ? 'Buscando...' : 'Buscar'}
                 </Button>
                 {ventas.length > 0 && (
-                  <Button onClick={exportarCSV} variant="outline" className="gap-2">
-                    <Download size={16} /> Exportar CSV
-                  </Button>
+                  <>
+                    <Button onClick={exportarCSV} variant="outline" className="gap-2">
+                      <Download size={16} /> Exportar CSV
+                    </Button>
+                    <Button onClick={exportarExcel} variant="outline" className="gap-2">
+                      <FileSpreadsheet size={16} /> Exportar Excel
+                    </Button>
+                  </>
                 )}
               </div>
 
@@ -247,6 +282,36 @@ export default function ReportesPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Gráfico de ventas por día */}
+                  {(() => {
+                    const porDia: Record<string, number> = {}
+                    ventas.forEach(v => {
+                      const fecha = v.creado_en.split('T')[0]
+                      porDia[fecha] = (porDia[fecha] || 0) + v.total
+                    })
+                    const dias = Object.keys(porDia).sort()
+                    if (dias.length > 1) {
+                      const chartData = dias.map(d => ({
+                        fecha: d.slice(5),
+                        total: porDia[d],
+                      }))
+                      return (
+                        <div className="bg-gray-50 rounded-lg p-4 mt-2">
+                          <p className="text-xs font-semibold text-gray-500 mb-3">Ventas por día</p>
+                          <ResponsiveContainer width="100%" height={180}>
+                            <BarChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+                              <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                              <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                              <Tooltip formatter={(v) => [formatPrecio(Number(v)), 'Ventas']} contentStyle={{ borderRadius: '12px', border: '1px solid #f0f0f0', fontSize: 12 }} />
+                              <Bar dataKey="total" fill="#4EC3BD" radius={[4, 4, 0, 0]} maxBarSize={24} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
 
                   {ventas.length === 0 ? (
                     <div className="text-center py-8 text-gray-400">No hay ventas en el período seleccionado</div>
@@ -404,12 +469,19 @@ export default function ReportesPage() {
             </CardHeader>
             {stockBajo.length > 0 && (
               <CardContent>
+                <div className="mb-3">
+                  <Input
+                    placeholder="Filtrar por talle..."
+                    value={filtroTalleStock}
+                    onChange={e => setFiltroTalleStock(e.target.value)}
+                    className="w-32 text-sm"
+                  />
+                </div>
                 <div className="overflow-hidden rounded-lg border border-gray-200">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="text-left px-4 py-3 text-gray-600 font-medium">Producto</th>
-                        <th className="text-center px-4 py-3 text-gray-600 font-medium">Talle</th>
                         <th className="text-center px-4 py-3 text-gray-600 font-medium">Stock</th>
                         <th className="text-center px-4 py-3 text-gray-600 font-medium">Mínimo</th>
                         <th className="text-right px-4 py-3 text-gray-600 font-medium">Precio</th>
@@ -417,10 +489,9 @@ export default function ReportesPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {stockBajo.map(v => (
+                      {stockBajo.filter(v => !filtroTalleStock.trim() || v.talle.toLowerCase().includes(filtroTalleStock.trim().toLowerCase())).map(v => (
                         <tr key={v.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 font-medium text-gray-800">{v.producto?.nombre}</td>
-                          <td className="px-4 py-2.5 text-center"><Badge variant="outline">{v.talle}</Badge></td>
+                          <td className="px-4 py-2.5 font-medium text-gray-800">{formatNombreConTalle(v.producto?.nombre || '', v.talle)}</td>
                           <td className="px-4 py-2.5 text-center font-bold">{v.stock}</td>
                           <td className="px-4 py-2.5 text-center text-gray-500">{v.stock_minimo}</td>
                           <td className="px-4 py-2.5 text-right text-gray-600">{formatPrecio(v.producto?.precio_venta || 0)}</td>

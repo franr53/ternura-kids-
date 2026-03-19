@@ -1,12 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, MetodoPago, Variante, Producto } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar } from 'lucide-react'
-import { formatPrecio, cn } from '@/lib/utils'
+import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
+import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
+import Link from 'next/link'
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
 
@@ -32,9 +35,9 @@ type VentaHoy = {
   total: number
   descuento: number
   creado_en: string
-  cliente?: { nombre: string } | null
+  cliente?: { id: string; nombre: string } | null
   venta_items?: VentaItem[]
-  venta_pagos?: { metodo: string; monto: number }[]
+  venta_pagos?: { metodo: string; monto: number; notas?: string }[]
 }
 
 const METODO_ICON: Record<string, React.ReactNode> = {
@@ -54,15 +57,20 @@ const METODO_COLOR: Record<string, string> = {
 
 export default function PosPage() {
   const supabase = createClient()
-  const [ventas, setVentas] = useState<VentaHoy[]>([])
-  const [loading, setLoading] = useState(true)
-  const [mostrarNuevaVenta, setMostrarNuevaVenta] = useState(false)
+  const { mask } = usePrivacyMode()
+  const [mostrarNuevaVenta, _setMostrarNuevaVenta] = useState(() => {
+    try { return sessionStorage.getItem('pos:dialog') === '1' } catch { return false }
+  })
+  function setMostrarNuevaVenta(v: boolean) {
+    _setMostrarNuevaVenta(v)
+    try { if (v) sessionStorage.setItem('pos:dialog', '1'); else sessionStorage.removeItem('pos:dialog') } catch {}
+  }
   const [expandida, setExpandida] = useState<string | null>(null)
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
 
-  const cargarVentas = useCallback(async () => {
-    setLoading(true)
+  const cacheKey = periodo === 'fecha' ? `pos:ventas:fecha:${fechaCustom}` : `pos:ventas:${periodo}`
+  const { data: _ventas, loading, refresh: cargarVentas } = useCache<VentaHoy[]>(cacheKey, async () => {
     const desde = new Date()
     if (periodo === 'hoy') {
       desde.setHours(0, 0, 0, 0)
@@ -80,7 +88,7 @@ export default function PosPage() {
 
     let query = supabase
       .from('ventas')
-      .select('id, total, descuento, creado_en, cliente:clientes(nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto)')
+      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto, notas)')
       .eq('estado', 'completada')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
@@ -92,11 +100,9 @@ export default function PosPage() {
     }
 
     const { data } = await query
-    setVentas((data as unknown as VentaHoy[]) || [])
-    setLoading(false)
-  }, [supabase, periodo, fechaCustom])
-
-  useEffect(() => { cargarVentas() }, [cargarVentas])
+    return (data as unknown as VentaHoy[]) || []
+  })
+  const ventas = _ventas ?? []
 
   const totalDia = ventas.reduce((s, v) => s + v.total, 0)
   const cantVentas = ventas.length
@@ -170,7 +176,7 @@ export default function PosPage() {
             {periodo === 'hoy' ? 'Total del día' : periodo === 'semana' ? 'Total semana' : periodo === 'mes' ? 'Total mes' : 'Total'}
           </p>
           <p className="text-2xl font-black text-teal-600 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
-            {formatPrecio(totalDia)}
+            {mask(formatPrecio(totalDia))}
           </p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center shadow-sm">
@@ -186,7 +192,7 @@ export default function PosPage() {
             Promedio
           </p>
           <p className="text-2xl font-black text-gray-800 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
-            {formatPrecio(promedio)}
+            {mask(formatPrecio(promedio))}
           </p>
         </div>
       </div>
@@ -251,10 +257,14 @@ export default function PosPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       {venta.cliente ? (
-                        <>
+                        <Link
+                          href={`/clientes/${venta.cliente.id}`}
+                          onClick={e => e.stopPropagation()}
+                          className="flex items-center gap-1.5 min-w-0 hover:text-teal-600 transition-colors"
+                        >
                           <User size={12} className="text-teal-500 shrink-0" />
-                          <span className="text-sm font-semibold text-gray-800 truncate">{venta.cliente.nombre}</span>
-                        </>
+                          <span className="text-sm font-semibold text-gray-800 truncate hover:text-teal-600 underline-offset-2 hover:underline">{venta.cliente.nombre}</span>
+                        </Link>
                       ) : (
                         <span className="text-sm text-gray-400">Sin cliente</span>
                       )}
@@ -271,17 +281,17 @@ export default function PosPage() {
                         className={cn('flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold', METODO_COLOR[p.metodo] || 'bg-gray-100 text-gray-500')}
                       >
                         {METODO_ICON[p.metodo]}
-                        {pagos.length > 1 && <span>{formatPrecio(p.monto)}</span>}
+                        {pagos.length > 1 && <span>{mask(formatPrecio(p.monto))}</span>}
                       </span>
                     ))}
                   </div>
 
                   <div className="text-right shrink-0 min-w-[80px]">
                     <p className="font-bold text-gray-800 text-sm" style={{ fontFamily: 'var(--font-display)' }}>
-                      {formatPrecio(venta.total)}
+                      {mask(formatPrecio(venta.total))}
                     </p>
                     {venta.descuento > 0 && (
-                      <p className="text-[10px] text-teal-500">−{formatPrecio(venta.descuento)}</p>
+                      <p className="text-[10px] text-teal-500">−{mask(formatPrecio(venta.descuento))}</p>
                     )}
                   </div>
 
@@ -297,32 +307,55 @@ export default function PosPage() {
                       {items.map((item, j) => (
                         <div key={j} className="flex items-center justify-between">
                           <div className="flex-1 min-w-0">
-                            <span className="text-sm text-gray-700 font-medium">{item.variante?.producto?.nombre || '—'}</span>
-                            {item.variante?.talle && (
-                              <span className="text-xs text-gray-400 ml-2">T. {item.variante.talle}</span>
-                            )}
+                            <span className="text-sm text-gray-700 font-medium">
+                              {item.variante?.talle
+                                ? formatNombreConTalle(item.variante?.producto?.nombre || '—', item.variante.talle)
+                                : (item.variante?.producto?.nombre || '—')}
+                            </span>
                           </div>
                           <div className="text-right shrink-0 ml-4">
                             {item.cantidad > 1 ? (
                               <div>
-                                <p className="text-xs text-gray-400">{item.cantidad} × {formatPrecio(item.precio_unitario)}</p>
+                                <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>
                                 <p className="text-sm font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
-                                  {formatPrecio(item.precio_unitario * item.cantidad)}
+                                  {mask(formatPrecio(item.precio_unitario * item.cantidad))}
                                 </p>
                               </div>
                             ) : (
                               <p className="text-sm font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
-                                {formatPrecio(item.precio_unitario)}
+                                {mask(formatPrecio(item.precio_unitario))}
                               </p>
                             )}
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="mt-3 pt-2 border-t border-teal-100 flex justify-between">
+                    {/* Desglose de pagos */}
+                    {pagos.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-teal-100 space-y-1">
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Pago</p>
+                        {pagos.map((p, i) => {
+                          const label: Record<string, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia', debito: 'Débito', credito: 'Crédito', fiado: 'Fiado' }
+                          return (
+                            <div key={i}>
+                              <div className="flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-xs text-gray-600">
+                                  {METODO_ICON[p.metodo]} {label[p.metodo] || p.metodo}
+                                </span>
+                                <span className="text-xs font-semibold text-gray-700">{mask(formatPrecio(p.monto))}</span>
+                              </div>
+                              {p.notas && (
+                                <p className="text-[11px] text-blue-600 ml-5">→ {p.notas}</p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <div className="mt-2 pt-2 border-t border-teal-100 flex justify-between">
                       <span className="text-xs text-gray-400">{items.length} artículo{items.length !== 1 ? 's' : ''}</span>
                       <span className="text-sm font-bold text-teal-700" style={{ fontFamily: 'var(--font-display)' }}>
-                        {formatPrecio(venta.total)}
+                        {mask(formatPrecio(venta.total))}
                       </span>
                     </div>
                   </div>
@@ -333,28 +366,10 @@ export default function PosPage() {
         )}
       </div>
 
-      {/* FAB */}
-      {ventas.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-10">
-          <button
-            onClick={() => setMostrarNuevaVenta(true)}
-            className="w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
-            style={{
-              background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
-              color: 'white',
-              boxShadow: '0 6px 24px rgba(78,195,189,0.45)',
-            }}
-          >
-            <Plus size={24} strokeWidth={2.5} />
-          </button>
-        </div>
-      )}
-
       {mostrarNuevaVenta && (
         <NuevaVentaDialog
           onCerrar={() => setMostrarNuevaVenta(false)}
           onVentaCompletada={() => {
-            setMostrarNuevaVenta(false)
             cargarVentas()
           }}
         />

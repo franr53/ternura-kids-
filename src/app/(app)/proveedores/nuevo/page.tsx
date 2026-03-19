@@ -8,9 +8,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
+import { FieldError } from '@/components/ui/field-error'
 import { toast } from 'sonner'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { validarRequerido, validarTelefono, validarEmail } from '@/lib/validations'
 
 export default function NuevoProveedorPage() {
   const router = useRouter()
@@ -22,9 +24,15 @@ export default function NuevoProveedorPage() {
   const [direccion, setDireccion] = useState('')
   const [notas, setNotas] = useState('')
   const [aliasCbu, setAliasCbu] = useState('')
+  const [errors, setErrors] = useState<Record<string, string | null>>({})
 
   async function guardar() {
-    if (!nombre.trim()) { toast.error('El nombre es obligatorio'); return }
+    const errNombre = validarRequerido(nombre, 'Nombre')
+    const errTel = validarTelefono(telefono)
+    const errEmail = validarEmail(email)
+    setErrors({ nombre: errNombre, telefono: errTel, email: errEmail })
+    if (errNombre || errTel || errEmail) return
+
     setLoading(true)
     const { error } = await supabase.from('proveedores').insert({
       nombre: nombre.trim(),
@@ -36,7 +44,7 @@ export default function NuevoProveedorPage() {
       deuda_total: 0,
       activo: true,
     })
-    if (error) { toast.error('Error al guardar'); setLoading(false); return }
+    if (error) { toast.error('Error al guardar: ' + error.message); setLoading(false); return }
     toast.success('Proveedor creado')
     router.push('/proveedores')
   }
@@ -53,14 +61,17 @@ export default function NuevoProveedorPage() {
           <div>
             <Label>Nombre *</Label>
             <Input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre del proveedor" className="mt-1" autoFocus />
+            <FieldError message={errors.nombre} />
           </div>
           <div>
             <Label>Teléfono</Label>
             <Input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="Ej: 3516123456" className="mt-1" />
+            <FieldError message={errors.telefono} />
           </div>
           <div>
             <Label>Email</Label>
             <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@ejemplo.com" className="mt-1" />
+            <FieldError message={errors.email} />
           </div>
           <div>
             <Label>Dirección</Label>

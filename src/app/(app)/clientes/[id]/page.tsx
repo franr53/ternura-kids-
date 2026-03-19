@@ -2,17 +2,20 @@
 
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Cliente, FiadoMovimiento, Venta } from '@/types'
+import { Cliente, FiadoMovimiento, Proveedor, Venta } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag, Loader2, X } from 'lucide-react'
+import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
+import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import Link from 'next/link'
-import { formatPrecio } from '@/lib/utils'
+import { FieldError } from '@/components/ui/field-error'
+import { validarRequerido, validarMaxLength, validarTelefono } from '@/lib/validations'
+import { generarPDFRecibo, compartirPDFWhatsApp, type ReciboAbonoData } from '@/lib/etiquetas-pdf'
 
 type VentaItem = {
   cantidad: number
@@ -28,6 +31,7 @@ type VentaConItems = Venta & {
 export default function ClienteDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const supabase = createClient()
+  const { mask } = usePrivacyMode()
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [movimientos, setMovimientos] = useState<FiadoMovimiento[]>([])
   const [ventas, setVentas] = useState<VentaConItems[]>([])
@@ -40,26 +44,38 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [montoAbono, setMontoAbono] = useState('')
   const [notasAbono, setNotasAbono] = useState('')
   const [metodoPagoAbono, setMetodoPagoAbono] = useState<'efectivo' | 'transferencia' | 'debito'>('efectivo')
+  const [errors, setErrors] = useState<Record<string, string | null>>({})
+  const [ultimoAbono, setUltimoAbono] = useState<{ monto: number; deudaRestante: number } | null>(null)
+  const [enviandoRecibo, setEnviandoRecibo] = useState(false)
+  const [proveedores, setProveedores] = useState<Proveedor[]>([])
+  const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
 
   useEffect(() => {
     async function cargar() {
-      const [{ data: c }, { data: movs }, { data: vs }] = await Promise.all([
+      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(30),
         supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
+        supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
       ])
       if (c) { setCliente(c); setNombre(c.nombre); setTelefono(c.telefono || ''); setDireccion(c.direccion || '') }
       setMovimientos(movs || [])
       setVentas(vs || [])
+      setProveedores((provs || []) as Proveedor[])
       setLoading(false)
     }
     cargar()
   }, [id, supabase])
 
   async function guardar() {
+    const errNombre = validarRequerido(nombre, 'Nombre') || validarMaxLength(nombre, 100, 'Nombre')
+    const errTel = validarTelefono(telefono)
+    setErrors({ nombre: errNombre, telefono: errTel })
+    if (errNombre || errTel) return
+
     setGuardando(true)
     const { error } = await supabase.from('clientes').update({ nombre, telefono: telefono || null, direccion: direccion || null }).eq('id', id)
-    if (error) toast.error('Error al guardar')
+    if (error) toast.error('Error al guardar: ' + error.message)
     else { toast.success('Cliente actualizado'); setCliente(prev => prev ? { ...prev, nombre, telefono, direccion } : null) }
     setGuardando(false)
   }
@@ -68,6 +84,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
     const monto = parseFloat(montoAbono)
     if (!monto || monto <= 0) { toast.error('Ingresá un monto válido'); return }
     if (!cliente) return
+    if (monto > cliente.deuda_total) { toast.error(`El abono no puede superar la deuda (${formatPrecio(cliente.deuda_total)})`); return }
 
     const { error } = await supabase.from('fiado_movimientos').insert({
       cliente_id: id,
@@ -75,15 +92,73 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       monto,
       notas: notasAbono || null,
     })
-    if (error) { toast.error('Error al registrar abono'); return }
+    if (error) { toast.error('Error al registrar abono: ' + error.message); return }
 
     const nuevaDeuda = Math.max(0, (cliente.deuda_total || 0) - monto)
     await supabase.from('clientes').update({ deuda_total: nuevaDeuda }).eq('id', id)
     setCliente(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
     setMovimientos(prev => [{ id: Date.now().toString(), cliente_id: id, tipo: 'abono', monto, notas: notasAbono || undefined, creado_en: new Date().toISOString() }, ...prev])
+
+    // Si la transferencia va a un proveedor, registrar el pago y reducir su deuda
+    if (metodoPagoAbono === 'transferencia' && proveedorTransferencia) {
+      const nuevaDeudaProv = Math.max(0, proveedorTransferencia.deuda_total - monto)
+      await Promise.all([
+        supabase.from('pagos_proveedores').insert({
+          proveedor_id: proveedorTransferencia.id,
+          monto,
+          metodo: 'transferencia',
+          notas: `Abono de cliente ${cliente.nombre}`,
+        }),
+        supabase.from('proveedores').update({ deuda_total: nuevaDeudaProv }).eq('id', proveedorTransferencia.id),
+      ])
+      setProveedores(prev => prev.map(p => p.id === proveedorTransferencia.id ? { ...p, deuda_total: nuevaDeudaProv } : p))
+      toast.success(`Deuda de ${proveedorTransferencia.nombre} reducida en ${formatPrecio(monto)}`, { duration: 4000 })
+      setProveedorTransferencia(null)
+    }
+
     setMontoAbono('')
     setNotasAbono('')
+    setUltimoAbono({ monto, deudaRestante: nuevaDeuda })
     toast.success(`Abono de ${formatPrecio(monto)} registrado`)
+  }
+
+  async function enviarReciboAbono() {
+    if (!ultimoAbono || !telefono || !cliente) return
+    setEnviandoRecibo(true)
+    try {
+      // Extraer artículos reales de ventas fiadas
+      const ultimasCompras = ventas
+        .filter(v => v.venta_pagos?.some(p => p.metodo === 'fiado'))
+        .flatMap(v => (v.venta_items || []).map(item => ({
+          nombre: item.variante?.producto?.nombre || '—',
+          talle: item.variante?.talle || '',
+          precio: item.precio_unitario * item.cantidad,
+          fecha: new Date(v.creado_en).toLocaleDateString('es-AR'),
+        })))
+        .slice(0, 8)
+
+      const metodosLabel: Record<string, string> = {
+        efectivo: 'Efectivo', transferencia: 'Transferencia', debito: 'Débito',
+      }
+
+      const reciboData: ReciboAbonoData = {
+        clienteNombre: cliente.nombre,
+        fecha: new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }),
+        montoAbono: ultimoAbono.monto,
+        metodoPago: metodosLabel[metodoPagoAbono] || metodoPagoAbono,
+        deudaAnterior: ultimoAbono.deudaRestante + ultimoAbono.monto,
+        deudaActual: ultimoAbono.deudaRestante,
+        ultimasCompras,
+      }
+
+      const blob = await generarPDFRecibo(reciboData)
+      const resultado = await compartirPDFWhatsApp(blob, `recibo_${new Date().toISOString().slice(0,10)}.pdf`, telefono)
+      toast.success(resultado === 'shared' ? 'Recibo enviado' : 'PDF descargado — adjuntalo en el chat de WhatsApp')
+    } catch (err) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setEnviandoRecibo(false)
+    }
   }
 
   function abrirWhatsApp() {
@@ -104,7 +179,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           <Link href="/clientes"><Button variant="ghost" size="icon"><ArrowLeft size={20} /></Button></Link>
           <div>
             <h1 className="text-xl font-bold text-gray-800">{cliente.nombre}</h1>
-            {cliente.deuda_total > 0 && <Badge variant="destructive" className="mt-1">Debe {formatPrecio(cliente.deuda_total)}</Badge>}
+            {cliente.deuda_total > 0 && <Badge variant="destructive" className="mt-1">Debe {mask(formatPrecio(cliente.deuda_total))}</Badge>}
           </div>
         </div>
         <div className="flex gap-2">
@@ -124,8 +199,16 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
         <Card>
           <CardHeader><CardTitle className="text-base">Datos</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <div><Label>Nombre</Label><Input value={nombre} onChange={e => setNombre(e.target.value)} className="mt-1" /></div>
-            <div><Label>Teléfono</Label><Input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="3516123456" className="mt-1" /></div>
+            <div>
+              <Label>Nombre</Label>
+              <Input value={nombre} onChange={e => setNombre(e.target.value)} className="mt-1" maxLength={100} />
+              <FieldError message={errors.nombre} />
+            </div>
+            <div>
+              <Label>Teléfono</Label>
+              <Input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="3516123456" className="mt-1" />
+              <FieldError message={errors.telefono} />
+            </div>
             <div><Label>Dirección</Label><Input value={direccion} onChange={e => setDireccion(e.target.value)} className="mt-1" /></div>
           </CardContent>
         </Card>
@@ -136,7 +219,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           <CardContent className="space-y-4">
             <div className="text-center py-2 rounded-xl bg-gray-50">
               <p className={`text-3xl font-bold ${cliente.deuda_total > 0 ? 'text-red-500' : 'text-green-600'}`}>
-                {formatPrecio(cliente.deuda_total)}
+                {mask(formatPrecio(cliente.deuda_total))}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">deuda actual</p>
             </div>
@@ -154,7 +237,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                 <p className="text-xs text-gray-500">
                   Saldo resultante:{' '}
                   <span className={`font-semibold ${Math.max(0, cliente.deuda_total - parseFloat(montoAbono)) === 0 ? 'text-green-600' : 'text-red-500'}`}>
-                    {formatPrecio(Math.max(0, cliente.deuda_total - parseFloat(montoAbono)))}
+                    {mask(formatPrecio(Math.max(0, cliente.deuda_total - parseFloat(montoAbono))))}
                   </span>
                 </p>
               )}
@@ -181,6 +264,45 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                 ))}
               </div>
 
+              {/* Selector proveedor (solo con transferencia) */}
+              {metodoPagoAbono === 'transferencia' && proveedores.length > 0 && (
+                <div>
+                  {proveedorTransferencia ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
+                      <Smartphone size={13} className="text-blue-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-blue-700 truncate">{proveedorTransferencia.nombre}</p>
+                        <p className="text-xs text-blue-600 font-mono truncate">
+                          Alias/CBU: {proveedorTransferencia.alias_cbu || <span className="text-blue-400 italic">sin cargar</span>}
+                        </p>
+                        <p className="text-xs text-blue-500">
+                          Deuda: {mask(formatPrecio(proveedorTransferencia.deuda_total))} → {mask(formatPrecio(Math.max(0, proveedorTransferencia.deuda_total - (parseFloat(montoAbono) || 0))))}
+                        </p>
+                      </div>
+                      <button onClick={() => setProveedorTransferencia(null)} className="text-blue-300 hover:text-blue-600 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value=""
+                      onChange={e => {
+                        const prov = proveedores.find(p => p.id === e.target.value)
+                        if (prov) setProveedorTransferencia(prov)
+                      }}
+                      className="w-full h-8 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    >
+                      <option value="">↗ ¿Va al alias de un proveedor?</option>
+                      {proveedores.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.nombre}{p.deuda_total > 0 ? ` — debe ${formatPrecio(p.deuda_total)}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+
               <Input
                 value={notasAbono}
                 onChange={e => setNotasAbono(e.target.value)}
@@ -193,6 +315,24 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
               >
                 <CheckCircle size={16} /> Confirmar pago
               </Button>
+
+              {/* Banner recibo WhatsApp */}
+              {ultimoAbono && telefono && (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-green-50 border border-green-200 mt-2">
+                  <CheckCircle size={14} className="text-green-500 shrink-0" />
+                  <span className="text-xs text-green-700 flex-1">
+                    Pago de {formatPrecio(ultimoAbono.monto)} registrado
+                  </span>
+                  <button
+                    onClick={enviarReciboAbono}
+                    disabled={enviandoRecibo}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-500 text-white text-xs font-medium hover:bg-green-600 transition-colors shrink-0 disabled:opacity-50"
+                  >
+                    {enviandoRecibo ? <Loader2 size={13} className="animate-spin" /> : <MessageCircle size={13} />}
+                    {enviandoRecibo ? 'Generando...' : 'Enviar recibo PDF'}
+                  </button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -214,7 +354,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                   </div>
                   <div className="text-right">
                     <p className={`font-semibold text-sm ${mov.tipo === 'cargo' ? 'text-red-500' : 'text-green-600'}`}>
-                      {mov.tipo === 'cargo' ? '+' : '-'} {formatPrecio(mov.monto)}
+                      {mov.tipo === 'cargo' ? '+' : '-'} {mask(formatPrecio(mov.monto))}
                     </p>
                     <p className="text-xs text-gray-400">{new Date(mov.creado_en).toLocaleDateString('es-AR')}</p>
                   </div>
@@ -255,9 +395,9 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                         </p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="font-bold text-gray-800">{formatPrecio(venta.total)}</p>
+                        <p className="font-bold text-gray-800">{mask(formatPrecio(venta.total))}</p>
                         {venta.descuento > 0 && (
-                          <p className="text-xs text-green-600">− {formatPrecio(venta.descuento)} desc.</p>
+                          <p className="text-xs text-green-600">− {mask(formatPrecio(venta.descuento))} desc.</p>
                         )}
                       </div>
                     </button>
@@ -270,18 +410,17 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                             <div key={j} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 last:border-0">
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-800 truncate">
-                                  {item.variante?.producto?.nombre || '—'}
+                                  {item.variante?.talle
+                                    ? formatNombreConTalle(item.variante?.producto?.nombre || '—', item.variante.talle)
+                                    : (item.variante?.producto?.nombre || '—')}
                                 </p>
-                                {item.variante?.talle && (
-                                  <p className="text-xs text-gray-400">Talle {item.variante.talle}</p>
-                                )}
                               </div>
                               <div className="text-right shrink-0 ml-4">
                                 {item.cantidad > 1 && (
-                                  <p className="text-xs text-gray-400">{item.cantidad} × {formatPrecio(item.precio_unitario)}</p>
+                                  <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>
                                 )}
                                 <p className="text-sm font-semibold text-gray-700">
-                                  {formatPrecio(item.precio_unitario * item.cantidad)}
+                                  {mask(formatPrecio(item.precio_unitario * item.cantidad))}
                                 </p>
                               </div>
                             </div>

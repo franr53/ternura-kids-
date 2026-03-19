@@ -116,6 +116,19 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+:root {
+  /* Chart colors — esmeralda + pasteles */
+  --chart-emerald: #10B981;
+  --chart-emerald-light: #34D399;
+  --chart-pastel-violet: #A78BFA;
+  --chart-pastel-blue: #93C5FD;
+  --chart-pastel-yellow: #FCD34D;
+  --chart-pastel-pink: #F9A8D4;
+  /* Card shadows */
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --card-hover-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -129,6 +142,9 @@
   }
   .font-display {
     font-family: var(--font-display), Georgia, serif;
+  }
+  .font-mono {
+    font-family: var(--font-mono), 'JetBrains Mono', monospace;
   }
 }
 

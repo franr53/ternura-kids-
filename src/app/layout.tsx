@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next'
-import { Fraunces, Nunito } from 'next/font/google'
+import { Fraunces, Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 
 const fraunces = Fraunces({
@@ -8,16 +8,26 @@ const fraunces = Fraunces({
   weight: 'variable',
 })
 
-const nunito = Nunito({
+const inter = Inter({
   variable: '--font-sans',
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
+})
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: '--font-mono',
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
 })
 
 export const metadata: Metadata = {
   title: 'Ternura Kids — Gestión',
   description: 'Sistema de gestión para tienda de ropa infantil',
   applicationName: 'Ternura Kids',
+  icons: {
+    icon: '/logo.png',
+    apple: '/logo.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
@@ -40,10 +50,11 @@ export default function RootLayout({
     <html lang="es">
       <head>
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="apple-touch-icon" href="/icons/icon.svg" />
+        <link rel="icon" href="/logo.png" />
+        <link rel="apple-touch-icon" href="/logo.png" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
-      <body className={`${fraunces.variable} ${nunito.variable} antialiased`}>
+      <body className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable} antialiased`}>
         {children}
         <script
           dangerouslySetInnerHTML={{

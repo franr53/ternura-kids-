@@ -100,6 +100,7 @@ export interface Caja {
   cerrada_por?: string
   abierta_en: string
   cerrada_en?: string
+  notas_cierre?: string
 }
 
 export interface Venta {
@@ -152,6 +153,7 @@ export interface CategoriaGasto {
   id: string
   nombre: string
   color: string
+  padre_id?: string | null
   creado_en: string
 }
 
@@ -161,7 +163,7 @@ export interface Gasto {
   concepto: string
   categoria_id?: string
   monto: number
-  metodo_pago: 'efectivo' | 'transferencia' | 'tarjeta'
+  metodo_pago: 'efectivo' | 'transferencia' | 'debito' | 'credito'
   notas?: string
   usuario_id?: string
   creado_en: string

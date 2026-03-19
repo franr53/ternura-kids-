@@ -1,34 +1,30 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { Suspense, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Producto, Categoria, Proveedor } from '@/types'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { formatPrecio } from '@/lib/utils'
+import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 
 export default function InventarioPage() {
-  const supabase = createClient()
-  const [productos, setProductos] = useState<Producto[]>([])
-  const [categorias, setCategorias] = useState<Categoria[]>([])
-  const [proveedores, setProveedores] = useState<Proveedor[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busqueda, setBusqueda] = useState('')
-  const [filtroCategoria, setFiltroCategoria] = useState('todas')
-  const [filtroProveedor, setFiltroProveedor] = useState('todos')
-  const [filtroStock, setFiltroStock] = useState('todos')
-  const [filtroTemporada, setFiltroTemporada] = useState('todas')
-  const [filtroPrecioMin, setFiltroPrecioMin] = useState('')
-  const [filtroPrecioMax, setFiltroPrecioMax] = useState('')
-  const [orden, setOrden] = useState('nombre_asc')
-  const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-gray-400">Cargando...</div>}>
+      <InventarioContent />
+    </Suspense>
+  )
+}
 
-  const cargarDatos = useCallback(async () => {
-    setLoading(true)
+function InventarioContent() {
+  const supabase = createClient()
+  const searchParams = useSearchParams()
+
+  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos', async () => {
     const [{ data: prods }, { data: cats }, { data: provs }] = await Promise.all([
       supabase
         .from('productos')
@@ -38,13 +34,28 @@ export default function InventarioPage() {
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
       supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
     ])
-    setProductos(prods || [])
-    setCategorias(cats || [])
-    setProveedores(provs || [])
-    setLoading(false)
-  }, [supabase])
+    return {
+      productos: (prods || []) as Producto[],
+      categorias: (cats || []) as Categoria[],
+      proveedores: (provs || []) as Proveedor[],
+    }
+  })
 
-  useEffect(() => { cargarDatos() }, [cargarDatos])
+  const productos = cachedData?.productos ?? []
+  const categorias = cachedData?.categorias ?? []
+  const proveedores = cachedData?.proveedores ?? []
+
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroCategoria, setFiltroCategoria] = useState('todas')
+  const [filtroProveedor, setFiltroProveedor] = useState('todos')
+  const stockParam = searchParams.get('stock')
+  const [filtroStock, setFiltroStock] = useState(stockParam && ['sin_stock', 'stock_bajo', 'con_stock', 'exceso'].includes(stockParam) ? stockParam : 'todos')
+  const [filtroTemporada, setFiltroTemporada] = useState('todas')
+  const [filtroPrecioMin, setFiltroPrecioMin] = useState('')
+  const [filtroPrecioMax, setFiltroPrecioMax] = useState('')
+  const [orden, setOrden] = useState('nombre_asc')
+  const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
+  const [filtroTalle, setFiltroTalle] = useState('todos')
 
   // Cálculo de anomalías (client-side)
   const todosLosCodigos = productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter(Boolean) ?? [])
@@ -89,7 +100,8 @@ export default function InventarioPage() {
       filtroAnomalia === 'nombre_repetido' ? nombresRepetidos.has(p.nombre.trim().toLowerCase()) :
       filtroAnomalia === 'precio_invalido' ? (p.precio_venta === 0 || p.precio_venta < p.precio_costo) :
       true
-    return matchBusqueda && matchCategoria && matchProveedor && matchStock && matchTemporada && matchPrecio && matchAnomalia
+    const matchTalle = filtroTalle === 'todos' || p.variantes?.some(v => v.talle === filtroTalle)
+    return matchBusqueda && matchCategoria && matchProveedor && matchStock && matchTemporada && matchPrecio && matchAnomalia && matchTalle
   }).sort((a, b) => {
     const stockA = a.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     const stockB = b.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
@@ -110,9 +122,18 @@ export default function InventarioPage() {
   const stockBajo = productos.filter(p => p.variantes?.some(v => v.stock > 0 && v.stock <= v.stock_minimo)).length
   const totalAnomalias = Object.values(conteoAnomalias).reduce((a, b) => a + b, 0)
 
+  // Talles únicos para el filtro
+  const tallesUnicos = Array.from(new Set(
+    productos.flatMap(p => p.variantes?.map(v => v.talle) ?? [])
+  )).sort((a, b) => {
+    const na = parseFloat(a), nb = parseFloat(b)
+    if (!isNaN(na) && !isNaN(nb)) return na - nb
+    return a.localeCompare(b)
+  })
+
   const hayFiltrosActivos = busqueda !== '' || filtroCategoria !== 'todas' || filtroProveedor !== 'todos' ||
     filtroStock !== 'todos' || filtroTemporada !== 'todas' || filtroPrecioMin !== '' || filtroPrecioMax !== '' ||
-    orden !== 'nombre_asc' || filtroAnomalia !== null
+    orden !== 'nombre_asc' || filtroAnomalia !== null || filtroTalle !== 'todos'
 
   function limpiarFiltros() {
     setBusqueda('')
@@ -124,6 +145,7 @@ export default function InventarioPage() {
     setFiltroPrecioMax('')
     setOrden('nombre_asc')
     setFiltroAnomalia(null)
+    setFiltroTalle('todos')
   }
 
   return (
@@ -234,6 +256,16 @@ export default function InventarioPage() {
               <SelectItem value="exceso">Alto (&gt;10)</SelectItem>
             </SelectContent>
           </Select>
+          <Select value={filtroTalle} onValueChange={v => setFiltroTalle(v ?? 'todos')}>
+            <SelectTrigger className="w-44">
+              <span className="text-gray-400 text-xs mr-1">Talle:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos</SelectItem>
+              {tallesUnicos.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Select value={filtroTemporada} onValueChange={v => setFiltroTemporada(v ?? 'todas')}>
             <SelectTrigger className="w-44">
               <span className="text-gray-400 text-xs mr-1">Temp:</span>
@@ -324,7 +356,7 @@ export default function InventarioPage() {
         </div>
       )}
 
-      {/* Tabla */}
+      {/* Tabla — una fila por variante (talle) */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading ? (
           <div className="p-12 text-center">
@@ -345,83 +377,104 @@ export default function InventarioPage() {
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Proveedor</th>
                 <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio</th>
                 <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Stock</th>
-                <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Talles</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {productosFiltrados.map(producto => {
-                const stockTotal = producto.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
-                const sinStockRow = stockTotal === 0
-                const stockBajoRow = !sinStockRow && producto.variantes?.some(v => v.stock > 0 && v.stock <= v.stock_minimo)
-                return (
-                  <tr key={producto.id} className="hover:bg-gray-50 transition-colors group">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {(sinStockRow || stockBajoRow) && (
-                          <AlertTriangle size={13} className={sinStockRow ? 'text-red-400 shrink-0' : 'text-orange-400 shrink-0'} />
-                        )}
+              {productosFiltrados.flatMap(producto => {
+                const variantes = producto.variantes || []
+                if (variantes.length === 0) {
+                  // Producto sin variantes: mostrar una fila sola
+                  return [(
+                    <tr key={producto.id} className="hover:bg-gray-50 transition-colors group">
+                      <td className="px-4 py-3">
                         <span className="font-medium text-gray-800">{producto.nombre}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {producto.categoria ? (
-                        <span
-                          className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
-                          style={{ backgroundColor: producto.categoria.color }}
-                        >
-                          {producto.categoria.nombre}
-                        </span>
-                      ) : <span className="text-gray-400 text-xs">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">{producto.proveedor?.nombre ?? '—'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`font-semibold ${producto.precio_venta === 0 || producto.precio_venta < producto.precio_costo ? 'text-red-500' : 'text-gray-800'}`}>
-                        {formatPrecio(producto.precio_venta)}
-                      </span>
-                      {producto.precio_venta < producto.precio_costo && producto.precio_venta > 0 && (
-                        <p className="text-xs text-red-400">costo: {formatPrecio(producto.precio_costo)}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        sinStockRow
-                          ? 'bg-red-100 text-red-600'
-                          : stockBajoRow
-                            ? 'bg-orange-100 text-orange-600'
-                            : 'bg-teal-50 text-teal-700'
-                      }`}>
-                        {stockTotal}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1 justify-center">
-                        {producto.variantes?.map(v => (
-                          <span
-                            key={v.id}
-                            title={`Stock: ${v.stock}`}
-                            className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                              v.stock === 0
-                                ? 'bg-red-100 text-red-600'
-                                : v.stock <= v.stock_minimo
-                                  ? 'bg-orange-100 text-orange-600'
-                                  : 'bg-gray-100 text-gray-600'
-                            }`}
-                          >
-                            {v.talle}: {v.stock}
+                      </td>
+                      <td className="px-4 py-3">
+                        {producto.categoria ? (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: producto.categoria.color }}>
+                            {producto.categoria.nombre}
                           </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <Link href={`/inventario/${producto.id}`}>
-                        <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">
-                          Editar
-                        </Button>
-                      </Link>
-                    </td>
-                  </tr>
-                )
+                        ) : <span className="text-gray-400 text-xs">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{producto.proveedor?.nombre ?? '—'}</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-semibold text-gray-800">{formatPrecio(producto.precio_venta)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">0</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Link href={`/inventario/${producto.id}`}>
+                          <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">Editar</Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  )]
+                }
+                const variantesFiltradas = filtroTalle !== 'todos'
+                  ? variantes.filter(v => v.talle === filtroTalle)
+                  : variantes
+                return variantesFiltradas.map((v, vi) => {
+                  const precioVenta = v.precio_venta ?? producto.precio_venta
+                  const precioCosto = v.precio_costo ?? producto.precio_costo
+                  const precioInvalido = precioVenta === 0 || precioVenta < precioCosto
+                  const esFirst = vi === 0
+                  return (
+                    <tr
+                      key={v.id}
+                      className={cn(
+                        'hover:bg-gray-50 transition-colors group',
+                        !esFirst && 'border-t-0 border-dashed'
+                      )}
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          {v.stock === 0 && <AlertTriangle size={13} className="text-red-400 shrink-0" />}
+                          {v.stock > 0 && v.stock <= v.stock_minimo && <AlertTriangle size={13} className="text-orange-400 shrink-0" />}
+                          <span className={cn('text-gray-800', esFirst ? 'font-medium' : 'text-gray-600')}>
+                            {formatNombreConTalle(producto.nombre, v.talle)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {esFirst && producto.categoria ? (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: producto.categoria.color }}>
+                            {producto.categoria.nombre}
+                          </span>
+                        ) : esFirst ? <span className="text-gray-400 text-xs">—</span> : null}
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-600 text-xs">
+                        {esFirst ? (producto.proveedor?.nombre ?? '—') : null}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span className={cn('font-semibold', precioInvalido ? 'text-red-500' : 'text-gray-800')}>
+                          {formatPrecio(precioVenta)}
+                        </span>
+                        {precioInvalido && precioVenta > 0 && (
+                          <p className="text-xs text-red-400">costo: {formatPrecio(precioCosto)}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={cn(
+                          'inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold',
+                          v.stock === 0 ? 'bg-red-100 text-red-600'
+                            : v.stock <= v.stock_minimo ? 'bg-orange-100 text-orange-600'
+                            : 'bg-teal-50 text-teal-700'
+                        )}>
+                          {v.stock}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        {esFirst && (
+                          <Link href={`/inventario/${producto.id}`}>
+                            <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">Editar</Button>
+                          </Link>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
               })}
             </tbody>
           </table>

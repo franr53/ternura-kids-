@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, Producto, Proveedor, Variante, MetodoPago } from '@/types'
 import { ItemCarrito } from '@/app/(app)/pos/page'
 import { Button } from '@/components/ui/button'
@@ -9,12 +10,13 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
-import { formatPrecio, cn } from '@/lib/utils'
-import { confirmarVenta } from '@/lib/services/ventas'
+import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
+import { confirmarVenta, ResultadoVenta } from '@/lib/services/ventas'
+import { generarPDFComprobante, compartirPDFWhatsApp, type ComprobanteData } from '@/lib/etiquetas-pdf'
 import {
-  X, Search, Plus, Minus, User,
-  Banknote, CreditCard, Smartphone, HandCoins,
-  CheckCircle, ShoppingCart, AlertTriangle, Pencil, ArrowRight,
+  X, Search, Plus, Minus, User, Smartphone,
+  Banknote, CreditCard, HandCoins, ArrowLeftRight,
+  CheckCircle, ShoppingCart, AlertTriangle, Pencil, ArrowRight, MessageCircle, FileDown, Loader2,
 } from 'lucide-react'
 
 type VarianteConProducto = Variante & {
@@ -57,22 +59,69 @@ function matchVariante(v: VarianteConProducto, query: string): boolean {
 export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props) {
   const supabase = createClient()
 
-  // Data
-  const [todasVariantes, setTodasVariantes] = useState<VarianteConProducto[]>([])
+  // Data (cached)
+  const { data: posData, loading: loadingData } = useCache<{ variantes: VarianteConProducto[]; clientes: Cliente[]; proveedores: Proveedor[] }>('pos:dialog', async () => {
+    const [{ data: variantes }, { data: clientes }, { data: proveedores }] = await Promise.all([
+      supabase
+        .from('variantes')
+        .select('*, producto:productos(*, categoria:categorias(nombre, color))')
+        .order('talle')
+        .limit(500),
+      supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
+      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+    ])
+    return {
+      variantes: ((variantes || []).filter((v) => v.producto?.activo) as VarianteConProducto[]),
+      clientes: (clientes || []) as Cliente[],
+      proveedores: ((proveedores || []) as Proveedor[]),
+    }
+  })
+  const todasVariantes = posData?.variantes ?? []
   const [todosClientes, setTodosClientes] = useState<Cliente[]>([])
-  const [todosProveedores, setTodosProveedores] = useState<Proveedor[]>([])
-  const [loadingData, setLoadingData] = useState(true)
+  const todosProveedores = posData?.proveedores ?? []
 
-  // Venta state
-  const [carrito, setCarrito] = useState<ItemCarrito[]>([])
-  const [cliente, setCliente] = useState<Cliente | null>(null)
-  const [descuento, setDescuento] = useState(0)
-  const [metodoPago, setMetodoPago] = useState<MetodoPago>('efectivo')
+  // Sync clientes from cache (mutable for phone updates)
+  const [clientesSynced, setClientesSynced] = useState(false)
+  if (posData && !clientesSynced) {
+    setTodosClientes(posData.clientes)
+    setClientesSynced(true)
+  }
+
+  // Venta state — restored from sessionStorage on refresh
+  const [carrito, setCarrito] = useState<ItemCarrito[]>(() => {
+    try { const s = sessionStorage.getItem('pos:carrito'); return s ? JSON.parse(s) : [] } catch { return [] }
+  })
+  const [cliente, setCliente] = useState<Cliente | null>(() => {
+    try { const s = sessionStorage.getItem('pos:cliente'); return s ? JSON.parse(s) : null } catch { return null }
+  })
+  const [descuentoAdicional, setDescuentoAdicional] = useState(0)
+  const [pagos, setPagos] = useState<Pago[]>([{ metodo: 'efectivo', monto: 0 }])
+  const esMixto = pagos.length > 1
+  const metodoPrincipal = pagos[0]?.metodo ?? 'efectivo'
+
+  // Persist carrito + cliente to sessionStorage
+  useEffect(() => {
+    try {
+      if (carrito.length > 0) sessionStorage.setItem('pos:carrito', JSON.stringify(carrito))
+      else sessionStorage.removeItem('pos:carrito')
+    } catch {}
+  }, [carrito])
+  useEffect(() => {
+    try {
+      if (cliente) sessionStorage.setItem('pos:cliente', JSON.stringify(cliente))
+      else sessionStorage.removeItem('pos:cliente')
+    } catch {}
+  }, [cliente])
 
   // Search state
   const [busProducto, setBusProducto] = useState('')
+  const [filtroTalle, setFiltroTalle] = useState('')
   const [busCliente, setBusCliente] = useState('')
   const [mostrarDropCliente, setMostrarDropCliente] = useState(false)
+
+  // Teléfono de cliente
+  const [telefonoTemp, setTelefonoTemp] = useState('')
+  const [guardandoTel, setGuardandoTel] = useState(false)
 
   // Transferencia a proveedor
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
@@ -94,33 +143,18 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     decision: 'pendiente' | 'variante' | 'todas_variantes' | 'producto' | 'ignorar'
   }>>([])
 
-  // Post-venta: revisión de precios
+  // Post-venta: revisión de precios + comprobante
   const [etapaPostVenta, setEtapaPostVenta] = useState(false)
   const [aplicandoDecision, setAplicandoDecision] = useState<number | null>(null)
-
-  useEffect(() => {
-    async function cargar() {
-      setLoadingData(true)
-      const [{ data: variantes }, { data: clientes }, { data: proveedores }] = await Promise.all([
-        supabase
-          .from('variantes')
-          .select('*, producto:productos(*, categoria:categorias(nombre, color))')
-          .order('talle')
-          .limit(500),
-        supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
-        supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
-      ])
-      setTodasVariantes((variantes || []).filter((v) => v.producto?.activo) as VarianteConProducto[])
-      setTodosClientes(clientes || [])
-      setTodosProveedores((proveedores || []) as Proveedor[])
-      setLoadingData(false)
-    }
-    cargar()
-  }, [])
+  const [ventaResultado, setVentaResultado] = useState<ResultadoVenta | null>(null)
+  const [enviandoPDF, setEnviandoPDF] = useState(false)
 
   // Derived
   const resultadosProducto = busProducto.trim()
-    ? todasVariantes.filter(v => matchVariante(v, busProducto)).slice(0, 30)
+    ? todasVariantes
+        .filter(v => matchVariante(v, busProducto))
+        .filter(v => !filtroTalle.trim() || v.talle.toLowerCase().includes(filtroTalle.trim().toLowerCase()))
+        .slice(0, 30)
     : []
 
   const resultadosCliente = busCliente.trim()
@@ -128,8 +162,76 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     : todosClientes.slice(0, 6)
 
   const subtotal = carrito.reduce((s, i) => s + i.precio * (1 - i.descuentoItem / 100) * i.cantidad, 0)
-  const montoDesc = subtotal * (descuento / 100)
+  const descEfectivo = (!esMixto && metodoPrincipal === 'efectivo') ? 20 : 0
+  const descTotal = descEfectivo + descuentoAdicional
+  const montoDesc = subtotal * (descTotal / 100)
   const total = subtotal - montoDesc
+
+  // Sync pagos amount when total or method changes (only single method)
+  useEffect(() => {
+    if (!esMixto) {
+      setPagos(prev => [{ ...prev[0], monto: total }])
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total, esMixto])
+
+  // Pago mixto helpers
+  function setMetodoPrincipal(metodo: MetodoPago) {
+    setPagos([{ metodo, monto: total }])
+  }
+  function activarMixto() {
+    const mitad = Math.round(total / 2)
+    setPagos([
+      { metodo: 'efectivo', monto: mitad },
+      { metodo: 'transferencia', monto: total - mitad },
+    ])
+    // Quitar descuento efectivo al activar mixto
+    setDescuentoAdicional(0)
+  }
+  function volverSimple() {
+    setPagos([{ metodo: 'efectivo', monto: total }])
+  }
+  function agregarMetodoPago(metodo: MetodoPago) {
+    if (pagos.some(p => p.metodo === metodo)) return
+    setPagos(prev => [...prev, { metodo, monto: 0 }])
+  }
+  function actualizarMontoPago(idx: number, monto: number) {
+    setPagos(prev => prev.map((p, i) => i === idx ? { ...p, monto } : p))
+  }
+  function quitarMetodoPago(idx: number) {
+    if (pagos.length <= 1) return
+    setPagos(prev => prev.filter((_, i) => i !== idx))
+  }
+  function autoCompletarUltimo() {
+    if (pagos.length < 2) return
+    const sumaOtros = pagos.slice(0, -1).reduce((s, p) => s + (p.monto || 0), 0)
+    const falta = Math.max(0, total - sumaOtros)
+    setPagos(prev => prev.map((p, i) => i === prev.length - 1 ? { ...p, monto: falta } : p))
+  }
+  const totalPagado = pagos.reduce((s, p) => s + (p.monto || 0), 0)
+  const diferenciaPago = totalPagado - total
+  const pagoListo = Math.abs(diferenciaPago) < 1
+
+  function buildComprobanteData(): ComprobanteData {
+    const metodosLabel: Record<string, string> = {
+      efectivo: 'Efectivo', transferencia: 'Transferencia',
+      debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
+    }
+    const pagosFinales = pagos.filter(p => p.monto > 0)
+    const pagoFiado = pagosFinales.find(p => p.metodo === 'fiado')
+    const metodoPagoLabel = pagosFinales.length === 1
+      ? (metodosLabel[pagosFinales[0].metodo] || pagosFinales[0].metodo)
+      : pagosFinales.map(p => `${metodosLabel[p.metodo] || p.metodo} ${formatPrecio(p.monto)}`).join(' + ')
+    return {
+      items: carrito.map(i => ({ nombre: i.productoNombre, talle: i.talle, cantidad: i.cantidad, precio: i.precio })),
+      subtotal, descuento: montoDesc, total,
+      descuentoPorcentaje: descTotal > 0 ? (descEfectivo > 0 && descuentoAdicional > 0 ? `${descTotal}% (${descEfectivo}% efec. + ${descuentoAdicional}% adic.)` : `${descTotal}%`) : undefined,
+      metodoPago: metodoPagoLabel,
+      clienteNombre: cliente?.nombre,
+      fiado: pagoFiado ? { monto: pagoFiado.monto, deudaAnterior: cliente?.deuda_total || 0, deudaActual: (cliente?.deuda_total || 0) + pagoFiado.monto } : undefined,
+      fecha: new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }),
+    }
+  }
 
   function agregarAlCarrito(variante: VarianteConProducto) {
     const idx = carrito.findIndex(i => i.varianteId === variante.id)
@@ -175,7 +277,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
   function confirmarEditPrecio(idx: number) {
     const nuevo = parseFloat(precioTemporal)
-    if (isNaN(nuevo) || nuevo <= 0) { setEditandoPrecioIdx(null); return }
+    if (isNaN(nuevo) || nuevo <= 0) { toast.error('El precio debe ser mayor a 0'); setEditandoPrecioIdx(null); return }
     const item = carrito[idx]
     if (nuevo === item.precio) { setEditandoPrecioIdx(null); return }
     setEditandoPrecioIdx(null)
@@ -222,49 +324,66 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     }
   }
 
+  async function guardarTelefono() {
+    if (!cliente || !telefonoTemp.trim()) return
+    setGuardandoTel(true)
+    const { error } = await supabase.from('clientes').update({ telefono: telefonoTemp.trim() }).eq('id', cliente.id)
+    if (error) {
+      toast.error(`Error al guardar teléfono: ${error.message}`)
+    } else {
+      const updated = { ...cliente, telefono: telefonoTemp.trim() }
+      setCliente(updated)
+      setTodosClientes(prev => prev.map(c => c.id === cliente.id ? updated : c))
+      setTelefonoTemp('')
+      toast.success('Teléfono guardado')
+    }
+    setGuardandoTel(false)
+  }
+
   async function handleConfirmarVenta() {
     if (carrito.length === 0) return
-    if (metodoPago === 'fiado' && !cliente) {
+    if (pagos.some(p => p.metodo === 'fiado') && !cliente) {
       toast.error('Para registrar fiado necesitás seleccionar un cliente')
+      return
+    }
+    if (esMixto && !pagoListo) {
+      toast.error(`Los montos no cuadran — ${diferenciaPago > 0 ? 'sobran' : 'faltan'} ${formatPrecio(Math.abs(diferenciaPago))}`)
       return
     }
     setLoading(true)
     try {
+      const pagosFinales = pagos.filter(p => p.monto > 0).map(p => ({
+        ...p,
+        notas: p.metodo === 'transferencia' && proveedorTransferencia
+          ? `Proveedor: ${proveedorTransferencia.nombre}`
+          : undefined,
+      }))
+      const montoTransferencia = pagos.find(p => p.metodo === 'transferencia')?.monto || 0
       const resultado = await confirmarVenta({
         supabase,
         carrito,
-        pagos: [{ metodo: metodoPago, monto: total }],
+        pagos: pagosFinales,
         subtotal,
         descuento: montoDesc,
         total,
         cliente,
+        proveedorId: proveedorTransferencia?.id,
+        montoProveedor: montoTransferencia,
       })
 
       if (!resultado.ok) { toast.error(resultado.error); return }
 
-      // Si la transferencia va a un proveedor, registrar el pago y reducir su deuda
-      if (metodoPago === 'transferencia' && proveedorTransferencia) {
-        const nuevaDeuda = Math.max(0, proveedorTransferencia.deuda_total - total)
-        await Promise.all([
-          supabase.from('pagos_proveedores').insert({
-            proveedor_id: proveedorTransferencia.id,
-            monto: total,
-            metodo: 'transferencia',
-            notas: 'Pago directo de cliente en venta',
-          }),
-          supabase.from('proveedores').update({ deuda_total: nuevaDeuda }).eq('id', proveedorTransferencia.id),
-        ])
-        toast.success(`Deuda de ${proveedorTransferencia.nombre} reducida en ${formatPrecio(total)}`, { duration: 4000 })
+      if (montoTransferencia > 0 && proveedorTransferencia) {
+        toast.success(`Deuda de ${proveedorTransferencia.nombre} reducida en ${formatPrecio(montoTransferencia)}`, { duration: 4000 })
       }
 
       toast.success(`Venta registrada — ${formatPrecio(total)}`)
-      onVentaCompletada()
-      // Si hubo cambios de precio, mostrar revisión; si no, cerrar directo
-      if (preciosCambiados.length > 0) {
-        setEtapaPostVenta(true)
-      } else {
-        onCerrar()
-      }
+      // Clear persisted state
+      try { sessionStorage.removeItem('pos:carrito'); sessionStorage.removeItem('pos:cliente') } catch {}
+      // NO llamar onVentaCompletada() acá — desmonta el diálogo.
+      // Se llama al cerrar la pantalla post-venta.
+      setVentaResultado(resultado)
+      setEtapaPostVenta(true)
     } finally {
       setLoading(false)
     }
@@ -295,22 +414,30 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
             {/* Búsqueda de producto */}
             <div className="p-4 border-b border-gray-50 space-y-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    placeholder={loadingData ? 'Cargando...' : 'Buscar por nombre o escanear código...'}
+                    value={busProducto}
+                    onChange={e => setBusProducto(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        const exacto = todasVariantes.find(v => v.codigo_barras === busProducto.trim())
+                        if (exacto) { agregarAlCarrito(exacto); return }
+                        if (resultadosProducto.length === 1) agregarAlCarrito(resultadosProducto[0])
+                      }
+                    }}
+                    className="pl-9 text-sm"
+                    autoFocus
+                    disabled={loadingData}
+                  />
+                </div>
                 <Input
-                  placeholder={loadingData ? 'Cargando...' : 'Buscar por nombre o escanear código...'}
-                  value={busProducto}
-                  onChange={e => setBusProducto(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      const exacto = todasVariantes.find(v => v.codigo_barras === busProducto.trim())
-                      if (exacto) { agregarAlCarrito(exacto); return }
-                      if (resultadosProducto.length === 1) agregarAlCarrito(resultadosProducto[0])
-                    }
-                  }}
-                  className="pl-9 text-sm"
-                  autoFocus
-                  disabled={loadingData}
+                  placeholder="Talle"
+                  value={filtroTalle}
+                  onChange={e => setFiltroTalle(e.target.value)}
+                  className="w-20 text-sm text-center"
                 />
               </div>
 
@@ -329,9 +456,8 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                         className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-50 text-left border-b border-gray-50 last:border-0 transition-colors"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate">{v.producto.nombre}</p>
+                          <p className="text-sm font-medium text-gray-800 truncate">{formatNombreConTalle(v.producto.nombre, v.talle)}</p>
                           <div className="flex items-center gap-2">
-                            <p className="text-xs text-gray-500">T. {v.talle}</p>
                             {v.stock <= 0
                               ? <span className="text-xs text-orange-500 font-medium">⚠ Sin stock</span>
                               : <span className="text-xs text-gray-400">Stock: {v.stock}</span>
@@ -372,8 +498,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                   {carrito.map((item, idx) => (
                     <div key={idx} className="flex items-center gap-3 p-2.5 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors group">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">{item.productoNombre}</p>
-                        <p className="text-xs text-gray-500">T. {item.talle}</p>
+                        <p className="text-sm font-medium text-gray-800 truncate">{formatNombreConTalle(item.productoNombre, item.talle)}</p>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
@@ -443,19 +568,41 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
             <div>
               <p className="text-xs font-medium text-gray-500 mb-1.5">Cliente (opcional)</p>
               {cliente ? (
-                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 border border-teal-200">
-                  <User size={14} className="text-teal-500 shrink-0" />
-                  <span className="text-sm font-medium text-teal-700 flex-1 truncate">{cliente.nombre}</span>
-                  {cliente.deuda_total > 0 && (
-                    <span className="text-xs text-red-500 flex items-center gap-0.5">
-                      <AlertTriangle size={10} />
-                      {formatPrecio(cliente.deuda_total)}
-                    </span>
+                <>
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 border border-teal-200">
+                    <User size={14} className="text-teal-500 shrink-0" />
+                    <span className="text-sm font-medium text-teal-700 flex-1 truncate">{cliente.nombre}</span>
+                    {cliente.deuda_total > 0 && (
+                      <span className="text-xs text-red-500 flex items-center gap-0.5">
+                        <AlertTriangle size={10} />
+                        {formatPrecio(cliente.deuda_total)}
+                      </span>
+                    )}
+                    <button onClick={() => { setCliente(null); setTelefonoTemp('') }} className="text-teal-300 hover:text-teal-600">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  {/* Pedir teléfono si no tiene */}
+                  {!cliente.telefono && (
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <Smartphone size={13} className="text-gray-400 shrink-0" />
+                      <Input
+                        placeholder="Teléfono del cliente"
+                        value={telefonoTemp}
+                        onChange={e => setTelefonoTemp(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') guardarTelefono() }}
+                        className="text-xs h-7 flex-1"
+                      />
+                      <button
+                        onClick={guardarTelefono}
+                        disabled={!telefonoTemp.trim() || guardandoTel}
+                        className="text-teal-500 hover:text-teal-700 disabled:text-gray-300 shrink-0"
+                      >
+                        <CheckCircle size={16} />
+                      </button>
+                    </div>
                   )}
-                  <button onClick={() => setCliente(null)} className="text-teal-300 hover:text-teal-600">
-                    <X size={14} />
-                  </button>
-                </div>
+                </>
               ) : (
                 <div className="relative">
                   <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -498,22 +645,32 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
             {/* Descuento */}
             <div>
-              <p className="text-xs font-medium text-gray-500 mb-1.5">Descuento</p>
+              {!esMixto && metodoPrincipal === 'efectivo' && (
+                <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-green-50 border border-green-200 rounded-lg">
+                  <Banknote size={13} className="text-green-600 shrink-0" />
+                  <span className="text-xs text-green-700 font-medium">20% descuento efectivo aplicado</span>
+                </div>
+              )}
+              <p className="text-xs font-medium text-gray-500 mb-1.5">Descuento adicional</p>
               <div className="flex gap-1.5">
-                {[0, 10, 15, 20].map(d => (
+                {[0, 5, 10, 15].map(d => {
+                  const totalDescPreview = descEfectivo + d
+                  if (totalDescPreview > 100) return null
+                  return (
                   <button
                     key={d}
-                    onClick={() => setDescuento(d)}
+                    onClick={() => setDescuentoAdicional(d)}
                     className={cn(
                       'flex-1 text-xs py-1.5 rounded-lg border font-medium transition-colors',
-                      descuento === d
+                      descuentoAdicional === d
                         ? 'bg-teal-100 border-teal-400 text-teal-700'
                         : 'border-gray-200 text-gray-500 hover:border-gray-300'
                     )}
                   >
-                    {d === 0 ? 'Sin desc.' : `${d}%`}
+                    {d === 0 ? 'Sin desc.' : `+${d}%`}
                   </button>
-                ))}
+                  )
+                })}
               </div>
             </div>
 
@@ -523,9 +680,9 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                 <span>Subtotal</span>
                 <span>{formatPrecio(subtotal)}</span>
               </div>
-              {descuento > 0 && (
+              {descTotal > 0 && (
                 <div className="flex justify-between text-green-600 text-xs">
-                  <span>Descuento {descuento}%</span>
+                  <span>Descuento {descTotal}%{descEfectivo > 0 && descuentoAdicional > 0 ? ` (${descEfectivo}% efec. + ${descuentoAdicional}% adic.)` : descEfectivo > 0 ? ' (efectivo)' : ''}</span>
                   <span>− {formatPrecio(montoDesc)}</span>
                 </div>
               )}
@@ -539,35 +696,116 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
             {/* Método de pago */}
             <div>
-              <p className="text-xs font-medium text-gray-500 mb-2">Método de pago</p>
-              <div className="grid grid-cols-3 gap-1.5">
-                {METODOS.map(m => (
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-gray-500">Método de pago</p>
+                {!esMixto ? (
                   <button
-                    key={m.key}
-                    onClick={() => { setMetodoPago(m.key); if (m.key !== 'transferencia') setProveedorTransferencia(null) }}
-                    className={cn(
-                      'flex flex-col items-center gap-1 p-2 rounded-xl border-2 text-xs font-medium transition-all',
-                      metodoPago === m.key
-                        ? m.color + ' border-2'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300 bg-white'
-                    )}
+                    onClick={activarMixto}
+                    className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-700 font-medium"
                   >
-                    {m.icon}
-                    <span className="leading-tight text-center">{m.label}</span>
+                    <ArrowLeftRight size={12} /> Pago mixto
                   </button>
-                ))}
+                ) : (
+                  <button
+                    onClick={volverSimple}
+                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 font-medium"
+                  >
+                    <X size={12} /> Método único
+                  </button>
+                )}
               </div>
 
+              {/* Modo simple: botones de método */}
+              {!esMixto && (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {METODOS.map(m => (
+                    <button
+                      key={m.key}
+                      onClick={() => { setMetodoPrincipal(m.key); if (m.key !== 'transferencia') setProveedorTransferencia(null) }}
+                      className={cn(
+                        'flex flex-col items-center gap-1 p-2 rounded-xl border-2 text-xs font-medium transition-all',
+                        metodoPrincipal === m.key
+                          ? m.color + ' border-2'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300 bg-white'
+                      )}
+                    >
+                      {m.icon}
+                      <span className="leading-tight text-center">{m.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Modo mixto: líneas con método + monto */}
+              {esMixto && (
+                <div className="space-y-2">
+                  {pagos.map((pago, idx) => {
+                    const metodo = METODOS.find(m => m.key === pago.metodo)
+                    return (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div className={cn('flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium w-28 shrink-0', metodo?.color)}>
+                          {metodo?.icon} {metodo?.label}
+                        </div>
+                        <Input
+                          type="number"
+                          value={pago.monto || ''}
+                          onChange={e => actualizarMontoPago(idx, parseFloat(e.target.value) || 0)}
+                          className="flex-1 h-8 text-sm"
+                          placeholder="$0"
+                          min={0}
+                        />
+                        <button onClick={() => quitarMetodoPago(idx)} className="text-gray-300 hover:text-red-400 shrink-0">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {/* Agregar método */}
+                  <div className="flex gap-1 flex-wrap">
+                    {METODOS.filter(m => !pagos.some(p => p.metodo === m.key)).map(m => (
+                      <button
+                        key={m.key}
+                        onClick={() => agregarMetodoPago(m.key)}
+                        className="text-xs px-2 py-1 rounded border border-dashed border-gray-300 text-gray-500 hover:border-teal-400 hover:text-teal-600"
+                      >
+                        + {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Auto-completar + indicador de diferencia */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={autoCompletarUltimo}
+                      className="text-xs text-teal-600 hover:text-teal-700 font-medium"
+                    >
+                      Auto-completar último
+                    </button>
+                    <div className={cn(
+                      'flex-1 text-xs text-right font-medium',
+                      diferenciaPago > 0.5 ? 'text-amber-600' :
+                      diferenciaPago < -0.5 ? 'text-red-600' : 'text-green-600'
+                    )}>
+                      {diferenciaPago > 0.5 ? `Sobran ${formatPrecio(diferenciaPago)}` :
+                       diferenciaPago < -0.5 ? `Faltan ${formatPrecio(-diferenciaPago)}` :
+                       '✓ Monto exacto'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Selector proveedor (solo con transferencia) */}
-              {metodoPago === 'transferencia' && todosProveedores.length > 0 && (
+              {pagos.some(p => p.metodo === 'transferencia') && todosProveedores.length > 0 && (
                 <div className="mt-2.5">
                   {proveedorTransferencia ? (
                     <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
                       <Smartphone size={13} className="text-blue-500 shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-blue-700 truncate">{proveedorTransferencia.nombre}</p>
+                        <p className="text-xs text-blue-600 font-mono truncate">
+                          Alias/CBU: {proveedorTransferencia.alias_cbu || <span className="text-blue-400 italic">sin cargar</span>}
+                        </p>
                         <p className="text-xs text-blue-500">
-                          Deuda: {formatPrecio(proveedorTransferencia.deuda_total)} → {formatPrecio(Math.max(0, proveedorTransferencia.deuda_total - total))}
+                          Deuda: {formatPrecio(proveedorTransferencia.deuda_total)} → {formatPrecio(Math.max(0, proveedorTransferencia.deuda_total - (pagos.find(p => p.metodo === 'transferencia')?.monto || 0)))}
                         </p>
                       </div>
                       <button onClick={() => setProveedorTransferencia(null)} className="text-blue-300 hover:text-blue-600 shrink-0">
@@ -598,7 +836,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
           </div>
         </div>
 
-        {/* Pantalla post-venta: revisión de precios cambiados */}
+        {/* Pantalla post-venta: comprobante + revisión de precios */}
         {etapaPostVenta && (
           <div className="absolute inset-0 z-10 bg-white rounded-2xl flex flex-col">
             {/* Header post-venta */}
@@ -609,96 +847,155 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-gray-800">Venta registrada</h2>
+                  <p className="text-sm text-gray-500">{formatPrecio(total)}</p>
+                </div>
+              </div>
+
+              {/* Botones comprobante PDF */}
+              {cliente && (
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setEnviandoPDF(true)
+                      try {
+                        const blob = await generarPDFComprobante(buildComprobanteData())
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url; a.download = `comprobante_${new Date().toISOString().slice(0,10)}.pdf`
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                        URL.revokeObjectURL(url)
+                        toast.success('Comprobante descargado')
+                      } catch (err) {
+                        toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+                      } finally {
+                        setEnviandoPDF(false)
+                      }
+                    }}
+                    disabled={enviandoPDF}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-50"
+                  >
+                    {enviandoPDF ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+                    PDF
+                  </button>
+                  {cliente.telefono && (
+                    <button
+                      onClick={async () => {
+                        setEnviandoPDF(true)
+                        try {
+                          const blob = await generarPDFComprobante(buildComprobanteData())
+                          const resultado = await compartirPDFWhatsApp(blob, `comprobante_${new Date().toISOString().slice(0,10)}.pdf`, cliente.telefono!)
+                          toast.success(resultado === 'shared' ? 'Comprobante enviado' : 'PDF descargado — adjuntalo en el chat de WhatsApp')
+                        } catch (err) {
+                          toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+                        } finally {
+                          setEnviandoPDF(false)
+                        }
+                      }}
+                      disabled={enviandoPDF}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50"
+                    >
+                      {enviandoPDF ? <Loader2 size={16} className="animate-spin" /> : <MessageCircle size={16} />}
+                      WhatsApp
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Lista de cambios de precio (solo si hay) */}
+            {preciosCambiados.length > 0 ? (
+              <>
+                <div className="px-6 pt-4 pb-1">
                   <p className="text-sm text-gray-500">
-                    Modificaste el precio de {preciosCambiados.length} {preciosCambiados.length === 1 ? 'producto' : 'productos'} en esta venta.
+                    Modificaste el precio de {preciosCambiados.length} {preciosCambiados.length === 1 ? 'producto' : 'productos'}.
                     ¿Querés actualizar el inventario?
                   </p>
                 </div>
-              </div>
-            </div>
+                <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
+                  {preciosCambiados.map((cambio, i) => {
+                    const resuelto = cambio.decision !== 'pendiente'
+                    return (
+                      <div
+                        key={i}
+                        className={cn(
+                          'rounded-2xl border-2 p-4 transition-all',
+                          resuelto ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-teal-100 bg-white'
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="text-sm font-bold text-gray-800">{formatNombreConTalle(cambio.productoNombre, cambio.talle)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-400 line-through">{formatPrecio(cambio.precioAnterior)}</span>
+                            <ArrowRight size={13} className="text-gray-300" />
+                            <span className="text-sm font-bold text-teal-600">{formatPrecio(cambio.nuevoPrecio)}</span>
+                          </div>
+                        </div>
 
-            {/* Lista de cambios */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-              {preciosCambiados.map((cambio, i) => {
-                const resuelto = cambio.decision !== 'pendiente'
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      'rounded-2xl border-2 p-4 transition-all',
-                      resuelto ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-teal-100 bg-white'
-                    )}
-                  >
-                    {/* Info del cambio */}
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="text-sm font-bold text-gray-800">{cambio.productoNombre}</p>
-                        <p className="text-xs text-gray-400">Talle {cambio.talle}</p>
+                        {resuelto ? (
+                          <div className="flex items-center gap-2 text-xs text-gray-400">
+                            <CheckCircle size={13} className="text-green-500" />
+                            {cambio.decision === 'ignorar' && 'Sin cambios en inventario'}
+                            {cambio.decision === 'variante' && `T. ${cambio.talle} actualizada`}
+                            {cambio.decision === 'todas_variantes' && 'Todas las tallas actualizadas'}
+                            {cambio.decision === 'producto' && 'Precio base actualizado'}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {([
+                              { key: 'variante', label: `Solo T. ${cambio.talle}`, desc: 'Esta variante' },
+                              { key: 'todas_variantes', label: 'Todas las tallas', desc: 'Todo el producto' },
+                              { key: 'producto', label: 'Precio base', desc: 'Producto + variantes' },
+                              { key: 'ignorar', label: 'No actualizar', desc: 'Solo fue para esta venta' },
+                            ] as const).map(op => (
+                              <button
+                                key={op.key}
+                                onClick={() => aplicarDecision(i, op.key)}
+                                disabled={aplicandoDecision === i}
+                                className={cn(
+                                  'text-left px-3 py-2.5 rounded-xl border transition-all',
+                                  op.key === 'ignorar'
+                                    ? 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                    : 'border-teal-100 hover:border-teal-400 hover:bg-teal-50'
+                                )}
+                              >
+                                <p className={cn('text-xs font-semibold', op.key === 'ignorar' ? 'text-gray-500' : 'text-gray-800')}>
+                                  {op.label}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-0.5">{op.desc}</p>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-400 line-through">{formatPrecio(cambio.precioAnterior)}</span>
-                        <ArrowRight size={13} className="text-gray-300" />
-                        <span className="text-sm font-bold text-teal-600">{formatPrecio(cambio.nuevoPrecio)}</span>
-                      </div>
-                    </div>
-
-                    {resuelto ? (
-                      <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <CheckCircle size={13} className="text-green-500" />
-                        {cambio.decision === 'ignorar' && 'Sin cambios en inventario'}
-                        {cambio.decision === 'variante' && `T. ${cambio.talle} actualizada`}
-                        {cambio.decision === 'todas_variantes' && 'Todas las tallas actualizadas'}
-                        {cambio.decision === 'producto' && 'Precio base actualizado'}
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {([
-                          { key: 'variante', label: `Solo T. ${cambio.talle}`, desc: 'Esta variante' },
-                          { key: 'todas_variantes', label: 'Todas las tallas', desc: 'Todo el producto' },
-                          { key: 'producto', label: 'Precio base', desc: 'Producto + variantes' },
-                          { key: 'ignorar', label: 'No actualizar', desc: 'Solo fue para esta venta' },
-                        ] as const).map(op => (
-                          <button
-                            key={op.key}
-                            onClick={() => aplicarDecision(i, op.key)}
-                            disabled={aplicandoDecision === i}
-                            className={cn(
-                              'text-left px-3 py-2.5 rounded-xl border transition-all',
-                              op.key === 'ignorar'
-                                ? 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                                : 'border-teal-100 hover:border-teal-400 hover:bg-teal-50'
-                            )}
-                          >
-                            <p className={cn('text-xs font-semibold', op.key === 'ignorar' ? 'text-gray-500' : 'text-gray-800')}>
-                              {op.label}
-                            </p>
-                            <p className="text-xs text-gray-400 mt-0.5">{op.desc}</p>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="flex-1" />
+            )}
 
             {/* Footer post-venta */}
             <div className="px-6 py-4 border-t border-gray-100">
               <Button
-                onClick={onCerrar}
-                disabled={preciosCambiados.some(p => p.decision === 'pendiente')}
+                onClick={() => { onVentaCompletada(); onCerrar() }}
+                disabled={preciosCambiados.length > 0 && preciosCambiados.some(p => p.decision === 'pendiente')}
                 className="w-full bg-teal-500 hover:bg-teal-600 h-11"
               >
-                {preciosCambiados.some(p => p.decision === 'pendiente')
+                {preciosCambiados.length > 0 && preciosCambiados.some(p => p.decision === 'pendiente')
                   ? 'Tomá una decisión en cada cambio'
-                  : 'Listo, cerrar'}
+                  : 'Cerrar'}
               </Button>
-              <button
-                onClick={onCerrar}
-                className="w-full text-center text-xs text-gray-400 hover:text-gray-600 mt-2 py-1"
-              >
-                Decidir más tarde (cerrar igual)
-              </button>
+              {preciosCambiados.length > 0 && preciosCambiados.some(p => p.decision === 'pendiente') && (
+                <button
+                  onClick={() => { onVentaCompletada(); onCerrar() }}
+                  className="w-full text-center text-xs text-gray-400 hover:text-gray-600 mt-2 py-1"
+                >
+                  Decidir más tarde (cerrar igual)
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -710,7 +1007,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
           </Button>
           <Button
             onClick={handleConfirmarVenta}
-            disabled={carrito.length === 0 || loading}
+            disabled={carrito.length === 0 || loading || (esMixto && !pagoListo)}
             className="flex-[2] bg-teal-500 hover:bg-teal-600 text-white font-semibold gap-2 h-11"
           >
             <CheckCircle size={18} />

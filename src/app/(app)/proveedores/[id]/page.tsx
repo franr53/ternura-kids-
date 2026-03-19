@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, use, useRef } from 'react'
+import { useEffect, useState, use, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Proveedor, IngresoMercaderia } from '@/types'
 
@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, Plus, FileText, Upload, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { ArrowLeft, Save, Plus, FileText, Upload, TrendingUp, TrendingDown, Minus, Pencil, Check } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 import * as XLSX from 'xlsx'
@@ -83,6 +83,25 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
   // Lista de precios Excel
   const [cambiosPrecio, setCambiosPrecio] = useState<CambioPrecio[]>([])
   const [aplicandoPrecios, setAplicandoPrecios] = useState(false)
+
+  // Edición inline de precios
+  const [editandoPrecio, setEditandoPrecio] = useState<{ productoId: string; campo: 'precio_costo' | 'precio_venta' } | null>(null)
+  const [precioEditTemp, setPrecioEditTemp] = useState('')
+
+  const guardarPrecioInline = useCallback(async () => {
+    if (!editandoPrecio) return
+    const nuevo = parseFloat(precioEditTemp)
+    if (isNaN(nuevo) || nuevo < 0) { toast.error('Precio inválido'); setEditandoPrecio(null); return }
+    const prod = productos.find(p => p.id === editandoPrecio.productoId)
+    if (!prod) { setEditandoPrecio(null); return }
+    const actual = prod[editandoPrecio.campo]
+    if (nuevo === actual) { setEditandoPrecio(null); return }
+    const { error } = await supabase.from('productos').update({ [editandoPrecio.campo]: nuevo }).eq('id', editandoPrecio.productoId)
+    if (error) { toast.error(`Error: ${error.message}`); setEditandoPrecio(null); return }
+    setProductos(prev => prev.map(p => p.id === editandoPrecio!.productoId ? { ...p, [editandoPrecio!.campo]: nuevo } : p))
+    setEditandoPrecio(null)
+    toast.success('Precio actualizado')
+  }, [editandoPrecio, precioEditTemp, productos, supabase])
 
   useEffect(() => {
     async function cargar() {
@@ -483,11 +502,59 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
                       <tbody className="divide-y divide-gray-100 max-h-80 overflow-y-auto">
                         {productos.map(p => {
                           const margen = p.precio_venta > 0 ? ((p.precio_venta - p.precio_costo) / p.precio_venta * 100) : 0
+                          const editandoCosto = editandoPrecio?.productoId === p.id && editandoPrecio.campo === 'precio_costo'
+                          const editandoVenta = editandoPrecio?.productoId === p.id && editandoPrecio.campo === 'precio_venta'
                           return (
                             <tr key={p.id} className="hover:bg-gray-50">
                               <td className="px-4 py-2 text-gray-800">{p.nombre}</td>
-                              <td className="px-4 py-2 text-right text-gray-600">{formatPrecio(p.precio_costo)}</td>
-                              <td className="px-4 py-2 text-right text-gray-600">{formatPrecio(p.precio_venta)}</td>
+                              <td className="px-4 py-2 text-right">
+                                {editandoCosto ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <input
+                                      type="number"
+                                      value={precioEditTemp}
+                                      onChange={e => setPrecioEditTemp(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') guardarPrecioInline(); if (e.key === 'Escape') setEditandoPrecio(null) }}
+                                      onBlur={guardarPrecioInline}
+                                      autoFocus
+                                      className="w-24 text-right text-sm border border-teal-400 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                                    />
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => { setEditandoPrecio({ productoId: p.id, campo: 'precio_costo' }); setPrecioEditTemp(p.precio_costo.toString()) }}
+                                    className="text-gray-600 hover:text-teal-600 inline-flex items-center gap-1 group"
+                                    title="Editar costo"
+                                  >
+                                    {formatPrecio(p.precio_costo)}
+                                    <Pencil size={10} className="text-gray-300 group-hover:text-teal-400 transition-colors" />
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                {editandoVenta ? (
+                                  <div className="flex items-center justify-end gap-1">
+                                    <input
+                                      type="number"
+                                      value={precioEditTemp}
+                                      onChange={e => setPrecioEditTemp(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') guardarPrecioInline(); if (e.key === 'Escape') setEditandoPrecio(null) }}
+                                      onBlur={guardarPrecioInline}
+                                      autoFocus
+                                      className="w-24 text-right text-sm border border-teal-400 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                                    />
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => { setEditandoPrecio({ productoId: p.id, campo: 'precio_venta' }); setPrecioEditTemp(p.precio_venta.toString()) }}
+                                    className="text-gray-600 hover:text-teal-600 inline-flex items-center gap-1 group"
+                                    title="Editar precio venta"
+                                  >
+                                    {formatPrecio(p.precio_venta)}
+                                    <Pencil size={10} className="text-gray-300 group-hover:text-teal-400 transition-colors" />
+                                  </button>
+                                )}
+                              </td>
                               <td className="px-4 py-2 text-right">
                                 <span className={`text-xs font-medium ${margen < 20 ? 'text-red-500' : margen < 35 ? 'text-amber-500' : 'text-green-600'}`}>
                                   {margen.toFixed(0)}%

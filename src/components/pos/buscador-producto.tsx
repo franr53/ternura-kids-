@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Variante, Producto } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Search, X, Package } from 'lucide-react'
-import { formatPrecio } from '@/lib/utils'
+import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
 
 type VarianteConProducto = Variante & { producto: Producto & { categoria?: { nombre: string; color: string } } }
 
@@ -33,25 +34,19 @@ function matchVariante(v: VarianteConProducto, query: string): boolean {
 export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
   const supabase = createClient()
   const [busqueda, setBusqueda] = useState('')
-  const [todasVariantes, setTodasVariantes] = useState<VarianteConProducto[]>([])
-  const [loading, setLoading] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { inputRef.current?.focus() }, [])
+  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes', async () => {
+    const { data } = await supabase
+      .from('variantes')
+      .select('*, producto:productos(*, categoria:categorias(nombre, color))')
+      .order('talle')
+      .limit(500)
+    return ((data || []).filter(v => v.producto?.activo) as VarianteConProducto[])
+  })
+  const todasVariantes = _variantes ?? []
 
-  useEffect(() => {
-    async function cargar() {
-      setLoading(true)
-      const { data } = await supabase
-        .from('variantes')
-        .select('*, producto:productos(*, categoria:categorias(nombre, color))')
-        .order('talle')
-        .limit(500)
-      setTodasVariantes((data || []).filter(v => v.producto?.activo) as VarianteConProducto[])
-      setLoading(false)
-    }
-    cargar()
-  }, [])
+  useEffect(() => { inputRef.current?.focus() }, [])
 
   const resultados = busqueda.trim()
     ? todasVariantes.filter(v => matchVariante(v, busqueda))
@@ -96,9 +91,8 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-800 text-sm truncate">{variante.producto.nombre}</p>
+                    <p className="font-medium text-gray-800 text-sm truncate">{formatNombreConTalle(variante.producto.nombre, variante.talle)}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-500">Talle {variante.talle}</span>
                       {variante.producto.categoria && (
                         <span
                           className="text-xs px-1.5 py-0.5 rounded-full text-white"

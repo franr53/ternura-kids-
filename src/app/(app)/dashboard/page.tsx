@@ -1,18 +1,24 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useCache } from '@/lib/hooks/use-cache'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell,
 } from 'recharts'
-import { TrendingUp, Users, Package, ShoppingCart, AlertCircle, ArrowUpRight, Tag } from 'lucide-react'
-import { formatPrecio } from '@/lib/utils'
+import {
+  TrendingUp, TrendingDown, Users, Package, ShoppingCart,
+  ArrowUpRight, DollarSign, Receipt, AlertTriangle,
+} from 'lucide-react'
+import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
+import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import { Cliente } from '@/types'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { motion } from 'framer-motion'
 
-interface VentaDia { fecha: string; total: number }
+interface DatosDia { fecha: string; ventas: number; unidades: number; ticket: number; countVentas: number }
 interface PagoMetodo { metodo: string; total: number }
 interface TopProducto { nombre: string; cantidad: number }
 
@@ -21,153 +27,241 @@ const METODO_LABELS: Record<string, string> = {
   debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
 }
 const METODO_COLORS: Record<string, string> = {
-  Efectivo: '#4EC3BD', Transferencia: '#60a5fa', Débito: '#fb923c',
-  Crédito: '#8b5cf6', Fiado: '#f87171',
+  Efectivo: '#10B981', Transferencia: '#93C5FD', Débito: '#FCD34D',
+  Crédito: '#A78BFA', Fiado: '#F9A8D4',
 }
 
-type Periodo = 'semana' | 'mes' | 'año'
+type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre'
+type MetricaChart = 'ventas' | 'unidades' | 'ticket'
+
+const METRICA_CONFIG: Record<MetricaChart, { label: string; color: string; dataKey: string; formatter: (v: number) => string }> = {
+  ventas: { label: 'Ventas ($)', color: '#10B981', dataKey: 'ventas', formatter: v => formatPrecio(v) },
+  unidades: { label: 'Unidades', color: '#93C5FD', dataKey: 'unidades', formatter: v => `${v} uds` },
+  ticket: { label: 'Ticket prom.', color: '#A78BFA', dataKey: 'ticket', formatter: v => formatPrecio(v) },
+}
 
 function InitialsAvatar({ name }: { name: string }) {
   const initials = name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
   return (
-    <div className="w-9 h-9 rounded-xl bg-teal-100 flex items-center justify-center shrink-0">
-      <span className="text-teal-700 text-xs font-bold" style={{ fontFamily: 'var(--font-display)' }}>{initials}</span>
+    <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center shrink-0">
+      <span className="text-teal-700 text-xs font-bold font-display">{initials}</span>
     </div>
   )
 }
 
+function ComparativoBadge({ actual, anterior }: { actual: number; anterior: number }) {
+  if (anterior === 0) return null
+  const diff = ((actual - anterior) / anterior) * 100
+  const up = diff >= 0
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-semibold ${up ? 'text-emerald-600' : 'text-red-500'}`}>
+      {up ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+      {`${up ? '+' : ''}${diff.toFixed(0)}%`}
+    </span>
+  )
+}
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.1, duration: 0.4, ease: 'easeOut' as const },
+  }),
+}
+
+interface DashboardData {
+  ventasHoy: number; ventasMes: number; clientesConDeuda: number; sinStock: number
+  ventasAyer: number; ticketMesAnterior: number; ticketPromedio: number
+  datosPorDia: DatosDia[]; ventasPorMetodo: PagoMetodo[]
+  topProductos: TopProducto[]; topDeudores: Cliente[]
+  stockCritico: { nombre: string; talle: string; stock: number }[]
+}
+
 export default function DashboardPage() {
   const supabase = createClient()
-  const [loading, setLoading] = useState(true)
+  const router = useRouter()
+  const { mask } = usePrivacyMode()
   const [periodo, setPeriodo] = useState<Periodo>('mes')
+  const [metricaChart, setMetricaChart] = useState<MetricaChart>('ventas')
 
-  const [ventasHoy, setVentasHoy] = useState(0)
-  const [ventasMes, setVentasMes] = useState(0)
-  const [clientesConDeuda, setClientesConDeuda] = useState(0)
-  const [sinStock, setSinStock] = useState(0)
+  const { data: d, loading } = useCache<DashboardData>(`dash:${periodo}`, async () => {
+    const hoy = new Date()
+    const inicioHoy = hoy.toISOString().split('T')[0]
+    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1)
+    const inicioAyer = ayer.toISOString().split('T')[0]
+    const inicioMes = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`
+    const mesAnt = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
+    const inicioMesAnterior = `${mesAnt.getFullYear()}-${String(mesAnt.getMonth() + 1).padStart(2, '0')}-01`
+    const finMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth(), 0)
+    const finMesAnteriorStr = finMesAnterior.toISOString().split('T')[0]
+    const diasAtras = periodo === 'hoy' ? 1 : periodo === 'semana' ? 7 : periodo === 'mes' ? 30 : 90
+    const desde = new Date(hoy); desde.setDate(desde.getDate() - diasAtras)
+    const desdeStr = desde.toISOString().split('T')[0]
 
-  const [ventasPorDia, setVentasPorDia] = useState<VentaDia[]>([])
-  const [ventasPorMetodo, setVentasPorMetodo] = useState<PagoMetodo[]>([])
-  const [topProductos, setTopProductos] = useState<TopProducto[]>([])
-  const [topDeudores, setTopDeudores] = useState<Cliente[]>([])
-  const [paraLiquidar, setParaLiquidar] = useState(0)
-  const [margenPromedio, setMargenPromedio] = useState<number | null>(null)
+    const [
+      { data: kpisData }, { data: ventasDiaData }, { data: pagosData },
+      { data: topData }, { data: deudoresTop }, { data: unidadesData },
+      { data: ventasMesAntData }, { data: ventasMesAntCount }, { data: stockCriticoData },
+    ] = await Promise.all([
+      supabase.rpc('dashboard_kpis', { p_fecha_hoy: inicioHoy, p_inicio_mes: inicioMes, p_inicio_ayer: inicioAyer }),
+      supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
+      supabase.from('venta_pagos').select('metodo, monto, venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
+      supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre)), venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
+      supabase.from('clientes').select('id, nombre, deuda_total').gt('deuda_total', 0).order('deuda_total', { ascending: false }).limit(5),
+      supabase.from('venta_items').select('cantidad, venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
+      supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
+      supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
+      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre)').lte('stock', 3).order('stock', { ascending: true }).limit(5),
+    ])
+
+    const kpis_result = kpisData as { ventas_hoy: number; ventas_ayer: number; ventas_mes: number; count_ventas_mes: number; clientes_deuda: number; variantes_sin_stock: number } | null
+    const totalMes = kpis_result?.ventas_mes || 0
+    const totalMesAnt: number = ventasMesAntData?.reduce((s: number, v: { total: number }) => s + v.total, 0) ?? 0
+    const countMesAnt = ventasMesAntCount?.length || 0
+    const countMes = kpis_result?.count_ventas_mes || 0
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scData = (stockCriticoData || []).map((v: any) => ({
+      nombre: v.producto?.nombre || 'Sin nombre', talle: v.talle || '', stock: v.stock,
+    }))
+
+    // Datos por día
+    const porDiaVentas: Record<string, number> = {}
+    const porDiaCount: Record<string, number> = {}
+    ventasDiaData?.forEach((v: { creado_en: string; total: number }) => {
+      const fecha = v.creado_en.split('T')[0]
+      porDiaVentas[fecha] = (porDiaVentas[fecha] || 0) + v.total
+      porDiaCount[fecha] = (porDiaCount[fecha] || 0) + 1
+    })
+    const porDiaUnidades: Record<string, number> = {}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(unidadesData || []).forEach((item: any) => {
+      const fecha = item.venta?.creado_en?.split('T')[0]
+      if (fecha) porDiaUnidades[fecha] = (porDiaUnidades[fecha] || 0) + item.cantidad
+    })
+    const diasArray: DatosDia[] = []
+    for (let i = diasAtras - 1; i >= 0; i--) {
+      const dd = new Date(hoy); dd.setDate(dd.getDate() - i)
+      const key = dd.toISOString().split('T')[0]
+      const ventas = porDiaVentas[key] || 0
+      const count = porDiaCount[key] || 0
+      diasArray.push({ fecha: key.slice(5), ventas, unidades: porDiaUnidades[key] || 0, ticket: count > 0 ? Math.round(ventas / count) : 0, countVentas: count })
+    }
+
+    // Pagos por método
+    const porMetodo: Record<string, number> = {}
+    pagosData?.forEach((p: { metodo: string; monto: number }) => {
+      porMetodo[p.metodo] = (porMetodo[p.metodo] || 0) + p.monto
+    })
+    const ventasPorMetodoArr = Object.entries(porMetodo).map(([metodo, total]) => ({ metodo: METODO_LABELS[metodo] || metodo, total })).sort((a, b) => b.total - a.total)
+
+    // Top productos
+    const porProd: Record<string, number> = {}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    topData?.forEach((item: any) => {
+      const nombre = item.variante?.producto?.nombre || 'Sin nombre'
+      porProd[nombre] = (porProd[nombre] || 0) + item.cantidad
+    })
+    const sorted = Object.entries(porProd).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    const topProductosArr = sorted.map(([nombre, cantidad]) => ({ nombre: nombre.length > 20 ? nombre.slice(0, 20) + '…' : nombre, cantidad }))
+
+    return {
+      ventasHoy: kpis_result?.ventas_hoy || 0,
+      ventasMes: totalMes,
+      clientesConDeuda: kpis_result?.clientes_deuda || 0,
+      sinStock: kpis_result?.variantes_sin_stock || 0,
+      ventasAyer: kpis_result?.ventas_ayer || 0,
+      ticketMesAnterior: countMesAnt > 0 ? totalMesAnt / countMesAnt : 0,
+      ticketPromedio: countMes > 0 ? totalMes / countMes : 0,
+      datosPorDia: diasArray,
+      ventasPorMetodo: ventasPorMetodoArr,
+      topProductos: topProductosArr,
+      topDeudores: (deudoresTop || []) as Cliente[],
+      stockCritico: scData,
+    }
+  })
+
+  const ventasHoy = d?.ventasHoy ?? 0
+  const ventasMes = d?.ventasMes ?? 0
+  const clientesConDeuda = d?.clientesConDeuda ?? 0
+  const sinStock = d?.sinStock ?? 0
+  const ventasAyer = d?.ventasAyer ?? 0
+  const ticketMesAnterior = d?.ticketMesAnterior ?? 0
+  const ticketPromedio = d?.ticketPromedio ?? 0
+  const datosPorDia = d?.datosPorDia ?? []
+  const ventasPorMetodo = d?.ventasPorMetodo ?? []
+  const topProductos = d?.topProductos ?? []
+  const topDeudores = d?.topDeudores ?? []
+  const stockCritico = d?.stockCritico ?? []
 
   const hora = new Date().getHours()
   const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches'
   const fechaHoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
-  useEffect(() => {
-    async function cargar() {
-      setLoading(true)
-      const hoy = new Date()
-      const inicioHoy = hoy.toISOString().split('T')[0]
-      const inicioMes = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`
-      const diasAtras = periodo === 'semana' ? 7 : periodo === 'mes' ? 30 : 365
-      const desde = new Date(hoy)
-      desde.setDate(desde.getDate() - diasAtras)
-      const desdeStr = desde.toISOString().split('T')[0]
-
-      const mesActual = hoy.getMonth() + 1
-      const esVerano = mesActual >= 10 || mesActual <= 3
-      const temporadaFuera = esVerano ? 'invierno' : 'verano'
-
-      const [
-        { data: ventasHoyData },
-        { data: ventasMesData },
-        { data: deudoresData },
-        { data: sinStockData },
-        { data: ventasDiaData },
-        { data: pagosData },
-        { data: topData },
-        { data: deudoresTop },
-        { data: liquidarData },
-        { data: productosMargen },
-      ] = await Promise.all([
-        supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioHoy}T00:00:00`),
-        supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMes}T00:00:00`),
-        supabase.from('clientes').select('id').gt('deuda_total', 0),
-        supabase.from('variantes').select('id').eq('stock', 0),
-        supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
-        supabase.from('venta_pagos').select('metodo, monto').gte('created_at', `${inicioMes}T00:00:00`),
-        supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre))').gte('created_at', `${inicioMes}T00:00:00`),
-        supabase.from('clientes').select('id, nombre, deuda_total').gt('deuda_total', 0).order('deuda_total', { ascending: false }).limit(5),
-        supabase.from('productos').select('id').eq('temporada', temporadaFuera).eq('activo', true),
-        supabase.from('productos').select('precio_costo, precio_venta').eq('activo', true).gt('precio_venta', 0).gt('precio_costo', 0),
-      ])
-
-      setVentasHoy(ventasHoyData?.reduce((s, v) => s + v.total, 0) || 0)
-      setVentasMes(ventasMesData?.reduce((s, v) => s + v.total, 0) || 0)
-      setClientesConDeuda(deudoresData?.length || 0)
-      setSinStock(sinStockData?.length || 0)
-      setTopDeudores((deudoresTop || []) as Cliente[])
-      setParaLiquidar(liquidarData?.length || 0)
-
-      if (productosMargen && productosMargen.length > 0) {
-        const margenes = (productosMargen as { precio_costo: number; precio_venta: number }[])
-          .map(p => (p.precio_venta - p.precio_costo) / p.precio_venta * 100)
-        setMargenPromedio(margenes.reduce((s, m) => s + m, 0) / margenes.length)
-      }
-
-      const porDia: Record<string, number> = {}
-      ventasDiaData?.forEach(v => {
-        const fecha = v.creado_en.split('T')[0]
-        porDia[fecha] = (porDia[fecha] || 0) + v.total
-      })
-      const diasArray: VentaDia[] = []
-      for (let i = diasAtras - 1; i >= 0; i--) {
-        const d = new Date(hoy)
-        d.setDate(d.getDate() - i)
-        const key = d.toISOString().split('T')[0]
-        diasArray.push({ fecha: key.slice(5), total: porDia[key] || 0 })
-      }
-      setVentasPorDia(diasArray)
-
-      const porMetodo: Record<string, number> = {}
-      pagosData?.forEach((p: { metodo: string; monto: number }) => {
-        porMetodo[p.metodo] = (porMetodo[p.metodo] || 0) + p.monto
-      })
-      setVentasPorMetodo(Object.entries(porMetodo).map(([metodo, total]) => ({ metodo: METODO_LABELS[metodo] || metodo, total })).sort((a, b) => b.total - a.total))
-
-      const porProd: Record<string, number> = {}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      topData?.forEach((item: any) => {
-        const nombre = item.variante?.producto?.nombre || 'Sin nombre'
-        porProd[nombre] = (porProd[nombre] || 0) + item.cantidad
-      })
-      const sorted = Object.entries(porProd).sort((a, b) => b[1] - a[1]).slice(0, 8)
-      setTopProductos(sorted.map(([nombre, cantidad]) => ({ nombre: nombre.length > 22 ? nombre.slice(0, 22) + '…' : nombre, cantidad })))
-
-      setLoading(false)
-    }
-    cargar()
-  }, [periodo, supabase])
+  // Total unidades en período
+  const totalUnidades = useMemo(() => datosPorDia.reduce((s, d) => s + d.unidades, 0), [datosPorDia])
 
   const totalMetodos = ventasPorMetodo.reduce((s, m) => s + m.total, 0)
+  const mc = METRICA_CONFIG[metricaChart]
+
+  const kpis = [
+    {
+      label: 'Ventas Hoy',
+      value: mask(formatPrecio(ventasHoy)),
+      icon: DollarSign,
+      iconBg: 'bg-emerald-50',
+      iconColor: 'text-emerald-500',
+      badge: ventasAyer > 0 ? <ComparativoBadge actual={ventasHoy} anterior={ventasAyer} /> : null,
+      badgeLabel: 'vs ayer',
+      href: null as string | null,
+    },
+    {
+      label: 'Ticket Promedio',
+      value: mask(formatPrecio(ticketPromedio)),
+      icon: Receipt,
+      iconBg: 'bg-violet-50',
+      iconColor: 'text-violet-500',
+      badge: ticketMesAnterior > 0 ? <ComparativoBadge actual={ticketPromedio} anterior={ticketMesAnterior} /> : null,
+      badgeLabel: 'vs mes ant.',
+      href: null,
+    },
+    {
+      label: 'Unidades',
+      value: totalUnidades.toString(),
+      icon: Package,
+      iconBg: 'bg-blue-50',
+      iconColor: 'text-blue-500',
+      badge: null,
+      badgeLabel: periodo === 'hoy' ? 'hoy' : `últimos ${periodo === 'semana' ? '7d' : periodo === 'mes' ? '30d' : '90d'}`,
+      href: null,
+    },
+    {
+      label: 'Clientes con Deuda',
+      value: clientesConDeuda.toString(),
+      icon: Users,
+      iconBg: 'bg-rose-50',
+      iconColor: 'text-rose-500',
+      badge: null,
+      badgeLabel: 'activos',
+      href: '/clientes?filtro=con_deuda',
+    },
+  ]
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto bg-gray-50 min-h-full">
+    <div className="space-y-6 max-w-7xl mx-auto py-4">
 
       {/* Header */}
       <div className="flex items-end justify-between">
         <div>
           <p className="text-xs text-gray-400 capitalize tracking-wide">{fechaHoy}</p>
-          <h1
-            className="text-3xl font-black text-gray-900 mt-0.5 leading-none"
-            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.5px' }}
-          >
-            {saludo} 👋
+          <h1 className="text-2xl font-bold text-gray-900 mt-0.5 leading-none">
+            {saludo}
           </h1>
         </div>
         <Link href="/pos">
-          <button
-            className="flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95"
-            style={{
-              background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
-              color: 'white',
-              fontFamily: 'var(--font-sans)',
-              boxShadow: '0 4px 16px rgba(78,195,189,0.35)',
-            }}
+          <button className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-white transition-all hover:scale-105 active:scale-95 bg-emerald-500 hover:bg-emerald-600"
+            style={{ boxShadow: '0 4px 14px rgba(16,185,129,0.3)' }}
           >
             <ShoppingCart size={15} />
             Nueva venta
@@ -175,154 +269,145 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      {/* KPIs */}
+      {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-
-        {/* Hero: ventas hoy */}
-        <div
-          className="col-span-2 relative overflow-hidden rounded-2xl p-6"
-          style={{
-            background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
-            boxShadow: '0 8px 32px rgba(78,195,189,0.3)',
-          }}
-        >
-          <p className="text-teal-100 text-xs font-semibold uppercase tracking-widest" style={{ fontFamily: 'var(--font-sans)' }}>
-            Ventas hoy
-          </p>
-          {loading
-            ? <Skeleton className="h-12 w-48 mt-2 bg-white/20" />
-            : (
-              <p
-                className="text-5xl font-black text-white mt-2 leading-none"
-                style={{ fontFamily: 'var(--font-display)', letterSpacing: '-1px' }}
-              >
-                {formatPrecio(ventasHoy)}
-              </p>
-            )
-          }
-          <ShoppingCart className="absolute right-5 bottom-5 text-white opacity-10" size={72} />
-        </div>
-
-        {/* Ventas del mes */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest" style={{ fontFamily: 'var(--font-sans)' }}>
-              Mes
-            </p>
-            <div className="w-8 h-8 rounded-xl bg-teal-50 flex items-center justify-center">
-              <TrendingUp size={14} className="text-teal-500" />
-            </div>
-          </div>
-          {loading
-            ? <Skeleton className="h-8 w-32 mt-1" />
-            : (
-              <p className="text-2xl font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
-                {formatPrecio(ventasMes)}
-              </p>
-            )
-          }
-          <p className="text-xs text-gray-400 mt-1">este mes</p>
-          {!loading && margenPromedio !== null && (
-            <div className="mt-3 pt-3 border-t border-gray-50">
-              <p className="text-xs text-gray-400">Margen promedio</p>
-              <p className={`text-lg font-bold mt-0.5 ${margenPromedio < 20 ? 'text-red-500' : margenPromedio < 35 ? 'text-amber-500' : 'text-teal-500'}`}
-                style={{ fontFamily: 'var(--font-display)' }}>
-                {margenPromedio.toFixed(0)}%
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Alertas */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest" style={{ fontFamily: 'var(--font-sans)' }}>
-              Alertas
-            </p>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center">
-              <AlertCircle size={14} className="text-amber-400" />
-            </div>
-          </div>
-          {loading ? (
-            <div className="space-y-2">
-              {[1,2,3].map(i => <Skeleton key={i} className="h-6 w-full" />)}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs text-gray-500"><Users size={11} /> Con fiado</span>
-                <span className="text-xs font-bold bg-red-50 text-red-500 px-2 py-0.5 rounded-full">{clientesConDeuda}</span>
+        {kpis.map((kpi, i) => {
+          const Icon = kpi.icon
+          return (
+            <motion.div
+              key={kpi.label}
+              custom={i}
+              initial="hidden"
+              animate={loading ? 'hidden' : 'visible'}
+              variants={cardVariants}
+              whileHover={{ scale: 1.02 }}
+              className={`bg-white rounded-2xl p-5 transition-shadow ${kpi.href ? 'cursor-pointer' : ''}`}
+              style={{ boxShadow: 'var(--card-shadow)' }}
+              onMouseEnter={e => (e.currentTarget.style.boxShadow = 'var(--card-hover-shadow)')}
+              onMouseLeave={e => (e.currentTarget.style.boxShadow = 'var(--card-shadow)')}
+              onClick={() => kpi.href && router.push(kpi.href)}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  {kpi.label}
+                </p>
+                <div className={`w-8 h-8 rounded-xl ${kpi.iconBg} flex items-center justify-center`}>
+                  <Icon size={14} className={kpi.iconColor} />
+                </div>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs text-gray-500"><Package size={11} /> Sin stock</span>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${sinStock > 0 ? 'bg-red-50 text-red-500' : 'bg-gray-50 text-gray-400'}`}>
-                  {sinStock}
-                </span>
-              </div>
-              {paraLiquidar > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-xs text-amber-600"><Tag size={11} /> Liquidar</span>
-                  <span className="text-xs font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">{paraLiquidar}</span>
+              {loading ? (
+                <Skeleton className="h-8 w-32" />
+              ) : (
+                <div>
+                  <p className="text-2xl font-bold text-gray-900 font-mono">
+                    {kpi.value}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {kpi.badge}
+                    <span className="text-xs text-gray-400">{kpi.badgeLabel}</span>
+                  </div>
                 </div>
               )}
-            </div>
-          )}
-        </div>
+            </motion.div>
+          )
+        })}
       </div>
 
-      {/* Chart + métodos */}
+      {/* Chart + Métodos de pago */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-        {/* Área chart */}
-        <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="font-semibold text-gray-700 text-sm" style={{ fontFamily: 'var(--font-sans)' }}>
-              Ventas por día
-            </h2>
+        {/* Chart principal */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: loading ? 0 : 1 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+          className="lg:col-span-2 bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
+          <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
             <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1">
-              {(['semana', 'mes', 'año'] as Periodo[]).map(p => (
+              {(Object.keys(METRICA_CONFIG) as MetricaChart[]).map(m => (
                 <button
-                  key={p}
-                  onClick={() => setPeriodo(p)}
+                  key={m}
+                  onClick={() => setMetricaChart(m)}
                   className="px-3 py-1 rounded-lg text-xs font-semibold transition-all"
                   style={{
-                    background: periodo === p ? 'white' : 'transparent',
-                    color: periodo === p ? '#0d9488' : '#9ca3af',
-                    boxShadow: periodo === p ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-                    fontFamily: 'var(--font-sans)',
+                    background: metricaChart === m ? 'white' : 'transparent',
+                    color: metricaChart === m ? METRICA_CONFIG[m].color : '#9ca3af',
+                    boxShadow: metricaChart === m ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
                   }}
                 >
-                  {p === 'semana' ? '7d' : p === 'mes' ? '30d' : '365d'}
+                  {METRICA_CONFIG[m].label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1">
+              {([
+                { key: 'hoy' as Periodo, label: 'Hoy' },
+                { key: 'semana' as Periodo, label: '7d' },
+                { key: 'mes' as Periodo, label: '30d' },
+                { key: 'trimestre' as Periodo, label: '90d' },
+              ]).map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => setPeriodo(p.key)}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: periodo === p.key ? 'white' : 'transparent',
+                    color: periodo === p.key ? '#10B981' : '#9ca3af',
+                    boxShadow: periodo === p.key ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  }}
+                >
+                  {p.label}
                 </button>
               ))}
             </div>
           </div>
           {loading ? (
-            <Skeleton className="h-48 w-full rounded-xl" />
+            <Skeleton className="h-52 w-full rounded-xl" />
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={ventasPorDia} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={datosPorDia} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="gradVentas" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4EC3BD" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#4EC3BD" stopOpacity={0} />
+                  <linearGradient id="gradEmerald" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={mc.color} stopOpacity={0.2} />
+                    <stop offset="95%" stopColor={mc.color} stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                <Tooltip
-                  formatter={(v) => [formatPrecio(Number(v)), 'Ventas']}
-                  contentStyle={{ borderRadius: '12px', border: '1px solid #f0f0f0', fontSize: 12 }}
+                <YAxis
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={v => mask(metricaChart === 'unidades' ? `${v}` : `$${(v / 1000).toFixed(0)}k`)}
                 />
-                <Area type="monotone" dataKey="total" stroke="#4EC3BD" strokeWidth={2.5} fill="url(#gradVentas)" dot={false} activeDot={{ r: 4, fill: '#4EC3BD' }} />
+                <Tooltip
+                  formatter={(v) => [mask(mc.formatter(Number(v))), mc.label]}
+                  contentStyle={{ borderRadius: '12px', border: 'none', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey={mc.dataKey}
+                  stroke={mc.color}
+                  strokeWidth={2.5}
+                  fill="url(#gradEmerald)"
+                  dot={false}
+                  activeDot={{ r: 4, fill: mc.color }}
+                />
               </AreaChart>
             </ResponsiveContainer>
           )}
-        </div>
+        </motion.div>
 
         {/* Métodos de pago */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <h2 className="font-semibold text-gray-700 text-sm mb-5" style={{ fontFamily: 'var(--font-sans)' }}>
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: loading ? 0 : 1, x: 0 }}
+          transition={{ duration: 0.5, delay: 0.4 }}
+          className="bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
             Cobros del mes
           </h2>
           {loading ? (
@@ -339,32 +424,137 @@ export default function DashboardPage() {
                 return (
                   <div key={metodo}>
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs text-gray-600 font-medium">{metodo}</span>
-                      <span className="text-xs font-bold text-gray-700">{formatPrecio(total)}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                        <span className="text-xs text-gray-600 font-medium">{metodo}</span>
+                      </div>
+                      <span className="text-xs font-bold text-gray-700 font-mono">{mask(formatPrecio(total))}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
                     </div>
                   </div>
                 )
               })}
-              <p className="text-xs text-gray-400 pt-1">Total: {formatPrecio(totalMetodos)}</p>
+              <div className="pt-2 border-t border-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Total</span>
+                  <span className="text-sm font-bold text-gray-700 font-mono">{mask(formatPrecio(totalMetodos))}</span>
+                </div>
+              </div>
             </div>
           )}
-        </div>
+        </motion.div>
       </div>
 
-      {/* Deudores + Top productos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pb-4">
+      {/* Bottom row: Stock Crítico + Top Productos + Top Deudores */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 pb-4">
 
-        {/* Top deudores */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+        {/* Stock Crítico */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: loading ? 0 : 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.5 }}
+          className="bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-700 text-sm" style={{ fontFamily: 'var(--font-sans)' }}>
-              Clientes con fiado
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Stock Crítico
+            </h2>
+            <Link href="/inventario?stock=sin_stock">
+              <button className="text-xs text-emerald-500 hover:text-emerald-600 flex items-center gap-1 font-semibold transition-colors">
+                Ver todos <ArrowUpRight size={11} />
+              </button>
+            </Link>
+          </div>
+          {loading ? (
+            <div className="space-y-3">
+              {[1,2,3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : stockCritico.length === 0 ? (
+            <div className="py-8 text-center">
+              <Package size={28} className="mx-auto text-gray-200 mb-2" />
+              <p className="text-sm text-gray-400">Todo en stock</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {stockCritico.map((item, i) => (
+                <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors">
+                  <AlertTriangle size={14} className={item.stock === 0 ? 'text-red-400' : 'text-amber-400'} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-700 truncate">{formatNombreConTalle(item.nombre, item.talle)}</p>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                    item.stock === 0 ? 'bg-red-50 text-red-500' : 'bg-amber-50 text-amber-600'
+                  }`}>
+                    {item.stock === 0 ? 'Sin stock' : `${item.stock} uds`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </motion.div>
+
+        {/* Top Productos */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: loading ? 0 : 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.6 }}
+          className="bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+            Top Productos
+          </h2>
+          {loading ? (
+            <Skeleton className="h-48 w-full rounded-xl" />
+          ) : topProductos.length === 0 ? (
+            <div className="py-8 text-center">
+              <Package size={28} className="mx-auto text-gray-200 mb-2" />
+              <p className="text-sm text-gray-400">Sin ventas</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {topProductos.map((prod, i) => {
+                const max = topProductos[0]?.cantidad || 1
+                const pct = (prod.cantidad / max) * 100
+                return (
+                  <div key={i}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-600 truncate">{prod.nombre}</span>
+                      <span className="text-xs font-bold text-gray-700 font-mono ml-2">{prod.cantidad}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{
+                          width: `${pct}%`,
+                          backgroundColor: i === 0 ? '#10B981' : i === 1 ? '#34D399' : '#6EE7B7',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </motion.div>
+
+        {/* Top Deudores */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: loading ? 0 : 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.7 }}
+          className="bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Top Deudores
             </h2>
             <Link href="/clientes?filtro=con_deuda">
-              <button className="text-xs text-teal-500 hover:text-teal-600 flex items-center gap-1 font-semibold transition-colors">
+              <button className="text-xs text-emerald-500 hover:text-emerald-600 flex items-center gap-1 font-semibold transition-colors">
                 Ver todos <ArrowUpRight size={11} />
               </button>
             </Link>
@@ -374,53 +564,26 @@ export default function DashboardPage() {
               {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-10 w-full" />)}
             </div>
           ) : topDeudores.length === 0 ? (
-            <div className="py-12 text-center">
-              <Users size={32} className="mx-auto text-gray-200 mb-2" />
-              <p className="text-sm text-gray-400">Sin deudas pendientes</p>
+            <div className="py-8 text-center">
+              <Users size={28} className="mx-auto text-gray-200 mb-2" />
+              <p className="text-sm text-gray-400">Sin deudas</p>
             </div>
           ) : (
             <div className="space-y-1">
-              {topDeudores.map((c, i) => (
-                <div key={c.id} className="flex items-center gap-3 p-2 rounded-xl hover:bg-gray-50 transition-colors">
-                  <span className="text-xs text-gray-300 w-4 shrink-0 text-right" style={{ fontFamily: 'var(--font-display)' }}>{i + 1}</span>
-                  <InitialsAvatar name={c.nombre} />
-                  <span className="flex-1 text-sm font-medium text-gray-700 truncate">{c.nombre}</span>
-                  <span className="text-xs font-bold bg-red-50 text-red-500 px-2.5 py-1 rounded-full shrink-0">
-                    {formatPrecio(c.deuda_total)}
-                  </span>
-                </div>
+              {topDeudores.map((c) => (
+                <Link key={c.id} href={`/clientes/${c.id}`}>
+                  <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors">
+                    <InitialsAvatar name={c.nombre} />
+                    <span className="flex-1 text-sm text-gray-700 truncate">{c.nombre}</span>
+                    <span className="text-xs font-bold bg-red-50 text-red-500 px-2.5 py-1 rounded-full shrink-0 font-mono">
+                      {mask(formatPrecio(c.deuda_total))}
+                    </span>
+                  </div>
+                </Link>
               ))}
             </div>
           )}
-        </div>
-
-        {/* Top productos */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <h2 className="font-semibold text-gray-700 text-sm mb-4" style={{ fontFamily: 'var(--font-sans)' }}>
-            Top productos vendidos
-          </h2>
-          {loading ? (
-            <Skeleton className="h-48 w-full rounded-xl" />
-          ) : topProductos.length === 0 ? (
-            <div className="py-12 text-center">
-              <Package size={32} className="mx-auto text-gray-200 mb-2" />
-              <p className="text-sm text-gray-400">Sin ventas en el período</p>
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={topProductos} layout="vertical" margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
-                <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="nombre" tick={{ fontSize: 10, fill: '#6b7280' }} width={120} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #f0f0f0', fontSize: 12 }} />
-                <Bar dataKey="cantidad" radius={[0, 6, 6, 0]} maxBarSize={14}>
-                  {topProductos.map((_, i) => (
-                    <Cell key={i} fill={i === 0 ? '#4EC3BD' : i === 1 ? '#6dd4cf' : '#a7e8e5'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+        </motion.div>
       </div>
     </div>
   )

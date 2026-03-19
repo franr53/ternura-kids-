@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
+import Image from 'next/image'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -26,93 +27,60 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden"
-      style={{ background: '#0B3D39' }}>
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
 
-      {/* Blobs orgánicos de fondo */}
-      <div className="tk-blob absolute"
-        style={{
-          width: 600, height: 600,
-          top: '-15%', left: '-10%',
-          background: 'radial-gradient(circle, rgba(78,195,189,0.18) 0%, transparent 70%)',
-          filter: 'blur(40px)',
-        }}
-      />
-      <div className="tk-blob absolute"
-        style={{
-          width: 500, height: 500,
-          bottom: '-20%', right: '-8%',
-          background: 'radial-gradient(circle, rgba(20,184,166,0.15) 0%, transparent 70%)',
-          filter: 'blur(60px)',
-          animationDelay: '-4s',
-        }}
-      />
-      <div className="tk-blob absolute"
-        style={{
-          width: 300, height: 300,
-          top: '30%', right: '20%',
-          background: 'radial-gradient(circle, rgba(245,158,11,0.08) 0%, transparent 70%)',
-          filter: 'blur(40px)',
-          animationDelay: '-2s',
-        }}
-      />
+      {/* Fondo: logo ocupando toda la pantalla con blur fuerte */}
+      <div className="absolute inset-0">
+        <Image
+          src="/logo.png"
+          alt=""
+          fill
+          className="object-cover"
+          style={{ filter: 'blur(20px)', transform: 'scale(1.1)' }}
+          priority
+        />
+        {/* Overlay oscuro para contraste */}
+        <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.45)' }} />
+      </div>
 
-      {/* Patrón de puntos sutil */}
-      <div className="absolute inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(78,195,189,1) 1px, transparent 0)',
-          backgroundSize: '32px 32px',
-        }}
-      />
-
-      {/* Card principal */}
+      {/* Card glassmorphism */}
       <div className="tk-fade-up relative z-10 w-full max-w-md mx-4">
 
-        {/* Header de la card */}
-        <div className="text-center mb-10">
-          {/* Ícono */}
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-6"
-            style={{
-              background: 'rgba(78,195,189,0.15)',
-              border: '1px solid rgba(78,195,189,0.3)',
-              backdropFilter: 'blur(10px)',
-            }}
-          >
-            <span className="text-3xl" role="img" aria-label="oso">🧸</span>
-          </div>
-
+        {/* Header */}
+        <div className="text-center mb-8">
           <h1
             className="text-5xl font-black text-white mb-1 leading-none"
-            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-1px' }}
+            style={{ fontFamily: 'var(--font-display)', letterSpacing: '-1px', textShadow: '0 2px 12px rgba(0,0,0,0.3)' }}
           >
             Ternura
           </h1>
           <p
             className="text-lg font-bold tracking-[6px] uppercase"
-            style={{ color: '#4EC3BD' }}
+            style={{ color: '#4EC3BD', textShadow: '0 1px 8px rgba(78,195,189,0.4)' }}
           >
             Kids
           </p>
         </div>
 
-        {/* Formulario */}
+        {/* Glass card */}
         <div
-          className="rounded-2xl p-8"
+          className="rounded-3xl p-8"
           style={{
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(78,195,189,0.2)',
-            backdropFilter: 'blur(20px)',
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.15)',
           }}
         >
-          <p className="text-white/60 text-sm mb-6 text-center">
+          <p className="text-white/50 text-sm mb-6 text-center">
             Ingresá para continuar
           </p>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label
-                className="block text-xs font-semibold uppercase tracking-widest mb-2"
-                style={{ color: 'rgba(78,195,189,0.7)' }}
+                className="block text-xs font-semibold uppercase tracking-widest mb-2 text-white/50"
               >
                 Email
               </label>
@@ -123,28 +91,29 @@ export default function LoginPage() {
                 required
                 autoFocus
                 placeholder="tu@email.com"
-                className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all duration-200 placeholder-white/20"
+                className="w-full px-4 py-3.5 rounded-xl text-sm outline-none transition-all duration-200 text-white placeholder-white/25"
                 style={{
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(78,195,189,0.2)',
-                  color: 'white',
-                  fontFamily: 'var(--font-sans)',
+                  background: 'rgba(100,200,220,0.15)',
+                  border: '1px solid rgba(120,210,230,0.25)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
                 }}
                 onFocus={e => {
-                  e.target.style.border = '1px solid rgba(78,195,189,0.6)'
-                  e.target.style.background = 'rgba(255,255,255,0.1)'
+                  e.target.style.border = '1px solid rgba(120,210,230,0.5)'
+                  e.target.style.background = 'rgba(100,200,220,0.22)'
+                  e.target.style.boxShadow = '0 0 16px rgba(100,200,220,0.15)'
                 }}
                 onBlur={e => {
-                  e.target.style.border = '1px solid rgba(78,195,189,0.2)'
-                  e.target.style.background = 'rgba(255,255,255,0.07)'
+                  e.target.style.border = '1px solid rgba(120,210,230,0.25)'
+                  e.target.style.background = 'rgba(100,200,220,0.15)'
+                  e.target.style.boxShadow = 'none'
                 }}
               />
             </div>
 
             <div>
               <label
-                className="block text-xs font-semibold uppercase tracking-widest mb-2"
-                style={{ color: 'rgba(78,195,189,0.7)' }}
+                className="block text-xs font-semibold uppercase tracking-widest mb-2 text-white/50"
               >
                 Contraseña
               </label>
@@ -154,20 +123,22 @@ export default function LoginPage() {
                 onChange={e => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all duration-200 placeholder-white/20"
+                className="w-full px-4 py-3.5 rounded-xl text-sm outline-none transition-all duration-200 text-white placeholder-white/25"
                 style={{
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(78,195,189,0.2)',
-                  color: 'white',
-                  fontFamily: 'var(--font-sans)',
+                  background: 'rgba(100,200,220,0.15)',
+                  border: '1px solid rgba(120,210,230,0.25)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
                 }}
                 onFocus={e => {
-                  e.target.style.border = '1px solid rgba(78,195,189,0.6)'
-                  e.target.style.background = 'rgba(255,255,255,0.1)'
+                  e.target.style.border = '1px solid rgba(120,210,230,0.5)'
+                  e.target.style.background = 'rgba(100,200,220,0.22)'
+                  e.target.style.boxShadow = '0 0 16px rgba(100,200,220,0.15)'
                 }}
                 onBlur={e => {
-                  e.target.style.border = '1px solid rgba(78,195,189,0.2)'
-                  e.target.style.background = 'rgba(255,255,255,0.07)'
+                  e.target.style.border = '1px solid rgba(120,210,230,0.25)'
+                  e.target.style.background = 'rgba(100,200,220,0.15)'
+                  e.target.style.boxShadow = 'none'
                 }}
               />
             </div>
@@ -176,15 +147,14 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 relative overflow-hidden"
+                className="w-full py-3.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 relative overflow-hidden cursor-pointer"
                 style={{
                   background: loading
-                    ? 'rgba(78,195,189,0.4)'
-                    : 'linear-gradient(135deg, #4EC3BD 0%, #14b8a6 100%)',
-                  color: loading ? 'rgba(255,255,255,0.6)' : '#0B3D39',
-                  fontFamily: 'var(--font-sans)',
+                    ? 'rgba(180,130,200,0.4)'
+                    : 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)',
+                  color: 'white',
                   letterSpacing: '0.5px',
-                  boxShadow: loading ? 'none' : '0 4px 24px rgba(78,195,189,0.4)',
+                  boxShadow: loading ? 'none' : '0 4px 20px rgba(168,85,247,0.4)',
                 }}
               >
                 {loading ? (
@@ -200,8 +170,8 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-xs mt-6" style={{ color: 'rgba(78,195,189,0.3)' }}>
-          Ternura Kids © {new Date().getFullYear()}
+        <p className="text-center text-xs mt-6 text-white/25">
+          Ternura Kids &copy; {new Date().getFullYear()}
         </p>
       </div>
     </div>
