@@ -195,7 +195,7 @@ export default function NuevoProductoPage() {
   const [todosProductos, setTodosProductos] = useState<ProductoExistente[]>([])
 
   // Wizard state
-  const [step, setStep] = useState<QuizStep>('inicio')
+  const [step, setStep] = useState<QuizStep>('marca')
   const [dir, setDir] = useState<'forward' | 'backward'>('forward')
   const [vinoDeExistente, setVinoDeExistente] = useState(false)
 
@@ -300,13 +300,13 @@ export default function NuevoProductoPage() {
   function goBack() {
     const prev: Record<QuizStep, QuizStep | null> = {
       inicio: null,
-      buscar_existente: 'inicio',
-      marca: 'inicio',
-      tipo: 'marca',
-      producto: 'tipo',
-      nombre_nuevo: 'producto',
+      buscar_existente: null,
+      marca: null,
+      tipo: 'producto',
+      producto: 'marca',
+      nombre_nuevo: 'tipo',
       precio: 'nombre_nuevo',
-      precio_existente: vinoDeExistente ? 'buscar_existente' : 'producto',
+      precio_existente: 'producto',
       talle: esProductoNuevo ? 'precio' : 'precio_existente',
       listo: 'talle',
     }
@@ -315,12 +315,6 @@ export default function NuevoProductoPage() {
   }
 
   // ── Datos derivados ────────────────────────────────────────────
-  const productosExistentesFiltrados = busquedaExistente.trim().length >= 2
-    ? todosProductos.filter(p =>
-        normalizar(busquedaExistente).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
-      ).slice(0, 20)
-    : []
-
   const marcasFiltradas = busquedaMarca.trim()
     ? proveedores.filter(p =>
         normalizar(busquedaMarca).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
@@ -332,14 +326,17 @@ export default function NuevoProductoPage() {
   )
   const otrosTipos = categorias.filter(c => !tiposDeEstaMarca.some(t => t.id === c.id))
 
-  const productosDeEsteMarcaTipo = todosProductos.filter(
-    p => p.proveedor_id === marca?.id && p.categoria_id === tipo?.id
-  )
+  // Todos los productos de la marca, para el paso "producto"
+  const productosDeEstaMarca = todosProductos.filter(p => p.proveedor_id === marca?.id)
   const productosFiltrados = busquedaProducto.trim()
-    ? productosDeEsteMarcaTipo.filter(p =>
+    ? productosDeEstaMarca.filter(p =>
         normalizar(busquedaProducto).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
       )
-    : productosDeEsteMarcaTipo
+    : productosDeEstaMarca
+  // Agrupados por categoría para mostrar en el paso producto
+  const productosPorCategoria = categorias
+    .filter(c => productosFiltrados.some(p => p.categoria_id === c.id))
+    .map(c => ({ categoria: c, productos: productosFiltrados.filter(p => p.categoria_id === c.id) }))
 
   const tallesSugeridos = tipo?.sistema_talles ? (TALLES_POR_SISTEMA[tipo.sistema_talles] || []) : []
   const tallesExistentes = producto?.variantes || []
@@ -444,12 +441,14 @@ export default function NuevoProductoPage() {
 
   function seleccionarTipo(c: Categoria) {
     setTipo(c)
-    setProducto(null); setEsProductoNuevo(false)
+    setProducto(null)
     setTallesSeleccionados({}); setBarcode('')
-    irA('producto', 'forward')
+    irA('nombre_nuevo', 'forward')
   }
 
   function seleccionarProducto(p: ProductoExistente) {
+    const cat = categorias.find(c => c.id === p.categoria_id) || null
+    setTipo(cat)
     setProducto(p)
     setEsProductoNuevo(false)
     setQuiereCambiarPrecio(false)
@@ -458,7 +457,7 @@ export default function NuevoProductoPage() {
     setPrecioVentaEditado(false)
     setTallesSeleccionados({}); setBarcode('')
     setBusquedaProducto('')
-    irA('talle', 'forward')
+    irA('precio_existente', 'forward')
   }
 
   function seleccionarNuevoProducto() {
@@ -467,7 +466,7 @@ export default function NuevoProductoPage() {
     setNombreNuevoProducto('')
     setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setOtroTipoPrenda('')
     setPrecioCosto(''); setPrecioVenta(''); setPrecioVentaEditado(false); setTemporada('todo_el_año')
-    irA('nombre_nuevo', 'forward')
+    irA('tipo', 'forward')
   }
 
   async function toggleTalle(talle: string, varianteId: string | null, esNueva: boolean) {
@@ -687,17 +686,17 @@ export default function NuevoProductoPage() {
     setMarca(null); setTipo(null); setProducto(null); setEsProductoNuevo(false)
     setVinoDeExistente(false)
     setTallesSeleccionados({}); setBarcode(''); setBusquedaProducto(''); setBusquedaExistente('')
-    irA('inicio', 'backward')
+    irA('marca', 'backward')
   }
 
   // ── Breadcrumbs ────────────────────────────────────────────────
   type BC = { label: string; goTo: QuizStep }
   const breadcrumbs: BC[] = []
-  if (marca && !['inicio','buscar_existente','marca'].includes(step)) breadcrumbs.push({ label: marca.nombre, goTo: 'marca' })
-  if (tipo && !['inicio','buscar_existente','marca','tipo'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'tipo' })
+  if (marca && !['marca'].includes(step)) breadcrumbs.push({ label: marca.nombre, goTo: 'marca' })
+  if (tipo && !['marca','tipo','producto'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'tipo' })
   const prodNombre = esProductoNuevo ? nombreNuevoProducto : producto?.nombre
-  if (prodNombre && !['inicio','buscar_existente','marca','tipo','producto','nombre_nuevo','precio','precio_existente'].includes(step)) {
-    breadcrumbs.push({ label: prodNombre, goTo: vinoDeExistente ? 'buscar_existente' : 'producto' })
+  if (prodNombre && !['marca','tipo','producto','nombre_nuevo','precio','precio_existente'].includes(step)) {
+    breadcrumbs.push({ label: prodNombre, goTo: 'producto' })
   }
 
   // ── UI helpers ─────────────────────────────────────────────────
@@ -831,7 +830,7 @@ export default function NuevoProductoPage() {
 
         {/* Header */}
         <div className="flex items-center gap-3">
-          {step === 'inicio' ? (
+          {step === 'marca' ? (
             <Link href="/inventario">
               <button className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50">
                 <ArrowLeft size={16} className="text-gray-500" />
@@ -865,105 +864,13 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
-        {/* ── PASO INICIO ────────────────────────────────────────── */}
-        {step === 'inicio' && (
-          <div className={animClass}>
-            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Carga de stock</p>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué ingresó?</h2>
-              </div>
-              <div className="grid grid-cols-1 gap-3">
-                <button
-                  onClick={() => { setVinoDeExistente(true); setBusquedaExistente(''); irA('buscar_existente', 'forward') }}
-                  className="flex items-center gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all hover:border-teal-400 hover:bg-teal-50 active:scale-[0.98]"
-                  style={{ borderColor: '#e5e7eb', background: 'white' }}
-                >
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(78,195,189,0.1)' }}>
-                    <RefreshCw size={20} style={{ color: '#4EC3BD' }} />
-                  </div>
-                  <div>
-                    <p className="font-bold text-gray-800 text-sm">Un artículo que ya tenía</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Reponer stock de un producto existente</p>
-                  </div>
-                </button>
-                <button
-                  onClick={() => { setVinoDeExistente(false); irA('marca', 'forward') }}
-                  className="flex items-center gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all hover:border-teal-400 hover:bg-teal-50 active:scale-[0.98]"
-                  style={{ borderColor: '#e5e7eb', background: 'white' }}
-                >
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(78,195,189,0.1)' }}>
-                    <Sparkles size={20} style={{ color: '#4EC3BD' }} />
-                  </div>
-                  <div>
-                    <p className="font-bold text-gray-800 text-sm">Un artículo nuevo</p>
-                    <p className="text-xs text-gray-400 mt-0.5">No estaba en el sistema todavía</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── PASO BUSCAR EXISTENTE ───────────────────────────────── */}
-        {step === 'buscar_existente' && (
-          <div className={animClass}>
-            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Reponer stock</p>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué artículo?</h2>
-              </div>
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                <Input
-                  value={busquedaExistente}
-                  onChange={e => setBusquedaExistente(e.target.value)}
-                  placeholder="Buscar por nombre..."
-                  className="h-11 pl-9 rounded-xl border-gray-200 text-sm"
-                  autoFocus
-                />
-              </div>
-              {busquedaExistente.trim().length >= 2 && productosExistentesFiltrados.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-3">Sin resultados para "{busquedaExistente}"</p>
-              )}
-              {productosExistentesFiltrados.length > 0 && (
-                <div className="space-y-1.5 max-h-80 overflow-y-auto">
-                  {productosExistentesFiltrados.map(p => {
-                    const prov = proveedores.find(v => v.id === p.proveedor_id)
-                    const stockTotal = p.variantes.reduce((s, v) => s + v.stock, 0)
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => seleccionarProductoExistente(p)}
-                        className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-all hover:border-teal-300 hover:bg-teal-50 active:scale-[0.98] text-left"
-                        style={{ borderColor: '#e5e7eb', background: 'white' }}
-                      >
-                        <div>
-                          <p className="font-semibold text-sm text-gray-800">{p.nombre}</p>
-                          {prov && <p className="text-xs text-gray-400 mt-0.5">{prov.nombre}</p>}
-                        </div>
-                        <span className="text-xs font-semibold ml-3 flex-shrink-0 px-2 py-0.5 rounded-full" style={{ background: stockTotal > 0 ? 'rgba(78,195,189,0.1)' : 'rgba(249,115,22,0.1)', color: stockTotal > 0 ? '#0d9488' : '#ea580c' }}>
-                          {stockTotal} uds
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              {busquedaExistente.trim().length < 2 && (
-                <p className="text-xs text-gray-400 text-center py-2">Escribí al menos 2 letras para buscar</p>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* ── PASO MARCA ─────────────────────────────────────────── */}
         {step === 'marca' && (
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Paso 1 de 6</p>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿De qué marca es?</h2>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Carga de stock</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué marca ingresó?</h2>
               </div>
               <button
                 onClick={() => setModalMarcaAbierto(true)}
@@ -982,8 +889,9 @@ export default function NuevoProductoPage() {
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Paso 2 de 6</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto</p>
                 <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué tipo de producto?</h2>
+                <p className="text-sm font-bold mt-0.5" style={{ color: '#4EC3BD' }}>{marca?.nombre}</p>
               </div>
 
               {modoCrear === 'tipo' ? (
@@ -1030,16 +938,40 @@ export default function NuevoProductoPage() {
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Paso 3 de 6</p>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué producto?</h2>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Seleccioná el artículo</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>{marca?.nombre}</h2>
               </div>
               <div className="space-y-3">
-                {productosDeEsteMarcaTipo.length > 5 && (
-                  <Input value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar..." className="h-9 rounded-xl border-gray-200 text-sm" autoFocus />
+                {/* Búsqueda */}
+                {productosDeEstaMarca.length > 4 && (
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <Input value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar producto..." className="h-9 pl-8 rounded-xl border-gray-200 text-sm" autoFocus />
+                  </div>
                 )}
-                {productosFiltrados.length > 0 && (
-                  <div className="space-y-1.5">
-                    {productosFiltrados.map(p => {
+                {/* Productos agrupados por categoría */}
+                {productosPorCategoria.length > 0 ? (
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {productosPorCategoria.map(({ categoria, productos }) => (
+                      <div key={categoria.id}>
+                        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">{categoria.nombre}</p>
+                        <div className="space-y-1">
+                          {productos.map(p => {
+                            const stockTotal = p.variantes.reduce((s, v) => s + v.stock, 0)
+                            return (
+                              <button key={p.id} onClick={() => seleccionarProducto(p)}
+                                className="w-full flex justify-between items-center px-4 py-3 rounded-2xl border transition-all hover:border-teal-300 hover:bg-teal-50 active:scale-[0.98]"
+                                style={{ borderColor: '#e5e7eb', background: 'white' }}>
+                                <span className="font-semibold text-sm text-gray-800 text-left">{p.nombre}</span>
+                                <span className="text-xs font-medium ml-3 flex-shrink-0" style={{ color: stockTotal > 0 ? '#4EC3BD' : '#f97316' }}>{stockTotal} uds</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {/* Productos sin categoría */}
+                    {productosFiltrados.filter(p => !p.categoria_id).map(p => {
                       const stockTotal = p.variantes.reduce((s, v) => s + v.stock, 0)
                       return (
                         <button key={p.id} onClick={() => seleccionarProducto(p)}
@@ -1051,9 +983,12 @@ export default function NuevoProductoPage() {
                       )
                     })}
                   </div>
-                )}
-                {productosDeEsteMarcaTipo.length === 0 && (
-                  <p className="text-sm text-gray-400 text-center py-4">No hay productos de {marca?.nombre} en {tipo?.nombre}</p>
+                ) : (
+                  busquedaProducto ? (
+                    <p className="text-sm text-gray-400 text-center py-3">Sin resultados para "{busquedaProducto}"</p>
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-3">Todavía no hay productos de {marca?.nombre}</p>
+                  )
                 )}
                 <BtnAgregar label="Nuevo producto" onClick={seleccionarNuevoProducto} />
               </div>
@@ -1240,7 +1175,7 @@ export default function NuevoProductoPage() {
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Reponer stock</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">{marca?.nombre}</p>
                 <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Cambió el precio?</h2>
                 <p className="text-sm font-bold mt-0.5" style={{ color: '#4EC3BD' }}>
                   {producto.nombre}
