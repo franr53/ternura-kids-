@@ -94,6 +94,7 @@ export interface Caja {
   total_debito: number
   total_credito: number
   total_fiado: number
+  total_cobros: number
   total_retiros: number
   estado: EstadoCaja
   abierta_por?: string
@@ -135,6 +136,7 @@ export interface VentaPago {
   venta_id: string
   metodo: MetodoPago
   monto: number
+  notas?: string
 }
 
 export interface FiadoMovimiento {
@@ -144,6 +146,7 @@ export interface FiadoMovimiento {
   tipo: 'cargo' | 'abono'
   monto: number
   notas?: string
+  metodo_pago?: string
   usuario_id?: string
   creado_en: string
   cliente?: Cliente

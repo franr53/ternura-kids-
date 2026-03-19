@@ -86,31 +86,29 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
     if (!cliente) return
     if (monto > cliente.deuda_total) { toast.error(`El abono no puede superar la deuda (${formatPrecio(cliente.deuda_total)})`); return }
 
-    const { error } = await supabase.from('fiado_movimientos').insert({
-      cliente_id: id,
-      tipo: 'abono',
-      monto,
-      notas: notasAbono || null,
+    const { data, error } = await supabase.rpc('procesar_cobro_deuda', {
+      p_cliente_id: id,
+      p_monto: Math.round(monto),
+      p_metodo: metodoPagoAbono,
+      p_notas: notasAbono || null,
+      p_proveedor_id: proveedorTransferencia?.id || null,
     })
     if (error) { toast.error('Error al registrar abono: ' + error.message); return }
 
-    const nuevaDeuda = Math.max(0, (cliente.deuda_total || 0) - monto)
-    await supabase.from('clientes').update({ deuda_total: nuevaDeuda }).eq('id', id)
-    setCliente(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
-    setMovimientos(prev => [{ id: Date.now().toString(), cliente_id: id, tipo: 'abono', monto, notas: notasAbono || undefined, creado_en: new Date().toISOString() }, ...prev])
+    const deudaRestante = (data as { deuda_restante: number }).deuda_restante
+    setCliente(prev => prev ? { ...prev, deuda_total: deudaRestante } : null)
+    setMovimientos(prev => [{
+      id: Date.now().toString(),
+      cliente_id: id,
+      tipo: 'abono',
+      monto,
+      notas: notasAbono || undefined,
+      metodo_pago: metodoPagoAbono,
+      creado_en: new Date().toISOString(),
+    }, ...prev])
 
-    // Si la transferencia va a un proveedor, registrar el pago y reducir su deuda
     if (metodoPagoAbono === 'transferencia' && proveedorTransferencia) {
       const nuevaDeudaProv = Math.max(0, proveedorTransferencia.deuda_total - monto)
-      await Promise.all([
-        supabase.from('pagos_proveedores').insert({
-          proveedor_id: proveedorTransferencia.id,
-          monto,
-          metodo: 'transferencia',
-          notas: `Abono de cliente ${cliente.nombre}`,
-        }),
-        supabase.from('proveedores').update({ deuda_total: nuevaDeudaProv }).eq('id', proveedorTransferencia.id),
-      ])
       setProveedores(prev => prev.map(p => p.id === proveedorTransferencia.id ? { ...p, deuda_total: nuevaDeudaProv } : p))
       toast.success(`Deuda de ${proveedorTransferencia.nombre} reducida en ${formatPrecio(monto)}`, { duration: 4000 })
       setProveedorTransferencia(null)
@@ -118,7 +116,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
 
     setMontoAbono('')
     setNotasAbono('')
-    setUltimoAbono({ monto, deudaRestante: nuevaDeuda })
+    setUltimoAbono({ monto, deudaRestante })
     toast.success(`Abono de ${formatPrecio(monto)} registrado`)
   }
 

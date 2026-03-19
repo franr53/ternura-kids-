@@ -9,6 +9,7 @@ import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, S
 import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
+import CobroDeudaDialog from '@/components/pos/cobro-deuda-dialog'
 import Link from 'next/link'
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
@@ -65,6 +66,7 @@ export default function PosPage() {
     _setMostrarNuevaVenta(v)
     try { if (v) sessionStorage.setItem('pos:dialog', '1'); else sessionStorage.removeItem('pos:dialog') } catch {}
   }
+  const [mostrarCobroDeuda, setMostrarCobroDeuda] = useState(false)
   const [expandida, setExpandida] = useState<string | null>(null)
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
@@ -124,19 +126,29 @@ export default function PosPage() {
           </h1>
           <p className="text-xs text-gray-400 capitalize mt-0.5">{fechaHoy}</p>
         </div>
-        <button
-          onClick={() => setMostrarNuevaVenta(true)}
-          className="flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95"
-          style={{
-            background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
-            color: 'white',
-            fontFamily: 'var(--font-sans)',
-            boxShadow: '0 4px 16px rgba(78,195,189,0.35)',
-          }}
-        >
-          <Plus size={16} />
-          Nueva venta
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMostrarCobroDeuda(true)}
+            className="flex items-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95 border-2 border-teal-400 text-teal-600 bg-white hover:bg-teal-50"
+            style={{ fontFamily: 'var(--font-sans)' }}
+          >
+            <HandCoins size={16} />
+            Nuevo pago
+          </button>
+          <button
+            onClick={() => setMostrarNuevaVenta(true)}
+            className="flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95"
+            style={{
+              background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)',
+              color: 'white',
+              fontFamily: 'var(--font-sans)',
+              boxShadow: '0 4px 16px rgba(78,195,189,0.35)',
+            }}
+          >
+            <Plus size={16} />
+            Nueva venta
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -372,6 +384,12 @@ export default function PosPage() {
           onVentaCompletada={() => {
             cargarVentas()
           }}
+        />
+      )}
+      {mostrarCobroDeuda && (
+        <CobroDeudaDialog
+          onCerrar={() => setMostrarCobroDeuda(false)}
+          onCobroCompletado={() => cargarVentas()}
         />
       )}
     </div>

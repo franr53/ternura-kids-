@@ -277,7 +277,7 @@ export default function CajaPage() {
   if (loading) return <div className="p-8 text-center text-gray-400">Cargando...</div>
 
   const totalVentas = caja
-    ? (caja.total_efectivo || 0) + (caja.total_transferencia || 0) + (caja.total_debito || 0) + (caja.total_credito || 0) + (caja.total_fiado || 0)
+    ? (caja.total_efectivo || 0) + (caja.total_transferencia || 0) + (caja.total_debito || 0) + (caja.total_credito || 0) + (caja.total_fiado || 0) + (caja.total_cobros || 0)
     : 0
 
   const totalGastosDia = gastosDia.reduce((s, g) => s + g.monto, 0)
@@ -419,6 +419,7 @@ export default function CajaPage() {
                 { label: 'Débito',         value: caja.total_debito,        color: 'text-purple-600' },
                 { label: 'Crédito',        value: caja.total_credito,       color: 'text-orange-600' },
                 { label: 'Fiado',          value: caja.total_fiado,         color: 'text-red-500' },
+                ...(caja.total_cobros > 0 ? [{ label: 'Cobros de deuda', value: caja.total_cobros, color: 'text-teal-600' }] : []),
               ].map(({ label, value, color }) => (
                 <div key={label} className="flex justify-between items-center">
                   <span className="text-gray-600">{label}</span>
