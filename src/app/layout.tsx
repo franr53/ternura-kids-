@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Fraunces, Inter, JetBrains_Mono } from 'next/font/google'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import './globals.css'
 
 const fraunces = Fraunces({
@@ -67,6 +68,7 @@ export default function RootLayout({
             `,
           }}
         />
+        <SpeedInsights />
       </body>
     </html>
   )
