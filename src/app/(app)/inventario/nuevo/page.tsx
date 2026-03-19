@@ -399,7 +399,7 @@ export default function NuevoProductoPage() {
     setPrecioVentaEditado(false)
     setTallesSeleccionados({}); setBarcode('')
     setBusquedaExistente('')
-    irA('precio_existente', 'forward')
+    irA('talle', 'forward')
   }
 
   function seleccionarMarca(p: Proveedor) {
@@ -428,7 +428,7 @@ export default function NuevoProductoPage() {
     setPrecioVentaEditado(false)
     setTallesSeleccionados({}); setBarcode('')
     setBusquedaProducto('')
-    irA('precio_existente', 'forward')
+    irA('talle', 'forward')
   }
 
   function seleccionarNuevoProducto() {

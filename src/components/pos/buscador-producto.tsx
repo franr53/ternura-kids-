@@ -62,6 +62,13 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
             placeholder="Buscar producto..."
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && busqueda.trim()) {
+                const exacto = todasVariantes.find(v => v.codigo_barras === busqueda.trim())
+                if (exacto) { onSeleccionar(exacto); onCerrar(); return }
+                if (resultados.length === 1) { onSeleccionar(resultados[0]); onCerrar() }
+              }
+            }}
             className="border-0 shadow-none focus-visible:ring-0 text-base p-0 h-auto"
           />
           <button onClick={onCerrar} className="text-gray-400 hover:text-gray-600">

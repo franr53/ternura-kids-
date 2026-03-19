@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Producto, Categoria, Proveedor } from '@/types'
@@ -23,6 +23,7 @@ export default function InventarioPage() {
 function InventarioContent() {
   const supabase = createClient()
   const searchParams = useSearchParams()
+  const router = useRouter()
 
   const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos', async () => {
     const [{ data: prods }, { data: cats }, { data: provs }] = await Promise.all([
@@ -218,6 +219,14 @@ function InventarioContent() {
               placeholder="Buscar por nombre o código de barras..."
               value={busqueda}
               onChange={e => setBusqueda(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && busqueda.trim()) {
+                  const exacto = productos.find(p =>
+                    p.variantes?.some(v => v.codigo_barras === busqueda.trim())
+                  )
+                  if (exacto) router.push(`/inventario/${exacto.id}`)
+                }
+              }}
               className="pl-9"
             />
           </div>
