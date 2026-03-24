@@ -175,13 +175,15 @@ function abreviaturaMarca(nombre: string): string {
   return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
 }
 
-function generarCodigoBarras(tipo: string, estilo: string, catNombre: string, marcaNombre: string, talle: string): string {
+function generarCodigoBarras(tipo: string, estilo: string, catNombre: string, marcaNombre: string, talle: string, genero?: string | null): string {
   const clave = [tipo, estilo].filter(Boolean).join(' ')
   const tipoPrefix = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipo] || generarPrefijo(clave || tipo)
   const catCode   = categoriaACodigo(catNombre)
   const marcaCode = abreviaturaMarca(marcaNombre)
   const talleCode = normalizarTalleParaCodigo(talle)
-  return `${tipoPrefix}${catCode}${marcaCode}${talleCode}`
+  // Incluir código de género para evitar duplicados cuando la categoría es neutra
+  const generoCode = genero === 'nena' ? 'NA' : genero === 'nene' ? 'NO' : genero === 'bebe' ? 'BB' : ''
+  return `${tipoPrefix}${catCode}${marcaCode}${generoCode}${talleCode}`
 }
 
 function normalizar(s: string) {
@@ -404,7 +406,7 @@ export default function NuevoProductoPage() {
     if (esProductoNuevo && tipoPrenda && tipo && marca) {
       const tipoPrendaStr = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
       const estiloStr = estiloPrenda || ''
-      return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle)
+      return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle, generoSeleccionado)
     } else {
       const nombreProd = producto?.nombre || ''
       const prefix = generarPrefijo(nombreProd)
