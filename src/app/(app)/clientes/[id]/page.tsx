@@ -336,103 +336,113 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
         </Card>
       </div>
 
-      {/* Historial fiado */}
-      {movimientos.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Historial de fiado</CardTitle></CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {movimientos.map(mov => (
-                <div key={mov.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                  <div>
-                    <Badge variant={mov.tipo === 'cargo' ? 'destructive' : 'secondary'}>
-                      {mov.tipo === 'cargo' ? 'Cargo' : 'Abono'}
-                    </Badge>
-                    {mov.notas && <span className="text-xs text-gray-500 ml-2">{mov.notas}</span>}
-                  </div>
-                  <div className="text-right">
-                    <p className={`font-semibold text-sm ${mov.tipo === 'cargo' ? 'text-red-500' : 'text-green-600'}`}>
-                      {mov.tipo === 'cargo' ? '+' : '-'} {mask(formatPrecio(mov.monto))}
-                    </p>
-                    <p className="text-xs text-gray-400">{new Date(mov.creado_en).toLocaleDateString('es-AR')}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Historial unificado */}
+      {(movimientos.length > 0 || ventas.length > 0) && (() => {
+        // Combinar y ordenar por fecha descendente
+        type Evento =
+          | { tipo: 'venta'; fecha: string; data: VentaConItems }
+          | { tipo: 'mov'; fecha: string; data: FiadoMovimiento }
 
-      {/* Historial compras */}
-      {ventas.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><ShoppingBag size={16} className="text-teal-500" /> Historial de compras</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            <div>
-              {ventas.map((venta, i) => {
-                const items = venta.venta_items || []
-                const expandida = ventaExpandida === venta.id
-                const metodos = venta.venta_pagos?.map(p => p.metodo).join(' + ') || ''
-                return (
-                  <div key={venta.id} className={cn('border-b border-gray-50 last:border-0', expandida && 'bg-teal-50/40')}>
-                    {/* Fila principal — clickeable para expandir */}
-                    <button
-                      className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 transition-colors text-left"
-                      onClick={() => setVentaExpandida(expandida ? null : venta.id)}
-                    >
-                      <div className="text-gray-400 shrink-0">
-                        {expandida ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800">
-                          {new Date(venta.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {items.length} {items.length === 1 ? 'artículo' : 'artículos'}
-                          {metodos && <span className="ml-2 text-gray-300">· {metodos}</span>}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="font-bold text-gray-800">{mask(formatPrecio(venta.total))}</p>
-                        {venta.descuento > 0 && (
-                          <p className="text-xs text-green-600">− {mask(formatPrecio(venta.descuento))} desc.</p>
-                        )}
-                      </div>
-                    </button>
+        const eventos: Evento[] = [
+          ...ventas.map(v => ({ tipo: 'venta' as const, fecha: v.creado_en, data: v })),
+          ...movimientos.map(m => ({ tipo: 'mov' as const, fecha: m.creado_en, data: m })),
+        ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
 
-                    {/* Detalle de artículos */}
-                    {expandida && items.length > 0 && (
-                      <div className="px-5 pb-3 space-y-1">
-                        <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
-                          {items.map((item, j) => (
-                            <div key={j} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 last:border-0">
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-800 truncate">
+        return (
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><ShoppingBag size={16} className="text-teal-500" /> Historial</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              {eventos.map((ev, i) => {
+                if (ev.tipo === 'venta') {
+                  const venta = ev.data
+                  const items = venta.venta_items || []
+                  const expandida = ventaExpandida === venta.id
+                  const metodos = venta.venta_pagos?.map(p => p.metodo).join(' + ') || ''
+                  return (
+                    <div key={`v-${venta.id}`} className={cn('border-b border-gray-50 last:border-0', expandida && 'bg-teal-50/40')}>
+                      <button
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                        onClick={() => setVentaExpandida(expandida ? null : venta.id)}
+                      >
+                        <div className="shrink-0">
+                          <span className="text-xs bg-teal-100 text-teal-700 font-medium px-2 py-0.5 rounded-full">Compra</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-700 truncate">
+                            {items.length > 0
+                              ? items.slice(0, 2).map(it => it.variante?.producto?.nombre || '—').join(', ') + (items.length > 2 ? ` +${items.length - 2}` : '')
+                              : 'Sin detalle'}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {new Date(venta.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            {metodos && <span className="ml-2">· {metodos}</span>}
+                            {items.length > 0 && <span className="ml-2">· {items.length} {items.length === 1 ? 'art.' : 'arts.'}</span>}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="font-bold text-red-500 text-sm">+{mask(formatPrecio(venta.total))}</p>
+                          {expandida ? <ChevronDown size={13} className="text-gray-400 ml-auto" /> : <ChevronRight size={13} className="text-gray-400 ml-auto" />}
+                        </div>
+                      </button>
+                      {expandida && items.length > 0 && (
+                        <div className="px-4 pb-3">
+                          <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
+                            {items.map((item, j) => (
+                              <div key={j} className="flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0">
+                                <p className="text-sm text-gray-800 truncate flex-1">
                                   {item.variante?.talle
                                     ? formatNombreConTalle(item.variante?.producto?.nombre || '—', item.variante.talle)
                                     : (item.variante?.producto?.nombre || '—')}
                                 </p>
+                                <div className="text-right shrink-0 ml-3">
+                                  {item.cantidad > 1 && <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>}
+                                  <p className="text-sm font-semibold text-gray-700">{mask(formatPrecio(item.precio_unitario * item.cantidad))}</p>
+                                </div>
                               </div>
-                              <div className="text-right shrink-0 ml-4">
-                                {item.cantidad > 1 && (
-                                  <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>
-                                )}
-                                <p className="text-sm font-semibold text-gray-700">
-                                  {mask(formatPrecio(item.precio_unitario * item.cantidad))}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
+                      )}
+                    </div>
+                  )
+                }
+
+                // Movimiento de fiado
+                const mov = ev.data
+                const esHistorial = mov.monto === 0
+                const esAbono = mov.tipo === 'abono'
+                return (
+                  <div key={`m-${mov.id}`} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
+                    <div className="shrink-0 pt-0.5">
+                      {esHistorial
+                        ? <span className="text-xs bg-gray-100 text-gray-500 font-medium px-2 py-0.5 rounded-full">Historial</span>
+                        : esAbono
+                          ? <span className="text-xs bg-green-100 text-green-700 font-medium px-2 py-0.5 rounded-full">Abono</span>
+                          : <span className="text-xs bg-red-100 text-red-700 font-medium px-2 py-0.5 rounded-full">Cargo</span>
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {mov.notas && (
+                        <p className="text-sm text-gray-700 leading-snug">{mov.notas}</p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(mov.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                    {!esHistorial && (
+                      <div className="text-right shrink-0">
+                        <p className={`font-bold text-sm ${esAbono ? 'text-green-600' : 'text-red-500'}`}>
+                          {esAbono ? '−' : '+'}{mask(formatPrecio(mov.monto))}
+                        </p>
                       </div>
                     )}
                   </div>
                 )
               })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
+        )
+      })()}
     </div>
   )
 }

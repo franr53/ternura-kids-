@@ -11,7 +11,11 @@ import { X, CheckCircle, Banknote, CreditCard, Smartphone, ArrowLeftRight, HandC
 interface Pago {
   metodo: MetodoPago
   monto: number
+  notas?: string
 }
+
+const EMPRESAS_DEBITO  = ['Fertil', 'Elebar', 'Visa', 'Mastercard', 'Cabal']
+const EMPRESAS_CREDITO = ['Visa', 'Mastercard', 'Cabal', 'Naranja']
 
 interface Props {
   carrito: ItemCarrito[]
@@ -41,6 +45,15 @@ export default function PagoDialog({ carrito, total, subtotal, descuentoGlobal, 
 
   function setMetodoPrincipal(metodo: MetodoPago) {
     setPagos([{ metodo, monto: total }])
+  }
+
+  const metodoActual = pagos.length === 1 ? pagos[0].metodo : null
+  const empresasDisponibles = metodoActual === 'debito' ? EMPRESAS_DEBITO : metodoActual === 'credito' ? EMPRESAS_CREDITO : []
+  const empresaActual = pagos.length === 1 ? (pagos[0].notas ?? null) : null
+
+  function seleccionarEmpresa(empresa: string) {
+    const nueva = empresa === empresaActual ? undefined : empresa
+    setPagos([{ ...pagos[0], notas: nueva }])
   }
 
   function agregarMetodo(metodo: MetodoPago) {
@@ -111,6 +124,29 @@ export default function PagoDialog({ carrito, total, subtotal, descuentoGlobal, 
                   >
                     {m.icon}
                     <span className="leading-tight text-center">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Empresa de débito/crédito */}
+          {pagos.length === 1 && empresasDisponibles.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-2 font-medium">Empresa</p>
+              <div className="flex gap-2 flex-wrap">
+                {empresasDisponibles.map(emp => (
+                  <button
+                    key={emp}
+                    onClick={() => seleccionarEmpresa(emp)}
+                    className={cn(
+                      'text-xs px-3 py-1.5 rounded-full border-2 font-medium transition-all',
+                      empresaActual === emp
+                        ? 'bg-indigo-100 border-indigo-400 text-indigo-700'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    )}
+                  >
+                    {emp}
                   </button>
                 ))}
               </div>

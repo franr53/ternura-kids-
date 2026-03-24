@@ -161,13 +161,16 @@ function normalizarTalleParaCodigo(talle: string): string {
   return talle.replace(/[^a-z0-9]/gi, '').toUpperCase()
 }
 
-function categoriaACodigo(nombre: string): string {
+function subcatParaCategoria(nombre: string): string {
   const n = nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  if (n.includes('bebe') || n.includes('bb')) return 'BB'
+  if (n === 'nena') return 'NA'
+  if (n === 'nene') return 'NO'
+  if (n.includes('bebe') || n === 'bb') return 'BB'
   if (n.includes('colegia')) return 'COL'
-  if (n.includes('nina') || n.includes('nena') || n.includes('mujer') || n.includes('femenin')) return 'NA'
-  if (n.includes('nino') || n.includes('nene') || n.includes('varon') || n.includes('mascul')) return 'NO'
-  if (n.includes('accesorio')) return 'ACC'
+  if (n.includes('calzado')) return ''
+  if (n.includes('ropa') && n.includes('inter')) return 'RI'
+  if (n.includes('acceso')) return 'ACC'
+  if (n.includes('perfum')) return 'PRF'
   return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
 }
 
@@ -175,15 +178,13 @@ function abreviaturaMarca(nombre: string): string {
   return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
 }
 
-function generarCodigoBarras(tipo: string, estilo: string, catNombre: string, marcaNombre: string, talle: string, genero?: string | null): string {
+function generarCodigoBarras(tipo: string, estilo: string, catNombre: string, marcaNombre: string, talle: string): string {
   const clave = [tipo, estilo].filter(Boolean).join(' ')
   const tipoPrefix = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipo] || generarPrefijo(clave || tipo)
-  const catCode   = categoriaACodigo(catNombre)
-  const marcaCode = abreviaturaMarca(marcaNombre)
-  const talleCode = normalizarTalleParaCodigo(talle)
-  // Incluir código de género para evitar duplicados cuando la categoría es neutra
-  const generoCode = genero === 'nena' ? 'NA' : genero === 'nene' ? 'NO' : genero === 'bebe' ? 'BB' : ''
-  return `${tipoPrefix}${catCode}${marcaCode}${generoCode}${talleCode}`
+  const subcatCode = subcatParaCategoria(catNombre)
+  const marcaCode  = abreviaturaMarca(marcaNombre)
+  const talleCode  = normalizarTalleParaCodigo(talle)
+  return `${tipoPrefix}${subcatCode}${marcaCode}${talleCode}`
 }
 
 function normalizar(s: string) {
@@ -406,7 +407,7 @@ export default function NuevoProductoPage() {
     if (esProductoNuevo && tipoPrenda && tipo && marca) {
       const tipoPrendaStr = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
       const estiloStr = estiloPrenda || ''
-      return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle, generoSeleccionado)
+      return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle)
     } else {
       const nombreProd = producto?.nombre || ''
       const prefix = generarPrefijo(nombreProd)
@@ -1181,7 +1182,7 @@ export default function NuevoProductoPage() {
                   <div className="p-4 rounded-2xl text-center" style={{ background: '#f0fdfb', border: '1px solid rgba(78,195,189,0.25)' }}>
                     <p className="text-xs text-gray-400 mb-1">Nombre generado</p>
                     <p className="text-xl font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>{nombreGenerado}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">Código: <span className="font-mono text-teal-600">{(() => { const clave = [tipoPrendaFinal, estiloPrenda || ''].filter(Boolean).join(' '); const p = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipoPrendaFinal] || generarPrefijo(tipoPrendaFinal); return `${p}${tipo ? categoriaACodigo(tipo.nombre) : 'XX'}${marca ? abreviaturaMarca(marca.nombre) : 'XX'}` })()}[talle]</span></p>
+                    <p className="text-[10px] text-gray-400 mt-1">Código: <span className="font-mono text-teal-600">{(() => { const clave = [tipoPrendaFinal, estiloPrenda || ''].filter(Boolean).join(' '); const p = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipoPrendaFinal] || generarPrefijo(tipoPrendaFinal); return `${p}${tipo ? subcatParaCategoria(tipo.nombre) : 'XX'}${marca ? abreviaturaMarca(marca.nombre) : 'XX'}` })()}[talle]</span></p>
                   </div>
                   <button
                     onClick={confirmarNombre}

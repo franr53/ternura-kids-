@@ -58,6 +58,23 @@ function InventarioContent() {
   const [orden, setOrden] = useState('nombre_asc')
   const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
   const [filtroTalle, setFiltroTalle] = useState('todos')
+  const [editandoCodigo, setEditandoCodigo] = useState<{ varianteId: string; valor: string } | null>(null)
+
+  async function guardarCodigo(varianteId: string, nuevo: string) {
+    const valor = nuevo.trim() || null
+    const { error } = await supabase.from('variantes').update({ codigo_barras: valor }).eq('id', varianteId)
+    if (error) {
+      if (error.message.includes('unique') || error.message.includes('duplicate')) {
+        toast.error('Ese código ya está en uso por otra variante')
+      } else {
+        toast.error('Error al guardar: ' + error.message)
+      }
+    } else {
+      toast.success(valor ? 'Código actualizado' : 'Código eliminado')
+      cargarDatos()
+    }
+    setEditandoCodigo(null)
+  }
 
   // Cálculo de anomalías (client-side)
   const todosLosCodigos = productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter(Boolean) ?? [])
@@ -462,16 +479,41 @@ function InventarioContent() {
                         {esFirst ? (producto.proveedor?.nombre ?? '—') : null}
                       </td>
                       <td className="hidden md:table-cell px-4 py-2.5">
-                        {v.codigo_barras ? (
-                          <button
-                            onClick={() => { navigator.clipboard.writeText(v.codigo_barras!); toast.success('Código copiado') }}
-                            className="font-mono text-xs text-teal-600 hover:text-teal-800 transition-colors flex items-center gap-1"
-                            title="Click para copiar">
-                            {v.codigo_barras}
-                            <Copy size={10} className="opacity-40" />
-                          </button>
+                        {editandoCodigo?.varianteId === v.id ? (
+                          <input
+                            autoFocus
+                            className="font-mono text-xs border border-teal-400 rounded px-2 py-1 w-36 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                            value={editandoCodigo.valor}
+                            onChange={e => setEditandoCodigo({ varianteId: v.id, valor: e.target.value })}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') guardarCodigo(v.id, editandoCodigo.valor)
+                              if (e.key === 'Escape') setEditandoCodigo(null)
+                            }}
+                            onBlur={() => guardarCodigo(v.id, editandoCodigo.valor)}
+                          />
+                        ) : v.codigo_barras ? (
+                          <div className="flex items-center gap-1 group">
+                            <button
+                              onClick={() => { navigator.clipboard.writeText(v.codigo_barras!); toast.success('Código copiado') }}
+                              className="font-mono text-xs text-teal-600 hover:text-teal-800 transition-colors flex items-center gap-1"
+                              title="Click para copiar">
+                              {v.codigo_barras}
+                              <Copy size={10} className="opacity-40" />
+                            </button>
+                            <button
+                              onClick={() => setEditandoCodigo({ varianteId: v.id, valor: v.codigo_barras! })}
+                              className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 transition-all"
+                              title="Editar código">
+                              ✏️
+                            </button>
+                          </div>
                         ) : (
-                          <span className="text-xs text-gray-300 italic">Sin código</span>
+                          <button
+                            onClick={() => setEditandoCodigo({ varianteId: v.id, valor: '' })}
+                            className="text-xs text-gray-300 italic hover:text-teal-500 transition-colors"
+                            title="Agregar código">
+                            + agregar
+                          </button>
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-right">

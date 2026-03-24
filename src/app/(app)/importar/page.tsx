@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Upload, Check, AlertCircle, Package, Users, Tag, Zap } from 'lucide-react'
+import { Upload, Check, AlertCircle, Package, Users, Tag, Zap, ArrowRight } from 'lucide-react'
+import Link from 'next/link'
 
 interface VarianteImport { talle: string; codigo: string | null; stock: number }
 interface ProductoImport {
@@ -190,6 +191,20 @@ export default function ImportarPage() {
         <h1 className="text-2xl font-bold text-gray-800">Importar desde Contagram</h1>
         <p className="text-gray-500 text-sm mt-1">Cargá el CSV exportado de Contagram para importar todos tus productos</p>
       </div>
+
+      {/* Carga inicial */}
+      <Link href="/importar/inicial">
+        <div className="flex items-center gap-4 p-4 bg-teal-50 border border-teal-200 rounded-2xl cursor-pointer hover:bg-teal-100 transition-colors">
+          <div className="w-10 h-10 rounded-xl bg-teal-500 text-white flex items-center justify-center shrink-0">
+            <Package size={20} />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-teal-800">Carga inicial desde Contagram</p>
+            <p className="text-sm text-teal-600">Importá productos, clientes con deuda e historial de ventas de una sola vez</p>
+          </div>
+          <ArrowRight size={20} className="text-teal-500 shrink-0" />
+        </div>
+      </Link>
 
       {/* Paso 1 */}
       <Card>
