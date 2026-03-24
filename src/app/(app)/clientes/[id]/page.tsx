@@ -20,7 +20,7 @@ import { generarPDFRecibo, compartirPDFWhatsApp, type ReciboAbonoData } from '@/
 type VentaItem = {
   cantidad: number
   precio_unitario: number
-  variante?: { talle: string; producto?: { nombre: string } }
+  variante?: { talle: string; producto?: { nombre_base: string } }
 }
 
 type VentaConItems = Venta & {
@@ -55,7 +55,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       const [{ data: c }, { data: movs }, { data: vs }, { data: provs }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(30),
-        supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
+        supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
         supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
       ])
       if (c) { setCliente(c); setNombre(c.nombre); setTelefono(c.telefono || ''); setDireccion(c.direccion || '') }
@@ -128,7 +128,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       const ultimasCompras = ventas
         .filter(v => v.venta_pagos?.some(p => p.metodo === 'fiado'))
         .flatMap(v => (v.venta_items || []).map(item => ({
-          nombre: item.variante?.producto?.nombre || '—',
+          nombre: item.variante?.producto?.nombre_base || '—',
           talle: item.variante?.talle || '',
           precio: item.precio_unitario * item.cantidad,
           fecha: new Date(v.creado_en).toLocaleDateString('es-AR'),
@@ -370,7 +370,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-gray-700 truncate">
                             {items.length > 0
-                              ? items.slice(0, 2).map(it => it.variante?.producto?.nombre || '—').join(', ') + (items.length > 2 ? ` +${items.length - 2}` : '')
+                              ? items.slice(0, 2).map(it => it.variante?.producto?.nombre_base || '—').join(', ') + (items.length > 2 ? ` +${items.length - 2}` : '')
                               : 'Sin detalle'}
                           </p>
                           <p className="text-xs text-gray-400">
@@ -391,8 +391,8 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                               <div key={j} className="flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0">
                                 <p className="text-sm text-gray-800 truncate flex-1">
                                   {item.variante?.talle
-                                    ? formatNombreConTalle(item.variante?.producto?.nombre || '—', item.variante.talle)
-                                    : (item.variante?.producto?.nombre || '—')}
+                                    ? formatNombreConTalle(item.variante?.producto?.nombre_base || '—', item.variante.talle)
+                                    : (item.variante?.producto?.nombre_base || '—')}
                                 </p>
                                 <div className="text-right shrink-0 ml-3">
                                   {item.cantidad > 1 && <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>}

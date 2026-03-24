@@ -28,7 +28,7 @@ export interface ItemCarrito {
 type VentaItem = {
   cantidad: number
   precio_unitario: number
-  variante?: { talle: string; producto?: { nombre: string } }
+  variante?: { talle: string; producto?: { nombre_base: string } }
 }
 
 type VentaHoy = {
@@ -90,7 +90,7 @@ export default function PosPage() {
 
     let query = supabase
       .from('ventas')
-      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre))), venta_pagos(metodo, monto, notas)')
+      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto, notas)')
       .eq('estado', 'completada')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
@@ -246,7 +246,7 @@ export default function PosPage() {
             const hora = new Date(venta.creado_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
             const resumen = items
               .slice(0, 2)
-              .map(it => it.variante?.producto?.nombre || '—')
+              .map(it => it.variante?.producto?.nombre_base || '—')
               .join(', ') + (items.length > 2 ? ` +${items.length - 2} más` : '')
 
             return (
@@ -321,8 +321,8 @@ export default function PosPage() {
                           <div className="flex-1 min-w-0">
                             <span className="text-sm text-gray-700 font-medium">
                               {item.variante?.talle
-                                ? formatNombreConTalle(item.variante?.producto?.nombre || '—', item.variante.talle)
-                                : (item.variante?.producto?.nombre || '—')}
+                                ? formatNombreConTalle(item.variante?.producto?.nombre_base || '—', item.variante.talle)
+                                : (item.variante?.producto?.nombre_base || '—')}
                             </span>
                           </div>
                           <div className="text-right shrink-0 ml-4">

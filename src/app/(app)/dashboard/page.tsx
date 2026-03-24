@@ -107,12 +107,12 @@ export default function DashboardPage() {
       supabase.rpc('dashboard_kpis', { p_fecha_hoy: inicioHoy, p_inicio_mes: inicioMes, p_inicio_ayer: inicioAyer }),
       supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
       supabase.from('venta_pagos').select('metodo, monto, venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
-      supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre)), venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
+      supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre_base)), venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('clientes').select('id, nombre, deuda_total').gt('deuda_total', 0).order('deuda_total', { ascending: false }).limit(5),
       supabase.from('venta_items').select('cantidad, venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
       supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
-      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre)').lte('stock', 3).order('stock', { ascending: true }).limit(5),
+      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').lte('stock', 3).order('stock', { ascending: true }).limit(5),
     ])
 
     const kpis_result = kpisData as { ventas_hoy: number; ventas_ayer: number; ventas_mes: number; count_ventas_mes: number; clientes_deuda: number; variantes_sin_stock: number } | null
@@ -123,7 +123,7 @@ export default function DashboardPage() {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const scData = (stockCriticoData || []).map((v: any) => ({
-      nombre: v.producto?.nombre || 'Sin nombre', talle: v.talle || '', stock: v.stock,
+      nombre: v.producto?.nombre_base || 'Sin nombre', talle: v.talle || '', stock: v.stock,
     }))
 
     // Datos por día
@@ -160,7 +160,7 @@ export default function DashboardPage() {
     const porProd: Record<string, number> = {}
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     topData?.forEach((item: any) => {
-      const nombre = item.variante?.producto?.nombre || 'Sin nombre'
+      const nombre = item.variante?.producto?.nombre_base || 'Sin nombre'
       porProd[nombre] = (porProd[nombre] || 0) + item.cantidad
     })
     const sorted = Object.entries(porProd).sort((a, b) => b[1] - a[1]).slice(0, 5)
