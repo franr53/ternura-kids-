@@ -250,9 +250,6 @@ export default function CargaInicialPage() {
       const { data: existentes } = await supabase.from('clientes').select('nombre')
       const existentesSet = new Set((existentes ?? []).map(c => c.nombre.toLowerCase().trim()))
 
-      const { data: { user } } = await supabase.auth.getUser()
-      const userId = user?.id
-
       for (const fila of validos) {
         const nombre = String(fila['Cliente']).trim()
         const deuda = Math.round(Number(fila['Total']) || 0)
@@ -279,7 +276,6 @@ export default function CargaInicialPage() {
             tipo: 'cargo',
             monto: deuda,
             notas: 'Saldo inicial Contagram al 23/03/2026',
-            usuario_id: userId,
           })
         }
 
@@ -342,13 +338,25 @@ export default function CargaInicialPage() {
     const res: ResultadoImport = { ok: 0, saltados: 0, noEncontrados: [], errores: [] }
 
     try {
-      // Cargar mapa de clientes
+      // Cargar mapa de clientes — matching por nombre normalizado y también por palabras
       const { data: clientes } = await supabase.from('clientes').select('id, nombre')
       const clienteMap = new Map<string, string>()
-      for (const c of clientes ?? []) clienteMap.set(c.nombre.toLowerCase().trim(), c.id)
+      const clienteMapPalabras = new Map<string, string>() // clave: palabras ordenadas
+      for (const c of clientes ?? []) {
+        const key = c.nombre.toLowerCase().trim()
+        clienteMap.set(key, c.id)
+        // También indexar por palabras ordenadas (para "Lezica Yeni" == "yeni lezica")
+        const palabras = key.split(/\s+/).sort().join(' ')
+        clienteMapPalabras.set(palabras, c.id)
+      }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      const userId = user?.id
+      function buscarCliente(nombre: string): string | undefined {
+        const key = nombre.toLowerCase().trim()
+        if (clienteMap.has(key)) return clienteMap.get(key)
+        // Probar con palabras ordenadas
+        const palabras = key.split(/\s+/).sort().join(' ')
+        return clienteMapPalabras.get(palabras)
+      }
 
       // Re-parsear el archivo para agrupar
       const rows = await leerXLSX(fileVentas)
@@ -372,7 +380,7 @@ export default function CargaInicialPage() {
 
       const movimientos = []
       for (const [id, g] of grupos.entries()) {
-        const clienteId = clienteMap.get(g.cliente.toLowerCase())
+        const clienteId = buscarCliente(g.cliente)
         if (!clienteId) {
           if (!res.noEncontrados.includes(g.cliente)) res.noEncontrados.push(g.cliente)
           continue
@@ -382,7 +390,6 @@ export default function CargaInicialPage() {
           tipo: 'cargo',
           monto: 0,
           notas: `Historial #${id}: ${g.items.slice(0, 8).join(', ')}${g.items.length > 8 ? ` (+ ${g.items.length - 8} más)` : ''} | Total: $${g.total.toLocaleString('es-AR')}`,
-          usuario_id: userId,
         })
       }
 
