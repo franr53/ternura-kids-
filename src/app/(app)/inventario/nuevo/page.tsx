@@ -44,6 +44,8 @@ const ESTILOS_POR_TIPO: Record<string, string[]> = {
 
 const GENEROS = ['Nena', 'Nene', 'Unisex']
 
+const TIPOS_CALZADO = ['Zapatilla', 'Sandalia', 'Bota', 'Zapato', 'Pantufla', 'Ojota']
+
 // Prefijos de código de barras por tipo+estilo (patrón real del stock)
 const PREFIJOS_TIPO: Record<string, string> = {
   // Remera
@@ -101,7 +103,9 @@ const PREFIJOS_TIPO: Record<string, string> = {
 }
 
 // ── Tipos ──────────────────────────────────────────────────────
-type QuizStep = 'inicio' | 'buscar_existente' | 'marca' | 'tipo' | 'producto' | 'nombre_nuevo' | 'precio' | 'precio_existente' | 'talle' | 'listo'
+type QuizStep = 'inicio' | 'buscar_existente' | 'marca' | 'tipo' | 'categoria' | 'genero' | 'producto' | 'nombre_nuevo' | 'precio' | 'precio_existente' | 'talle' | 'revisar_lote' | 'listo'
+
+type GeneroSeleccionado = 'bebe' | 'nena' | 'nene' | 'unisex' | null
 
 interface TalleSeleccion {
   cantidad: number
@@ -213,6 +217,7 @@ export default function NuevoProductoPage() {
   const [tipoPrenda, setTipoPrenda] = useState('')
   const [estiloPrenda, setEstiloPrenda] = useState<string | null>(null)  // null = aún no elegido, '' = omitido
   const [generoPrenda, setGeneroPrenda] = useState<string | null>(null)   // null = aún no elegido, '' = omitido
+  const [generoSeleccionado, setGeneroSeleccionado] = useState<GeneroSeleccionado>(null)
   const [otroTipoPrenda, setOtroTipoPrenda] = useState('')
   const [precioCosto, setPrecioCosto] = useState('')
   const [precioVenta, setPrecioVenta] = useState('')
@@ -303,11 +308,14 @@ export default function NuevoProductoPage() {
       buscar_existente: null,
       marca: null,
       tipo: 'producto',
+      categoria: 'producto',
+      genero: 'categoria',
       producto: 'marca',
-      nombre_nuevo: 'tipo',
+      nombre_nuevo: esCalzado ? 'categoria' : 'genero',
       precio: 'nombre_nuevo',
       precio_existente: 'producto',
       talle: esProductoNuevo ? 'precio' : 'producto',
+      revisar_lote: null,
       listo: 'talle',
     }
     const p = prev[step]
@@ -365,39 +373,27 @@ export default function NuevoProductoPage() {
 
   // Nombre construido por el builder
   const tipoPrendaFinal = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
-  const nombreGenerado = [tipoPrendaFinal, estiloPrenda || '', generoPrenda || '']
+  const esCalzado = tipo?.sistema_talles === 'calzado'
+  const generoLabel = generoSeleccionado === 'bebe' ? 'Bebé'
+    : generoSeleccionado === 'nena' ? 'Nena'
+    : generoSeleccionado === 'nene' ? 'Nene'
+    : ''  // unisex o null = no agrega nada
+  const nombreGenerado = [tipoPrendaFinal, estiloPrenda || '', generoLabel]
     .filter(Boolean).join(' ')
 
   // Cuándo mostrar cada sección del builder
   const builderTipoOk = tipoPrendaFinal.length > 0
   const builderEstiloOk = builderTipoOk && estiloPrenda !== null
-  const esCalzado = tipo?.sistema_talles === 'calzado'
-  const builderGeneroOk = builderEstiloOk && (generoPrenda !== null || esCalzado)
+  const builderGeneroOk = builderEstiloOk
   const estilosDisponibles = ESTILOS_POR_TIPO[tipoPrenda] || []
 
-  // Detectar si la categoría seleccionada ya implica género (para no repetirlo en el builder)
-  const catImplicaGenero = tipo ? (() => {
-    const n = normalizar(tipo.nombre)
-    return n.includes('nina') || n.includes('nena') || n.includes('mujer') || n.includes('femenin') ||
-           n.includes('nino') || n.includes('nene') || n.includes('varon') || n.includes('mascul') ||
-           n.includes('bebe') || n.includes('bb')
-  })() : false
-
-  // Auto-omitir género para calzado
+  // Auto-omitir estilo si no hay opciones
   useEffect(() => {
-    if (esCalzado && generoPrenda === null) setGeneroPrenda('')
-  }, [esCalzado, generoPrenda])
-
-  // Auto-omitir género cuando la categoría ya lo implica (evita preguntarlo dos veces)
-  useEffect(() => {
-    if (!tipo) return
-    const n = normalizar(tipo.nombre)
-    const impliesGender = n.includes('nina') || n.includes('nena') || n.includes('mujer') || n.includes('femenin') ||
-                          n.includes('nino') || n.includes('nene') || n.includes('varon') || n.includes('mascul') ||
-                          n.includes('bebe') || n.includes('bb')
-    if (impliesGender) setGeneroPrenda('')
+    if (builderTipoOk && estilosDisponibles.length === 0 && estiloPrenda === null) {
+      setEstiloPrenda('')
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipo])
+  }, [builderTipoOk, estilosDisponibles.length, estiloPrenda])
 
   // ── Generación de barcode ──────────────────────────────────────
   async function calcularBarcodeParaTalle(talle: string): Promise<string> {
@@ -455,7 +451,7 @@ export default function NuevoProductoPage() {
     setTallesSeleccionados({}); setBarcode('')
     setModalMarcaAbierto(false)
     setBusquedaMarca('')
-    irA('tipo', 'forward')
+    irA('producto', 'forward')
   }
 
   function seleccionarTipo(c: Categoria) {
@@ -463,6 +459,18 @@ export default function NuevoProductoPage() {
     setProducto(null)
     setTallesSeleccionados({}); setBarcode('')
     irA('nombre_nuevo', 'forward')
+  }
+
+  function seleccionarCategoria(c: Categoria) {
+    setTipo(c)
+    setProducto(null)
+    setTallesSeleccionados({}); setBarcode('')
+    if (c.sistema_talles === 'calzado') {
+      setGeneroSeleccionado(null)
+      irA('nombre_nuevo', 'forward')
+    } else {
+      irA('genero', 'forward')
+    }
   }
 
   function seleccionarProducto(p: ProductoExistente) {
@@ -483,9 +491,9 @@ export default function NuevoProductoPage() {
     setEsProductoNuevo(true)
     setProducto(null)
     setNombreNuevoProducto('')
-    setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setOtroTipoPrenda('')
+    setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setGeneroSeleccionado(null); setOtroTipoPrenda('')
     setPrecioCosto(''); setPrecioVenta(''); setPrecioVentaEditado(false); setTemporada('todo_el_año')
-    irA('tipo', 'forward')
+    irA('categoria', 'forward')
   }
 
   async function toggleTalle(talle: string, varianteId: string | null, esNueva: boolean) {
@@ -546,9 +554,8 @@ export default function NuevoProductoPage() {
     const { data, error } = await supabase.from('categorias').insert({ nombre, sistema_talles: sistemaNuevoTipo, activa: true }).select().single()
     if (error || !data) { toast.error(`Error: ${error?.message}`); setLoadingCrear(false); return }
     await cargarTodo()
-    setTipo(data as Categoria)
     setLoadingCrear(false)
-    irA('producto', 'forward')
+    seleccionarCategoria(data as Categoria)
   }
 
   async function confirmarCrearTalle() {
@@ -704,7 +711,7 @@ export default function NuevoProductoPage() {
   }
   function empezarDeNuevo() {
     setMarca(null); setTipo(null); setProducto(null); setEsProductoNuevo(false)
-    setVinoDeExistente(false)
+    setVinoDeExistente(false); setGeneroSeleccionado(null)
     setTallesSeleccionados({}); setBarcode(''); setBusquedaProducto(''); setBusquedaExistente('')
     irA('marca', 'backward')
   }
@@ -713,9 +720,9 @@ export default function NuevoProductoPage() {
   type BC = { label: string; goTo: QuizStep }
   const breadcrumbs: BC[] = []
   if (marca && !['marca'].includes(step)) breadcrumbs.push({ label: marca.nombre, goTo: 'marca' })
-  if (tipo && !['marca','tipo','producto'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'tipo' })
+  if (tipo && !['marca','tipo','categoria','producto'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'categoria' })
   const prodNombre = esProductoNuevo ? nombreNuevoProducto : producto?.nombre
-  if (prodNombre && !['marca','tipo','producto','nombre_nuevo','precio','precio_existente'].includes(step)) {
+  if (prodNombre && !['marca','tipo','categoria','genero','producto','nombre_nuevo','precio','precio_existente'].includes(step)) {
     breadcrumbs.push({ label: prodNombre, goTo: 'producto' })
   }
 
@@ -827,22 +834,12 @@ export default function NuevoProductoPage() {
           })}
         </div>
         <button
-          onClick={confirmarLote}
-          disabled={loadingConfirmar}
-          className="w-full py-3 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 disabled:opacity-75 transition-all"
+          onClick={() => irA('revisar_lote', 'forward')}
+          className="w-full py-3 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 transition-all"
           style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)', fontFamily: 'var(--font-display)' }}
         >
-          {loadingConfirmar ? (
-            <>
-              <Loader2 size={15} className="animate-spin" />
-              {confirmProgress ? `Guardando ${confirmProgress.current}/${confirmProgress.total}...` : 'Guardando...'}
-            </>
-          ) : (
-            <>
-              <CheckCircle2 size={15} />
-              Confirmar todo ({totalUds} uds)
-            </>
-          )}
+          <CheckCircle2 size={15} />
+          Revisar y confirmar ({totalUds} uds)
         </button>
         <button
           onClick={() => { if (window.confirm('¿Descartar todos los artículos del lote?')) setLoteActual([]) }}
@@ -974,13 +971,11 @@ export default function NuevoProductoPage() {
                 <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>{marca?.nombre}</h2>
               </div>
               <div className="space-y-3">
-                {/* Búsqueda */}
-                {productosDeEstaMarca.length > 4 && (
-                  <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    <Input value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar producto..." className="h-9 pl-8 rounded-xl border-gray-200 text-sm" autoFocus />
-                  </div>
-                )}
+                {/* Búsqueda — siempre visible */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <Input value={busquedaProducto} onChange={e => setBusquedaProducto(e.target.value)} placeholder="Buscar producto..." className="h-9 pl-8 rounded-xl border-gray-200 text-sm" autoFocus />
+                </div>
                 {/* Productos agrupados por categoría */}
                 {productosPorCategoria.length > 0 ? (
                   <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -1028,6 +1023,90 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
+        {/* ── PASO CATEGORIA ─────────────────────────────────────── */}
+        {step === 'categoria' && (
+          <div className={animClass}>
+            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué categoría?</h2>
+                <p className="text-sm font-bold mt-0.5" style={{ color: '#4EC3BD' }}>{marca?.nombre}</p>
+              </div>
+
+              {modoCrear === 'tipo' ? (
+                <InlineCrear placeholder="Nombre de la categoría (ej: Buzos)" onConfirm={confirmarCrearTipo} onCancel={() => setModoCrear(null)} loading={loadingCrear}>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2 font-medium">Sistema de talles</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[['numerico','Numérico (2,4,6...)'],['letras','Letras (S,M,L...)'],['meses','Meses (0-3m...)'],['calzado','Calzado (18,19...)']].map(([v, l]) => (
+                        <button key={v} onClick={() => setSistemaNuevoTipo(v)} className="py-2 px-3 rounded-xl text-xs font-semibold border transition-all"
+                          style={{ background: sistemaNuevoTipo === v ? 'rgba(78,195,189,0.1)' : 'white', borderColor: sistemaNuevoTipo === v ? '#4EC3BD' : '#e5e7eb', color: sistemaNuevoTipo === v ? '#0d9488' : '#6b7280' }}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </InlineCrear>
+              ) : (
+                <div className="space-y-3">
+                  {tiposDeEstaMarca.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Categorías de {marca?.nombre}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {tiposDeEstaMarca.map(c => <Chip key={c.id} label={c.nombre} onClick={() => seleccionarCategoria(c)} />)}
+                      </div>
+                    </div>
+                  )}
+                  {otrosTipos.length > 0 && (
+                    <details>
+                      <summary className="text-xs text-gray-400 font-semibold cursor-pointer hover:text-gray-600">Otras categorías ({otrosTipos.length})</summary>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        {otrosTipos.map(c => <Chip key={c.id} label={c.nombre} onClick={() => seleccionarCategoria(c)} />)}
+                      </div>
+                    </details>
+                  )}
+                  <BtnAgregar label="Nuevo tipo de producto" onClick={() => setModoCrear('tipo')} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── PASO GENERO ─────────────────────────────────────────── */}
+        {step === 'genero' && (
+          <div className={animClass}>
+            <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Para quién es?</h2>
+                <p className="text-sm font-bold mt-0.5" style={{ color: '#4EC3BD' }}>{marca?.nombre} · {tipo?.nombre}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { key: 'bebe', emoji: '👶', label: 'Bebé', sub: '0-24 meses' },
+                  { key: 'nena', emoji: '👧', label: 'Nena', sub: 'Talle 2-16' },
+                  { key: 'nene', emoji: '👦', label: 'Nene', sub: 'Talle 2-16' },
+                  { key: 'unisex', emoji: '🤝', label: 'Unisex', sub: 'Talle 2-16' },
+                ].map(({ key, emoji, label, sub }) => (
+                  <button key={key}
+                    onClick={() => { setGeneroSeleccionado(key as GeneroSeleccionado); irA('nombre_nuevo', 'forward') }}
+                    className="flex flex-col items-center justify-center rounded-2xl border py-5 px-3 transition-all active:scale-95 hover:scale-[1.02]"
+                    style={{
+                      background: generoSeleccionado === key ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
+                      borderColor: generoSeleccionado === key ? '#4EC3BD' : '#e5e7eb',
+                      color: generoSeleccionado === key ? 'white' : '#374151',
+                      boxShadow: generoSeleccionado === key ? '0 4px 12px rgba(78,195,189,0.35)' : '0 1px 3px rgba(0,0,0,0.05)',
+                    }}>
+                    <span className="text-2xl mb-1">{emoji}</span>
+                    <span className="font-black text-sm">{label}</span>
+                    <span className="text-[10px] opacity-70 mt-0.5">{sub}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── PASO NOMBRE_NUEVO: Constructor de nombre ───────────── */}
         {step === 'nombre_nuevo' && (
           <div className={animClass}>
@@ -1040,8 +1119,8 @@ export default function NuevoProductoPage() {
               {/* Sección 1: Tipo de prenda */}
               <div>
                 <div className="flex flex-wrap gap-2">
-                  {TIPOS_PRENDA.map(t => (
-                    <button key={t} onClick={() => { setTipoPrenda(t); setEstiloPrenda(null); setGeneroPrenda(null) }}
+                  {(esCalzado ? TIPOS_CALZADO : TIPOS_PRENDA).map(t => (
+                    <button key={t} onClick={() => { setTipoPrenda(t); setEstiloPrenda(null) }}
                       className="py-2 px-4 rounded-2xl text-sm font-bold border transition-all active:scale-95"
                       style={{
                         background: tipoPrenda === t ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
@@ -1052,7 +1131,7 @@ export default function NuevoProductoPage() {
                       {t}
                     </button>
                   ))}
-                  <button onClick={() => { setTipoPrenda('__otro__'); setEstiloPrenda(null); setGeneroPrenda(null) }}
+                  <button onClick={() => { setTipoPrenda('__otro__'); setEstiloPrenda(null) }}
                     className="py-2 px-4 rounded-2xl text-sm font-bold border border-dashed transition-all"
                     style={{ borderColor: tipoPrenda === '__otro__' ? '#4EC3BD' : '#d1d5db', color: tipoPrenda === '__otro__' ? '#0d9488' : '#9ca3af', background: 'white' }}>
                     + Otra
@@ -1091,23 +1170,6 @@ export default function NuevoProductoPage() {
                       {estiloPrenda === '' ? '✓ Continuando sin detalle' : 'Continuar sin detalle →'}
                     </button>
                   )}
-                </div>
-              )}
-
-              {/* Sección 3: Género (se oculta para calzado y cuando la categoría ya implica género) */}
-              {builderEstiloOk && !esCalzado && !catImplicaGenero && (
-                <div className="tk-slide-forward">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="h-px flex-1 bg-gray-100" />
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">¿Para quién?</p>
-                    <div className="h-px flex-1 bg-gray-100" />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {GENEROS.map(g => (
-                      <ChipPeq key={g} label={g} activo={generoPrenda === g} onClick={() => setGeneroPrenda(generoPrenda === g ? null : g)} />
-                    ))}
-                    <ChipPeq label="Omitir" activo={generoPrenda === ''} onClick={() => setGeneroPrenda('')} />
-                  </div>
                 </div>
               )}
 
@@ -1435,6 +1497,185 @@ export default function NuevoProductoPage() {
           </div>
         )}
 
+        {/* ── PASO REVISAR_LOTE ──────────────────────────────────── */}
+        {step === 'revisar_lote' && (
+          <div className={animClass}>
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Revisión</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Revisá tu carga</h2>
+                <p className="text-sm text-gray-400">Verificá todo antes de guardar</p>
+              </div>
+
+              {loteActual.length === 0 ? (
+                <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm text-center">
+                  <p className="text-gray-400">El lote está vacío</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {loteActual.map(item => {
+                    const catNombre = categorias.find(c => c.id === item.categoriaId)?.nombre
+                    const totalUdsItem = Object.values(item.talles).reduce((s, sel) => s + sel.cantidad, 0)
+                    const itemPrecioVenta = item.precioVenta
+                    const itemPrecioCosto = item.precioCosto
+                    const itemMargen = itemPrecioCosto > 0
+                      ? Math.round(((itemPrecioVenta - itemPrecioCosto) / itemPrecioCosto) * 100)
+                      : null
+                    const itemEfectivo = Math.round(itemPrecioVenta * 0.8)
+
+                    return (
+                      <div key={item.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        {/* Header del artículo */}
+                        <div className="p-4 space-y-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={item.nombreProducto}
+                                onChange={e => setLoteActual(prev => prev.map(it => it.id === item.id ? { ...it, nombreProducto: e.target.value } : it))}
+                                className="w-full text-base font-black text-gray-900 border-0 border-b border-transparent hover:border-gray-200 focus:border-teal-400 focus:outline-none bg-transparent pb-0.5 transition-colors"
+                                style={{ fontFamily: 'var(--font-display)' }}
+                              />
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                {[item.marcaNombre, catNombre].filter(Boolean).join(' · ')}
+                              </p>
+                            </div>
+                          </div>
+                          {Object.values(item.talles)[0]?.barcode && (
+                            <p className="text-[10px] font-mono text-teal-600">
+                              Código base: {Object.values(item.talles)[0].barcode}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Precios */}
+                        <div className="px-4 pb-3">
+                          <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.15)' }}>
+                            <div className="flex-1">
+                              <p className="text-[10px] text-gray-400">Costo</p>
+                              <input
+                                type="number"
+                                value={item.precioCosto || ''}
+                                onChange={e => setLoteActual(prev => prev.map(it => it.id === item.id ? { ...it, precioCosto: parseFloat(e.target.value) || 0 } : it))}
+                                className="w-full text-sm font-bold text-gray-800 border-0 border-b border-transparent hover:border-gray-200 focus:border-teal-400 focus:outline-none bg-transparent transition-colors"
+                                placeholder="0"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-[10px] text-gray-400">Venta</p>
+                              <input
+                                type="number"
+                                value={item.precioVenta || ''}
+                                onChange={e => setLoteActual(prev => prev.map(it => it.id === item.id ? { ...it, precioVenta: parseFloat(e.target.value) || 0 } : it))}
+                                className="w-full text-sm font-bold text-gray-800 border-0 border-b border-transparent hover:border-gray-200 focus:border-teal-400 focus:outline-none bg-transparent transition-colors"
+                                placeholder="0"
+                              />
+                            </div>
+                            <div className="text-center">
+                              {itemMargen !== null ? (
+                                <>
+                                  <p className="text-sm font-black leading-none" style={{ color: itemMargen >= 30 ? '#0d9488' : itemMargen >= 15 ? '#d97706' : '#ef4444', fontFamily: 'var(--font-display)' }}>{itemMargen}%</p>
+                                  <p className="text-[9px] text-gray-400">margen</p>
+                                </>
+                              ) : <p className="text-xs text-gray-300">%</p>}
+                            </div>
+                          </div>
+                          {itemEfectivo > 0 && (
+                            <p className="text-[10px] text-gray-400 mt-1.5 px-1">
+                              Efectivo (−20%): <span className="font-semibold text-teal-600">{formatPrecio(itemEfectivo)}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Tabla de talles */}
+                        <div className="px-4 pb-3">
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                            Talles cargados · {totalUdsItem} unidades
+                          </p>
+                          <div className="space-y-1.5">
+                            {Object.entries(item.talles).map(([talle, sel]) => (
+                              <div key={talle} className="flex items-center gap-2 py-1.5 px-2 rounded-lg" style={{ background: 'rgba(78,195,189,0.04)' }}>
+                                <span className="text-xs font-black text-gray-800 w-8">{talle}</span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => setLoteActual(prev => prev.map(it => {
+                                      if (it.id !== item.id) return it
+                                      const newTalles = { ...it.talles }
+                                      newTalles[talle] = { ...newTalles[talle], cantidad: Math.max(1, sel.cantidad - 1) }
+                                      return { ...it, talles: newTalles }
+                                    }))}
+                                    className="w-6 h-6 rounded-md border border-gray-200 flex items-center justify-center hover:border-teal-300 bg-white">
+                                    <Minus size={10} className="text-gray-500" />
+                                  </button>
+                                  <span className="w-6 text-center text-xs font-black text-gray-900">{sel.cantidad}</span>
+                                  <button
+                                    onClick={() => setLoteActual(prev => prev.map(it => {
+                                      if (it.id !== item.id) return it
+                                      const newTalles = { ...it.talles }
+                                      newTalles[talle] = { ...newTalles[talle], cantidad: sel.cantidad + 1 }
+                                      return { ...it, talles: newTalles }
+                                    }))}
+                                    className="w-6 h-6 rounded-md border border-gray-200 flex items-center justify-center hover:border-teal-300 bg-white">
+                                    <Plus size={10} className="text-gray-500" />
+                                  </button>
+                                </div>
+                                <div className="flex-1 flex items-center gap-2 text-[10px] text-gray-500">
+                                  <span>C: {formatPrecio(parseFloat(sel.precioCosto) || item.precioCosto)}</span>
+                                  <span>V: {formatPrecio(parseFloat(sel.precioVenta) || item.precioVenta)}</span>
+                                  {sel.barcode && <span className="font-mono text-teal-600 truncate">{sel.barcode}</span>}
+                                </div>
+                                <button
+                                  onClick={() => setLoteActual(prev => prev.map(it => {
+                                    if (it.id !== item.id) return it
+                                    const newTalles = { ...it.talles }
+                                    delete newTalles[talle]
+                                    return { ...it, talles: newTalles }
+                                  }).filter(it => it.id !== item.id || Object.keys(it.talles).length > 0))}
+                                  className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-50">
+                                  <Trash2 size={10} className="text-gray-300 hover:text-red-400" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Eliminar artículo completo */}
+                        <div className="px-4 pb-4">
+                          <button
+                            onClick={() => eliminarDelLote(item.id)}
+                            className="w-full py-2 rounded-xl text-xs font-semibold text-red-400 hover:text-red-500 hover:bg-red-50 transition-colors border border-transparent hover:border-red-100">
+                            Eliminar artículo
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Acciones */}
+              <div className="space-y-3">
+                <button
+                  onClick={confirmarLote}
+                  disabled={loadingConfirmar || loteActual.length === 0}
+                  className="w-full py-4 rounded-2xl font-black text-base text-white flex items-center justify-center gap-2 disabled:opacity-75 transition-all"
+                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)', fontFamily: 'var(--font-display)' }}>
+                  {loadingConfirmar ? (
+                    <><Loader2 size={18} className="animate-spin" /> {confirmProgress ? `Guardando ${confirmProgress.current}/${confirmProgress.total}...` : 'Guardando...'}</>
+                  ) : (
+                    <><CheckCircle2 size={18} /> Confirmar y guardar ({loteActual.reduce((s, i) => s + Object.values(i.talles).reduce((ss, sel) => ss + sel.cantidad, 0), 0)} uds)</>
+                  )}
+                </button>
+                <button
+                  onClick={empezarDeNuevo}
+                  className="w-full py-3 rounded-2xl font-semibold text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                  ← Seguir cargando
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── PASO LISTO ─────────────────────────────────────────── */}
         {step === 'listo' && ultimoGuardado && (
           <div className={animClass}>
@@ -1538,7 +1779,7 @@ export default function NuevoProductoPage() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold opacity-80">Confirmar</span>
+                <span className="text-xs font-semibold opacity-80">Revisar</span>
                 <ChevronUp size={14} />
               </div>
             </button>

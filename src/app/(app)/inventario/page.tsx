@@ -9,7 +9,8 @@ import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 
 export default function InventarioPage() {
@@ -384,6 +385,7 @@ function InventarioContent() {
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Producto</th>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Categoría</th>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Proveedor</th>
+                <th className="hidden md:table-cell text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Código</th>
                 <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio</th>
                 <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Stock</th>
                 <th className="px-4 py-3"></th>
@@ -407,6 +409,9 @@ function InventarioContent() {
                         ) : <span className="text-gray-400 text-xs">—</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-xs">{producto.proveedor?.nombre ?? '—'}</td>
+                      <td className="hidden md:table-cell px-4 py-3">
+                        <span className="text-xs text-gray-300 italic">Sin código</span>
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <span className="font-semibold text-gray-800">{formatPrecio(producto.precio_venta)}</span>
                       </td>
@@ -455,6 +460,19 @@ function InventarioContent() {
                       </td>
                       <td className="px-4 py-2.5 text-gray-600 text-xs">
                         {esFirst ? (producto.proveedor?.nombre ?? '—') : null}
+                      </td>
+                      <td className="hidden md:table-cell px-4 py-2.5">
+                        {v.codigo_barras ? (
+                          <button
+                            onClick={() => { navigator.clipboard.writeText(v.codigo_barras!); toast.success('Código copiado') }}
+                            className="font-mono text-xs text-teal-600 hover:text-teal-800 transition-colors flex items-center gap-1"
+                            title="Click para copiar">
+                            {v.codigo_barras}
+                            <Copy size={10} className="opacity-40" />
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-300 italic">Sin código</span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <span className={cn('font-semibold', precioInvalido ? 'text-red-500' : 'text-gray-800')}>
