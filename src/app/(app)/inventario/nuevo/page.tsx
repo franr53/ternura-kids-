@@ -375,10 +375,29 @@ export default function NuevoProductoPage() {
   const builderGeneroOk = builderEstiloOk && (generoPrenda !== null || esCalzado)
   const estilosDisponibles = ESTILOS_POR_TIPO[tipoPrenda] || []
 
+  // Detectar si la categoría seleccionada ya implica género (para no repetirlo en el builder)
+  const catImplicaGenero = tipo ? (() => {
+    const n = normalizar(tipo.nombre)
+    return n.includes('nina') || n.includes('nena') || n.includes('mujer') || n.includes('femenin') ||
+           n.includes('nino') || n.includes('nene') || n.includes('varon') || n.includes('mascul') ||
+           n.includes('bebe') || n.includes('bb')
+  })() : false
+
   // Auto-omitir género para calzado
   useEffect(() => {
     if (esCalzado && generoPrenda === null) setGeneroPrenda('')
   }, [esCalzado, generoPrenda])
+
+  // Auto-omitir género cuando la categoría ya lo implica (evita preguntarlo dos veces)
+  useEffect(() => {
+    if (!tipo) return
+    const n = normalizar(tipo.nombre)
+    const impliesGender = n.includes('nina') || n.includes('nena') || n.includes('mujer') || n.includes('femenin') ||
+                          n.includes('nino') || n.includes('nene') || n.includes('varon') || n.includes('mascul') ||
+                          n.includes('bebe') || n.includes('bb')
+    if (impliesGender) setGeneroPrenda('')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tipo])
 
   // ── Generación de barcode ──────────────────────────────────────
   async function calcularBarcodeParaTalle(talle: string): Promise<string> {
@@ -604,6 +623,7 @@ export default function NuevoProductoPage() {
             precio_costo: item.precioCosto,
             precio_venta: item.precioVenta,
             temporada: item.temporada,
+            activo: true,
           }).select().single()
           if (errProd || !prod) throw new Error(errProd?.message || 'Error creando producto')
           productoId = prod.id
@@ -773,26 +793,38 @@ export default function NuevoProductoPage() {
           </span>
         </div>
         <div className="space-y-2 max-h-80 overflow-y-auto">
-          {loteActual.map(item => (
-            <div key={item.id} className="rounded-xl p-3 space-y-1.5" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-gray-800 truncate">{item.nombreProducto}</p>
-                  {item.marcaNombre && <p className="text-[10px] text-gray-400">{item.marcaNombre}</p>}
+          {loteActual.map(item => {
+            const catNombre = categorias.find(c => c.id === item.categoriaId)?.nombre
+            const totalUdsItem = Object.values(item.talles).reduce((s, sel) => s + sel.cantidad, 0)
+            return (
+              <div key={item.id} className="rounded-xl p-3 space-y-1.5" style={{ background: '#f8fdfc', border: '1px solid rgba(78,195,189,0.2)' }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-gray-800 truncate">{item.nombreProducto}</p>
+                    <p className="text-[10px] text-gray-400">
+                      {[item.marcaNombre, catNombre].filter(Boolean).join(' · ')}
+                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {item.precioVenta > 0 && (
+                        <span className="text-[10px] font-semibold" style={{ color: '#0d9488' }}>{formatPrecio(item.precioVenta)}</span>
+                      )}
+                      <span className="text-[10px] text-gray-400">{totalUdsItem} ud{totalUdsItem !== 1 ? 's' : ''}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => eliminarDelLote(item.id)} className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 flex-shrink-0 transition-colors">
+                    <Trash2 size={12} className="text-gray-400 hover:text-red-500" />
+                  </button>
                 </div>
-                <button onClick={() => eliminarDelLote(item.id)} className="w-6 h-6 rounded-lg flex items-center justify-center hover:bg-red-50 flex-shrink-0 transition-colors">
-                  <Trash2 size={12} className="text-gray-400 hover:text-red-500" />
-                </button>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(item.talles).map(([t, sel]) => (
+                    <span key={t} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(78,195,189,0.08)', color: '#0d9488' }}>
+                      {t} ×{sel.cantidad}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {Object.entries(item.talles).map(([t, sel]) => (
-                  <span key={t} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(78,195,189,0.08)', color: '#0d9488' }}>
-                    {t} ×{sel.cantidad}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
         <button
           onClick={confirmarLote}
@@ -1062,8 +1094,8 @@ export default function NuevoProductoPage() {
                 </div>
               )}
 
-              {/* Sección 3: Género (se oculta para calzado) */}
-              {builderEstiloOk && !esCalzado && (
+              {/* Sección 3: Género (se oculta para calzado y cuando la categoría ya implica género) */}
+              {builderEstiloOk && !esCalzado && !catImplicaGenero && (
                 <div className="tk-slide-forward">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="h-px flex-1 bg-gray-100" />
