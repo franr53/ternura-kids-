@@ -472,10 +472,14 @@ export default function CargaInicialPage() {
       // Agrupar por ID de venta
       type Grupo = { cliente: string; prods: string[]; total: number }
       const grupos = new Map<string, Grupo>()
+      // Nombres que corresponden a clientes ocasionales — se ignoran
+      const OCASIONALES = ['local', 'mostrador', 'ocasional', 'sin cuenta', 'contado']
+
       for (const fila of rawRowsC) {
         const id = colId ? getVal(fila, colId) : String(Math.random())
         const clienteNombre = getVal(fila, colCliente)
         if (!clienteNombre) continue
+        if (OCASIONALES.includes(clienteNombre.toLowerCase())) { res.saltados++; continue }
         if (!grupos.has(id)) grupos.set(id, { cliente: clienteNombre, prods: [], total: 0 })
         const g = grupos.get(id)!
         if (colProd) {
@@ -795,7 +799,7 @@ export default function CargaInicialPage() {
             <div className="space-y-2">
               <div className="flex gap-3 flex-wrap">
                 <Badge className="bg-green-100 text-green-700">✓ {resultadoC.ok} registros importados</Badge>
-                {resultadoC.saltados > 0 && <Badge className="bg-yellow-100 text-yellow-700">⚠ {resultadoC.saltados} clientes no encontrados</Badge>}
+                {resultadoC.saltados > 0 && <Badge className="bg-yellow-100 text-yellow-700">⚠ {resultadoC.saltados} omitidos (ocasionales o no encontrados)</Badge>}
                 {resultadoC.errores.length > 0 && <Badge className="bg-red-100 text-red-700">✗ {resultadoC.errores.length} errores</Badge>}
               </div>
               {resultadoC.noEncontrados.length > 0 && (
