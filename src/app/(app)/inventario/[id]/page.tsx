@@ -31,6 +31,8 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
   const [categoriaId, setCategoriaId] = useState('')
   const [proveedorId, setProveedorId] = useState('')
   const [temporada, setTemporada] = useState('')
+  const [precioCosto, setPrecioCosto] = useState('')
+  const [precioVenta, setPrecioVenta] = useState('')
 
   useEffect(() => {
     async function cargar() {
@@ -45,6 +47,8 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
         setCategoriaId(prod.categoria_id || '')
         setProveedorId(prod.proveedor_id || '')
         setTemporada(prod.temporada || '')
+        setPrecioCosto(String(prod.precio_costo || ''))
+        setPrecioVenta(String(prod.precio_venta || ''))
         setVariantes(prod.variantes || [])
       }
       setCategorias(cats || [])
@@ -62,6 +66,8 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
       categoria_id: categoriaId || null,
       proveedor_id: proveedorId || null,
       temporada: temporada || null,
+      precio_costo: parseFloat(precioCosto) || null,
+      precio_venta: parseFloat(precioVenta) || null,
       actualizado_en: new Date().toISOString(),
     }).eq('id', id)
 
@@ -116,6 +122,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
   const stockTotal = variantes.reduce((s, v) => s + v.stock, 0)
   const categoriaNombre = categorias.find(c => c.id === categoriaId)?.nombre || ''
   const proveedorNombre = proveedores.find(p => p.id === proveedorId)?.nombre || ''
+  const esProductoUnico = variantes.length === 1 && variantes[0].talle === 'Único'
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -207,6 +214,16 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
               </SelectContent>
             </Select>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Precio costo</Label>
+              <Input type="number" value={precioCosto} onChange={e => setPrecioCosto(e.target.value)} className="mt-1" min={0} placeholder="0" />
+            </div>
+            <div>
+              <Label>Precio venta</Label>
+              <Input type="number" value={precioVenta} onChange={e => setPrecioVenta(e.target.value)} className="mt-1" min={0} placeholder="0" />
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -221,8 +238,8 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
           )}
 
           {variantes.map(v => {
-            const costo = v.precio_costo ?? 0
-            const venta = v.precio_venta ?? 0
+            const costo = v.precio_costo ?? producto?.precio_costo ?? 0
+            const venta = v.precio_venta ?? producto?.precio_venta ?? 0
             const margenV = costo > 0 && venta > 0 ? Math.round(((venta - costo) / costo) * 100) : null
             const efectivo = venta > 0 ? Math.round(venta * 0.8) : 0
 
@@ -259,47 +276,64 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                     <Trash2 size={14} />
                   </Button>
                 </div>
-                {/* Fila 2: Precios */}
-                <div className="flex items-center gap-3 pl-[3rem]">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-400">Costo:</span>
-                    <Input
-                      type="number"
-                      value={v.precio_costo ?? ''}
-                      onChange={e => {
-                        const val = e.target.value === '' ? null : parseFloat(e.target.value)
-                        actualizarVariante(v.id, 'precio_costo', val)
-                      }}
-                      placeholder="0"
-                      className="h-8 w-24 text-xs"
-                      min={0}
-                    />
+                {/* Fila 2: Precios — solo para productos con múltiples talles */}
+                {!esProductoUnico && (
+                  <div className="flex items-center gap-3 pl-[3rem]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-400">Costo:</span>
+                      <Input
+                        type="number"
+                        value={v.precio_costo ?? ''}
+                        onChange={e => {
+                          const val = e.target.value === '' ? null : parseFloat(e.target.value)
+                          actualizarVariante(v.id, 'precio_costo', val)
+                        }}
+                        placeholder="0"
+                        className="h-8 w-24 text-xs"
+                        min={0}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-400">Venta:</span>
+                      <Input
+                        type="number"
+                        value={v.precio_venta ?? ''}
+                        onChange={e => {
+                          const val = e.target.value === '' ? null : parseFloat(e.target.value)
+                          actualizarVariante(v.id, 'precio_venta', val)
+                        }}
+                        placeholder="0"
+                        className="h-8 w-24 text-xs"
+                        min={0}
+                      />
+                    </div>
+                    {margenV !== null && (
+                      <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
+                        {margenV}%
+                      </span>
+                    )}
+                    {efectivo > 0 && (
+                      <span className="text-xs text-gray-400 ml-auto">
+                        Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-400">Venta:</span>
-                    <Input
-                      type="number"
-                      value={v.precio_venta ?? ''}
-                      onChange={e => {
-                        const val = e.target.value === '' ? null : parseFloat(e.target.value)
-                        actualizarVariante(v.id, 'precio_venta', val)
-                      }}
-                      placeholder="0"
-                      className="h-8 w-24 text-xs"
-                      min={0}
-                    />
+                )}
+                {/* Margen/etiqueta para productos únicos (precio en la card superior) */}
+                {esProductoUnico && (margenV !== null || efectivo > 0) && (
+                  <div className="flex items-center gap-3 pl-[3rem]">
+                    {margenV !== null && (
+                      <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
+                        Margen: {margenV}%
+                      </span>
+                    )}
+                    {efectivo > 0 && (
+                      <span className="text-xs text-gray-400 ml-auto">
+                        Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
+                      </span>
+                    )}
                   </div>
-                  {margenV !== null && (
-                    <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
-                      {margenV}%
-                    </span>
-                  )}
-                  {efectivo > 0 && (
-                    <span className="text-xs text-gray-400 ml-auto">
-                      Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
-                    </span>
-                  )}
-                </div>
+                )}
               </div>
             )
           })}

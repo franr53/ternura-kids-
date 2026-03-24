@@ -222,6 +222,8 @@ export default function NuevoProductoPage() {
   const [generoPrenda, setGeneroPrenda] = useState<string | null>(null)   // null = aún no elegido, '' = omitido
   const [generoSeleccionado, setGeneroSeleccionado] = useState<GeneroSeleccionado>(null)
   const [otroTipoPrenda, setOtroTipoPrenda] = useState('')
+  const [modoLibre, setModoLibre] = useState(false)
+  const [nombreLibre, setNombreLibre] = useState('')
   const [precioCosto, setPrecioCosto] = useState('')
   const [precioVenta, setPrecioVenta] = useState('')
   const [precioVentaEditado, setPrecioVentaEditado] = useState(false)
@@ -494,7 +496,7 @@ export default function NuevoProductoPage() {
     setEsProductoNuevo(true)
     setProducto(null)
     setNombreNuevoProducto('')
-    setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setGeneroSeleccionado(null); setOtroTipoPrenda('')
+    setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setGeneroSeleccionado(null); setOtroTipoPrenda(''); setModoLibre(false); setNombreLibre('')
     setPrecioCosto(''); setPrecioVenta(''); setPrecioVentaEditado(false); setTemporada('todo_el_año')
     irA('categoria', 'forward')
   }
@@ -574,6 +576,14 @@ export default function NuevoProductoPage() {
     const nombre = nombreGenerado.trim()
     if (!nombre) { toast.error('Elegí al menos el tipo de prenda'); return }
     setNombreNuevoProducto(nombre)
+    irA('precio', 'forward')
+  }
+
+  function confirmarNombreLibre() {
+    const nombre = nombreLibre.trim()
+    if (!nombre) return
+    setNombreNuevoProducto(nombre)
+    setTipoPrenda('')
     irA('precio', 'forward')
   }
 
@@ -1114,12 +1124,46 @@ export default function NuevoProductoPage() {
         {step === 'nombre_nuevo' && (
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-5">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto</p>
-                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Qué tipo de prenda?</h2>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto</p>
+                  <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>
+                    {modoLibre ? 'Escribí el nombre' : '¿Qué tipo de prenda?'}
+                  </h2>
+                </div>
+                <button
+                  onClick={() => { setModoLibre(!modoLibre); setNombreLibre(''); setTipoPrenda(''); setEstiloPrenda(null) }}
+                  className="text-xs text-gray-400 hover:text-teal-600 underline mt-1 shrink-0"
+                >
+                  {modoLibre ? '← Usar asistente' : 'Nombre libre'}
+                </button>
               </div>
 
-              {/* Sección 1: Tipo de prenda */}
+              {/* Modo libre: input directo */}
+              {modoLibre && (
+                <div className="space-y-3">
+                  <Input
+                    value={nombreLibre}
+                    onChange={e => setNombreLibre(e.target.value)}
+                    placeholder="Ej: Remera Blanca San Miguel, Bikini verano..."
+                    className="h-10 rounded-xl text-sm"
+                    autoFocus
+                    onKeyDown={e => e.key === 'Enter' && nombreLibre.trim() && confirmarNombreLibre()}
+                  />
+                  {nombreLibre.trim() && (
+                    <button
+                      onClick={confirmarNombreLibre}
+                      className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
+                      style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
+                    >
+                      Continuar con "{nombreLibre.trim()}"
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Modo asistente */}
+              {!modoLibre && (
               <div>
                 <div className="flex flex-wrap gap-2">
                   {(esCalzado ? TIPOS_CALZADO : TIPOS_PRENDA).map(t => (
@@ -1150,6 +1194,7 @@ export default function NuevoProductoPage() {
                   />
                 )}
               </div>
+              )}
 
               {/* Sección 2: Estilo (revelación progresiva) */}
               {builderTipoOk && (
