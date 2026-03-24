@@ -120,12 +120,10 @@ const MARGEN_SUGERIDO = 2.5
 
 interface ProductoExistente {
   id: string
-  nombre: string
-  precio_venta: number
-  precio_costo: number
+  nombre_base: string
   categoria_id: string | null
-  proveedor_id: string | null
-  variantes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number | null; precio_costo: number | null }[]
+  marca_id: string | null
+  variantes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number; precio_costo: number }[]
 }
 
 // ── Tipos de lote ──────────────────────────────────────────
@@ -149,7 +147,7 @@ interface ItemLote {
     precioCosto: string
     precioVenta: string
   }>
-  variantesExistentes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number | null; precio_costo: number | null }[]
+  variantesExistentes: { id: string; talle: string; codigo_barras: string | null; stock: number; stock_minimo: number; precio_venta: number; precio_costo: number }[]
 }
 
 // ── Utilidades ─────────────────────────────────────────────────
@@ -275,9 +273,9 @@ export default function NuevoProductoPage() {
   // ── Carga de datos ─────────────────────────────────────────────
   const cargarTodo = useCallback(async () => {
     const [{ data: provs }, { data: cats }, { data: prods }] = await Promise.all([
-      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+      supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
-      supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo,precio_venta,precio_costo)').eq('activo', true).order('nombre'),
+      supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo,precio_venta,precio_costo)').eq('activo', true).order('nombre_base'),
     ])
     setProveedores(provs || [])
     setCategorias(cats || [])
@@ -335,15 +333,15 @@ export default function NuevoProductoPage() {
     : proveedores
 
   const tiposDeEstaMarca = categorias.filter(c =>
-    todosProductos.some(p => p.proveedor_id === marca?.id && p.categoria_id === c.id)
+    todosProductos.some(p => p.marca_id === marca?.id && p.categoria_id === c.id)
   )
   const otrosTipos = categorias.filter(c => !tiposDeEstaMarca.some(t => t.id === c.id))
 
   // Todos los productos de la marca, para el paso "producto"
-  const productosDeEstaMarca = todosProductos.filter(p => p.proveedor_id === marca?.id)
+  const productosDeEstaMarca = todosProductos.filter(p => p.marca_id === marca?.id)
   const productosFiltrados = busquedaProducto.trim()
     ? productosDeEstaMarca.filter(p =>
-        normalizar(busquedaProducto).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre).includes(w))
+        normalizar(busquedaProducto).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre_base).includes(w))
       )
     : productosDeEstaMarca
   // Agrupados por categoría para mostrar en el paso producto
@@ -411,7 +409,7 @@ export default function NuevoProductoPage() {
       const estiloStr = estiloPrenda || ''
       return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle)
     } else {
-      const nombreProd = producto?.nombre || ''
+      const nombreProd = producto?.nombre_base || ''
       const prefix = generarPrefijo(nombreProd)
       const talleCode = normalizarTalleParaCodigo(talle)
       const base = `${prefix}${talleCode}`
@@ -433,7 +431,7 @@ export default function NuevoProductoPage() {
   // ── Handlers de selección ──────────────────────────────────────
   function seleccionarProductoExistente(p: ProductoExistente) {
     // Setear marca y tipo desde el producto para que el barcode y breadcrumbs funcionen
-    const prov = proveedores.find(v => v.id === p.proveedor_id) || null
+    const prov = proveedores.find(v => v.id === p.marca_id) || null
     const cat  = categorias.find(c => c.id === p.categoria_id) || null
     setMarca(prov)
     setTipo(cat)
@@ -441,8 +439,8 @@ export default function NuevoProductoPage() {
     setEsProductoNuevo(false)
     setVinoDeExistente(true)
     setQuiereCambiarPrecio(false)
-    setPrecioCosto(String(p.precio_costo || ''))
-    setPrecioVenta(String(p.precio_venta || ''))
+    setPrecioCosto(String(p.variantes?.[0]?.precio_costo || ''))
+    setPrecioVenta(String(p.variantes?.[0]?.precio_venta || ''))
     setPrecioVentaEditado(false)
     setTallesSeleccionados({}); setBarcode('')
     setBusquedaExistente('')
@@ -484,8 +482,8 @@ export default function NuevoProductoPage() {
     setProducto(p)
     setEsProductoNuevo(false)
     setQuiereCambiarPrecio(false)
-    setPrecioCosto(String(p.precio_costo || ''))
-    setPrecioVenta(String(p.precio_venta || ''))
+    setPrecioCosto(String(p.variantes?.[0]?.precio_costo || ''))
+    setPrecioVenta(String(p.variantes?.[0]?.precio_venta || ''))
     setPrecioVentaEditado(false)
     setTallesSeleccionados({}); setBarcode('')
     setBusquedaProducto('')
@@ -502,12 +500,10 @@ export default function NuevoProductoPage() {
   }
 
   async function toggleTalle(talle: string, varianteId: string | null, esNueva: boolean) {
-    // Pre-fill prices: variant-level > product-level > form-level
+    // Pre-fill prices: variant-level > form-level
     const varExist = tallesExistentes.find(v => v.talle === talle)
-    const defaultCosto = varExist?.precio_costo != null ? String(varExist.precio_costo)
-      : producto?.precio_costo ? String(producto.precio_costo) : precioCosto
-    const defaultVenta = varExist?.precio_venta != null ? String(varExist.precio_venta)
-      : producto?.precio_venta ? String(producto.precio_venta) : precioVenta
+    const defaultCosto = varExist?.precio_costo ? String(varExist.precio_costo) : precioCosto
+    const defaultVenta = varExist?.precio_venta ? String(varExist.precio_venta) : precioVenta
 
     setTallesSeleccionados(prev => {
       if (prev[talle]) {
@@ -544,7 +540,7 @@ export default function NuevoProductoPage() {
     const nombre = nuevaMarcaNombre.trim()
     if (!nombre) return
     setLoadingCrearMarca(true)
-    const { data, error } = await supabase.from('proveedores').insert({ nombre, deuda_total: 0, activo: true }).select().single()
+    const { data, error } = await supabase.from('marcas').insert({ nombre, deuda_total: 0, activo: true }).select().single()
     if (error || !data) { toast.error(`Error: ${error?.message}`); setLoadingCrearMarca(false); return }
     await cargarTodo()
     setLoadingCrearMarca(false)
@@ -591,7 +587,7 @@ export default function NuevoProductoPage() {
   function agregarAlLote() {
     const entries = Object.entries(tallesSeleccionados)
     if (entries.length === 0) return
-    const nombreFinal = esProductoNuevo ? nombreNuevoProducto.trim() : (producto?.nombre || '')
+    const nombreFinal = esProductoNuevo ? nombreNuevoProducto.trim() : (producto?.nombre_base || '')
     const totalUnidades = entries.reduce((s, [, sel]) => s + sel.cantidad, 0)
     const item: ItemLote = {
       id: crypto.randomUUID(),
@@ -626,22 +622,12 @@ export default function NuevoProductoPage() {
       const item = loteActual[i]
       setConfirmProgress({ current: i + 1, total: loteActual.length })
       try {
-        if (item.quiereCambiarPrecio && !item.esProductoNuevo && item.productoId) {
-          const { error: errPrecio } = await supabase.from('productos').update({
-            precio_costo: item.precioCosto,
-            precio_venta: item.precioVenta,
-          }).eq('id', item.productoId)
-          if (errPrecio) throw new Error(errPrecio.message)
-        }
-
         let productoId = item.productoId
         if (item.esProductoNuevo) {
           const { data: prod, error: errProd } = await supabase.from('productos').insert({
-            nombre: item.nombreProducto,
+            nombre_base: item.nombreProducto,
             categoria_id: item.categoriaId,
-            proveedor_id: item.marcaId,
-            precio_costo: item.precioCosto,
-            precio_venta: item.precioVenta,
+            marca_id: item.marcaId,
             temporada: item.temporada,
             activo: true,
           }).select().single()
@@ -734,7 +720,7 @@ export default function NuevoProductoPage() {
   const breadcrumbs: BC[] = []
   if (marca && !['marca'].includes(step)) breadcrumbs.push({ label: marca.nombre, goTo: 'marca' })
   if (tipo && !['marca','tipo','categoria','producto'].includes(step)) breadcrumbs.push({ label: tipo.nombre, goTo: 'categoria' })
-  const prodNombre = esProductoNuevo ? nombreNuevoProducto : producto?.nombre
+  const prodNombre = esProductoNuevo ? nombreNuevoProducto : producto?.nombre_base
   if (prodNombre && !['marca','tipo','categoria','genero','producto','nombre_nuevo','precio','precio_existente'].includes(step)) {
     breadcrumbs.push({ label: prodNombre, goTo: 'producto' })
   }
@@ -1002,7 +988,7 @@ export default function NuevoProductoPage() {
                               <button key={p.id} onClick={() => seleccionarProducto(p)}
                                 className="w-full flex justify-between items-center px-4 py-3 rounded-2xl border transition-all hover:border-teal-300 hover:bg-teal-50 active:scale-[0.98]"
                                 style={{ borderColor: '#e5e7eb', background: 'white' }}>
-                                <span className="font-semibold text-sm text-gray-800 text-left">{p.nombre}</span>
+                                <span className="font-semibold text-sm text-gray-800 text-left">{p.nombre_base}</span>
                                 <span className="text-xs font-medium ml-3 flex-shrink-0" style={{ color: stockTotal > 0 ? '#4EC3BD' : '#f97316' }}>{stockTotal} uds</span>
                               </button>
                             )
@@ -1017,7 +1003,7 @@ export default function NuevoProductoPage() {
                         <button key={p.id} onClick={() => seleccionarProducto(p)}
                           className="w-full flex justify-between items-center px-4 py-3 rounded-2xl border transition-all hover:border-teal-300 hover:bg-teal-50 active:scale-[0.98]"
                           style={{ borderColor: '#e5e7eb', background: 'white' }}>
-                          <span className="font-semibold text-sm text-gray-800 text-left">{p.nombre}</span>
+                          <span className="font-semibold text-sm text-gray-800 text-left">{p.nombre_base}</span>
                           <span className="text-xs font-medium ml-3 flex-shrink-0" style={{ color: stockTotal > 0 ? '#4EC3BD' : '#f97316' }}>{stockTotal} uds</span>
                         </button>
                       )
@@ -1320,7 +1306,7 @@ export default function NuevoProductoPage() {
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">{marca?.nombre}</p>
                 <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>¿Cambió el precio?</h2>
                 <p className="text-sm font-bold mt-0.5" style={{ color: '#4EC3BD' }}>
-                  {producto.nombre}
+                  {producto.nombre_base}
                   {marca && <span className="font-normal text-gray-400"> — {marca.nombre}</span>}
                 </p>
               </div>
@@ -1331,21 +1317,21 @@ export default function NuevoProductoPage() {
                 <div className="flex items-center gap-4">
                   <div>
                     <p className="text-xs text-gray-400">Costo</p>
-                    <p className="text-sm font-bold text-gray-800">{formatPrecio(producto.precio_costo)}</p>
+                    <p className="text-sm font-bold text-gray-800">{formatPrecio(parseFloat(precioCosto) || 0)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Venta</p>
-                    <p className="text-sm font-bold text-gray-800">{formatPrecio(producto.precio_venta)}</p>
+                    <p className="text-sm font-bold text-gray-800">{formatPrecio(parseFloat(precioVenta) || 0)}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4 pt-1 border-t border-gray-100">
                   <div>
                     <p className="text-xs text-gray-400">Etiqueta</p>
-                    <p className="text-sm font-semibold text-gray-700">{formatPrecio(producto.precio_venta)}</p>
+                    <p className="text-sm font-semibold text-gray-700">{formatPrecio(parseFloat(precioVenta) || 0)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Efectivo (−20%)</p>
-                    <p className="text-sm font-semibold" style={{ color: '#0d9488' }}>{formatPrecio(Math.round(producto.precio_venta * 0.8))}</p>
+                    <p className="text-sm font-semibold" style={{ color: '#0d9488' }}>{formatPrecio(Math.round((parseFloat(precioVenta) || 0) * 0.8))}</p>
                   </div>
                 </div>
               </div>
@@ -1362,8 +1348,6 @@ export default function NuevoProductoPage() {
                   <button
                     onClick={() => {
                       setQuiereCambiarPrecio(true)
-                      setPrecioCosto(String(producto.precio_costo || ''))
-                      setPrecioVenta(String(producto.precio_venta || ''))
                       setPrecioVentaEditado(false)
                     }}
                     className="w-full py-2.5 rounded-2xl font-semibold text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
@@ -1427,7 +1411,7 @@ export default function NuevoProductoPage() {
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
                 <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Talles y cantidades</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre} — Tocá para seleccionar</p>
+                <p className="text-xs text-gray-400 mt-0.5">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre_base} — Tocá para seleccionar</p>
               </div>
               <div className="space-y-4">
                 {/* Talles existentes (producto existente) */}

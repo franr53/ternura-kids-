@@ -155,9 +155,9 @@ export default function CargaInicialPage() {
       const proveedoresUnicos = [...new Set(activos.map(r => r['Proveedor']?.trim()).filter(Boolean))]
       const proveedoresInsert = proveedoresUnicos.map(nombre => ({ nombre, activo: true }))
       if (proveedoresInsert.length > 0) {
-        await supabase.from('proveedores').upsert(proveedoresInsert, { onConflict: 'nombre', ignoreDuplicates: true })
+        await supabase.from('marcas').upsert(proveedoresInsert, { onConflict: 'nombre', ignoreDuplicates: true })
       }
-      const { data: provs } = await supabase.from('proveedores').select('id, nombre')
+      const { data: provs } = await supabase.from('marcas').select('id, nombre')
       const provMap = new Map<string, string>((provs ?? []).map(p => [p.nombre, p.id]))
 
       // Insertar productos en lotes
@@ -168,11 +168,11 @@ export default function CargaInicialPage() {
         const productosInsert = lote.map(r => {
           const catNombre = resolverCategoria(String(r['Tipo de Producto']))
           return {
-            nombre: String(r['Nombre']).trim(),
+            nombre_base: String(r['Nombre']).trim(),
             categoria_id: catMap.get(catNombre) ?? null,
-            proveedor_id: provMap.get(String(r['Proveedor']).trim()) ?? null,
-            precio_costo: Math.round(Number(r['Costo']) || 0),
-            precio_venta: Math.round(Number(r['Precio de Venta']) || 0),
+            marca_id: provMap.get(String(r['Proveedor']).trim()) ?? null,
+            
+            
             activo: true,
             temporada: 'todo_el_año',
           }
@@ -200,6 +200,8 @@ export default function CargaInicialPage() {
             talle: 'Único',
             codigo_barras: barcode,
             stock: Math.round(Number(r['Stock']) || 0),
+            precio_costo: Math.round(Number(r['Costo']) || 0),
+            precio_venta: Math.round(Number(r['Precio de Venta']) || 0),
           }
         })
 

@@ -53,7 +53,7 @@ function fuzzyMatch(texto: string, query: string): boolean {
 function matchVariante(v: VarianteConProducto, query: string): boolean {
   const q = query.trim()
   if (v.codigo_barras && v.codigo_barras.includes(q)) return true
-  return fuzzyMatch(v.producto.nombre, q)
+  return fuzzyMatch(v.producto.nombre_base, q)
 }
 
 export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props) {
@@ -68,7 +68,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
         .order('talle')
         .limit(500),
       supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
-      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+      supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
     ])
     return {
       variantes: ((variantes || []).filter((v) => v.producto?.activo) as VarianteConProducto[]),
@@ -243,19 +243,19 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
       setCarrito(prev => [...prev, {
         varianteId: variante.id,
         productoId: variante.producto.id,
-        productoNombre: variante.producto.nombre,
+        productoNombre: variante.producto.nombre_base,
         talle: variante.talle,
         codigoBarras: variante.codigo_barras,
-        precio: variante.precio_venta ?? variante.producto.precio_venta,
+        precio: variante.precio_venta,
         descuentoItem: 0,
         cantidad: 1,
       }])
     }
     setBusProducto('')
     if (variante.stock <= 0) {
-      toast.warning(`${variante.producto.nombre} T${variante.talle} — sin stock registrado`, { duration: 2000 })
+      toast.warning(`${variante.producto.nombre_base} T${variante.talle} — sin stock registrado`, { duration: 2000 })
     } else {
-      toast.success(`${variante.producto.nombre} T${variante.talle} agregado`, { duration: 1200 })
+      toast.success(`${variante.producto.nombre_base} T${variante.talle} agregado`, { duration: 1200 })
     }
   }
 
@@ -309,11 +309,8 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
       if (decision !== 'ignorar') {
         if (decision === 'variante') {
           await supabase.from('variantes').update({ precio_venta: cambio.nuevoPrecio }).eq('id', cambio.varianteId)
-        } else if (decision === 'todas_variantes') {
-          await supabase.from('variantes').update({ precio_venta: cambio.nuevoPrecio }).eq('producto_id', cambio.productoId)
         } else {
-          await supabase.from('productos').update({ precio_venta: cambio.nuevoPrecio }).eq('id', cambio.productoId)
-          await supabase.from('variantes').update({ precio_venta: null }).eq('producto_id', cambio.productoId)
+          await supabase.from('variantes').update({ precio_venta: cambio.nuevoPrecio }).eq('producto_id', cambio.productoId)
         }
       }
       setPreciosCambiados(prev => prev.map((p, j) => j === i ? { ...p, decision } : p))
@@ -456,7 +453,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                         className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-50 text-left border-b border-gray-50 last:border-0 transition-colors"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate">{formatNombreConTalle(v.producto.nombre, v.talle)}</p>
+                          <p className="text-sm font-medium text-gray-800 truncate">{formatNombreConTalle(v.producto.nombre_base, v.talle)}</p>
                           <div className="flex items-center gap-2">
                             {v.stock <= 0
                               ? <span className="text-xs text-orange-500 font-medium">⚠ Sin stock</span>
@@ -474,7 +471,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                         </div>
                         <div className="shrink-0 ml-3 flex items-center gap-2">
                           <span className="text-sm font-semibold text-gray-800">
-                            {formatPrecio(v.precio_venta ?? v.producto.precio_venta)}
+                            {formatPrecio(v.precio_venta)}
                           </span>
                           <Plus size={14} className="text-teal-400" />
                         </div>

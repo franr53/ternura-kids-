@@ -27,12 +27,13 @@ interface StockBajo {
   talle: string
   stock: number
   stock_minimo: number
-  producto?: { nombre: string; precio_venta: number }
+  precio_venta: number
+  producto?: { nombre_base: string }
 }
 
 interface VentaTemporada {
   total: number
-  venta_items: { cantidad: number; subtotal: number; variante?: { producto?: { nombre: string; precio_costo?: number } } }[]
+  venta_items: { cantidad: number; subtotal: number; variante?: { producto?: { nombre_base: string } } }[]
 }
 
 interface TopProductoTemp {
@@ -111,7 +112,7 @@ export default function ReportesPage() {
     setLoadingStock(true)
     const { data: all } = await supabase
       .from('variantes')
-      .select('*, producto:productos(nombre, precio_venta)')
+      .select('*, producto:productos(nombre_base)')
       .order('stock')
     const bajos = (all || []).filter((v: StockBajo) => v.stock <= v.stock_minimo)
     setStockBajo(bajos)
@@ -129,7 +130,7 @@ export default function ReportesPage() {
         .gte('creado_en', `${temp.desde}T00:00:00`)
         .lte('creado_en', `${temp.hasta}T23:59:59`),
       supabase.from('venta_items')
-        .select('cantidad, subtotal, variante:variantes(producto:productos(nombre, precio_costo))')
+        .select('cantidad, subtotal, variante:variantes(producto:productos(nombre_base))')
         .gte('created_at', `${temp.desde}T00:00:00`)
         .lte('created_at', `${temp.hasta}T23:59:59`),
     ])
@@ -152,7 +153,7 @@ export default function ReportesPage() {
     const porProd: Record<string, { cantidad: number; total: number }> = {}
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(itemsActuales || []).forEach((item: any) => {
-      const nombre = item.variante?.producto?.nombre || 'Sin nombre'
+      const nombre = item.variante?.producto?.nombre_base || 'Sin nombre'
       if (!porProd[nombre]) porProd[nombre] = { cantidad: 0, total: 0 }
       porProd[nombre].cantidad += item.cantidad
       porProd[nombre].total += item.subtotal
@@ -491,10 +492,10 @@ export default function ReportesPage() {
                     <tbody className="divide-y divide-gray-100">
                       {stockBajo.filter(v => !filtroTalleStock.trim() || v.talle.toLowerCase().includes(filtroTalleStock.trim().toLowerCase())).map(v => (
                         <tr key={v.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 font-medium text-gray-800">{formatNombreConTalle(v.producto?.nombre || '', v.talle)}</td>
+                          <td className="px-4 py-2.5 font-medium text-gray-800">{formatNombreConTalle(v.producto?.nombre_base || '', v.talle)}</td>
                           <td className="px-4 py-2.5 text-center font-bold">{v.stock}</td>
                           <td className="px-4 py-2.5 text-center text-gray-500">{v.stock_minimo}</td>
-                          <td className="px-4 py-2.5 text-right text-gray-600">{formatPrecio(v.producto?.precio_venta || 0)}</td>
+                          <td className="px-4 py-2.5 text-right text-gray-600">{formatPrecio(v.precio_venta || 0)}</td>
                           <td className="px-4 py-2.5 text-center">
                             <Badge variant={v.stock === 0 ? 'destructive' : 'outline'} className={v.stock === 0 ? '' : 'border-orange-300 text-orange-600'}>
                               {v.stock === 0 ? 'Sin stock' : 'Stock bajo'}

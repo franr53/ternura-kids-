@@ -28,7 +28,7 @@ function fuzzyMatch(texto: string, query: string): boolean {
 function matchVariante(v: VarianteConProducto, query: string): boolean {
   const q = query.trim()
   if (v.codigo_barras && v.codigo_barras.includes(q)) return true
-  return fuzzyMatch(v.producto.nombre, q)
+  return fuzzyMatch(v.producto.nombre_base, q)
 }
 
 export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
@@ -98,7 +98,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-800 text-sm truncate">{formatNombreConTalle(variante.producto.nombre, variante.talle)}</p>
+                    <p className="font-medium text-gray-800 text-sm truncate">{formatNombreConTalle(variante.producto.nombre_base, variante.talle)}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       {variante.producto.categoria && (
                         <span
@@ -111,7 +111,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                     </div>
                   </div>
                   <div className="text-right ml-3 shrink-0">
-                    <p className="font-semibold text-gray-800 text-sm">{formatPrecio(variante.precio_venta ?? variante.producto.precio_venta)}</p>
+                    <p className="font-semibold text-gray-800 text-sm">{formatPrecio(variante.precio_venta)}</p>
                     {variante.stock <= 0 ? (
                       <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
                     ) : (

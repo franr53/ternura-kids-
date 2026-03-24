@@ -20,7 +20,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
   const supabase = createClient()
   const [producto, setProducto] = useState<Producto | null>(null)
   const [categorias, setCategorias] = useState<{ id: string; nombre: string; sistema_talles: string; activa: boolean }[]>([])
-  const [proveedores, setProveedores] = useState<{ id: string; nombre: string; activo: boolean }[]>([])
+  const [marcas, setMarcas] = useState<{ id: string; nombre: string; activo: boolean }[]>([])
   const [loading, setLoading] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [variantes, setVariantes] = useState<Variante[]>([])
@@ -29,30 +29,26 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
   // Campos editables producto
   const [nombre, setNombre] = useState('')
   const [categoriaId, setCategoriaId] = useState('')
-  const [proveedorId, setProveedorId] = useState('')
+  const [marcaId, setMarcaId] = useState('')
   const [temporada, setTemporada] = useState('')
-  const [precioCosto, setPrecioCosto] = useState('')
-  const [precioVenta, setPrecioVenta] = useState('')
 
   useEffect(() => {
     async function cargar() {
       const [{ data: prod }, { data: cats }, { data: provs }] = await Promise.all([
-        supabase.from('productos').select('*, categoria:categorias(*), proveedor:proveedores(*), variantes(*)').eq('id', id).single(),
+        supabase.from('productos').select('*, categoria:categorias(*), marca:marcas(*), variantes(*)').eq('id', id).single(),
         supabase.from('categorias').select('id, nombre, sistema_talles, activa').order('nombre'),
-        supabase.from('proveedores').select('id, nombre, activo').order('nombre'),
+        supabase.from('marcas').select('id, nombre, activo').order('nombre'),
       ])
       if (prod) {
         setProducto(prod)
-        setNombre(prod.nombre)
+        setNombre(prod.nombre_base)
         setCategoriaId(prod.categoria_id || '')
-        setProveedorId(prod.proveedor_id || '')
+        setMarcaId(prod.marca_id || '')
         setTemporada(prod.temporada || '')
-        setPrecioCosto(String(prod.precio_costo || ''))
-        setPrecioVenta(String(prod.precio_venta || ''))
         setVariantes(prod.variantes || [])
       }
       setCategorias(cats || [])
-      setProveedores(provs || [])
+      setMarcas(provs || [])
       setLoading(false)
     }
     cargar()
@@ -62,12 +58,10 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
     setGuardando(true)
 
     const { error } = await supabase.from('productos').update({
-      nombre,
+      nombre_base: nombre,
       categoria_id: categoriaId || null,
-      proveedor_id: proveedorId || null,
+      marca_id: marcaId || null,
       temporada: temporada || null,
-      precio_costo: parseFloat(precioCosto) || null,
-      precio_venta: parseFloat(precioVenta) || null,
       actualizado_en: new Date().toISOString(),
     }).eq('id', id)
 
@@ -93,6 +87,8 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
       talle: nuevoTalle.trim(),
       stock: 0,
       stock_minimo: 0,
+      precio_costo: 0,
+      precio_venta: 0,
     }).select().single()
     if (!error && data) {
       setVariantes(prev => [...prev, data])
@@ -121,8 +117,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
 
   const stockTotal = variantes.reduce((s, v) => s + v.stock, 0)
   const categoriaNombre = categorias.find(c => c.id === categoriaId)?.nombre || ''
-  const proveedorNombre = proveedores.find(p => p.id === proveedorId)?.nombre || ''
-  const esProductoUnico = variantes.length === 1 && variantes[0].talle === 'Único'
+  const marcaNombre = marcas.find(p => p.id === marcaId)?.nombre || ''
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -132,10 +127,10 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
             <Button variant="ghost" size="icon"><ArrowLeft size={20} /></Button>
           </Link>
           <div>
-            <h1 className="text-xl font-bold text-gray-800">{producto.nombre}</h1>
+            <h1 className="text-xl font-bold text-gray-800">{producto.nombre_base}</h1>
             <p className="text-gray-500 text-sm">
-              {proveedorNombre && <span>{proveedorNombre}</span>}
-              {proveedorNombre && categoriaNombre && <span> · </span>}
+              {marcaNombre && <span>{marcaNombre}</span>}
+              {marcaNombre && categoriaNombre && <span> · </span>}
               {categoriaNombre && <span>{categoriaNombre}</span>}
               {stockTotal > 0 && <span className="ml-2 text-teal-600 font-semibold">{stockTotal} uds total</span>}
             </p>
@@ -179,16 +174,16 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
               </Select>
             </div>
             <div>
-              <Label>Proveedor / Marca</Label>
-              <Select value={proveedorId || '__none__'} onValueChange={v => setProveedorId(v === '__none__' ? '' : (v ?? ''))}>
+              <Label>Marca</Label>
+              <Select value={marcaId || '__none__'} onValueChange={v => setMarcaId(v === '__none__' ? '' : (v ?? ''))}>
                 <SelectTrigger className="mt-1">
                   <SelectValue>
-                    {proveedorId ? (proveedores.find(p => p.id === proveedorId)?.nombre || 'Sin proveedor') : 'Sin proveedor'}
+                    {marcaId ? (marcas.find(p => p.id === marcaId)?.nombre || 'Sin marca') : 'Sin marca'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">Sin proveedor</SelectItem>
-                  {proveedores.map(p => (
+                  <SelectItem value="__none__">Sin marca</SelectItem>
+                  {marcas.map(p => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.nombre}{!p.activo ? ' (inactivo)' : ''}
                     </SelectItem>
@@ -214,16 +209,6 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Precio costo</Label>
-              <Input type="number" value={precioCosto} onChange={e => setPrecioCosto(e.target.value)} className="mt-1" min={0} placeholder="0" />
-            </div>
-            <div>
-              <Label>Precio venta</Label>
-              <Input type="number" value={precioVenta} onChange={e => setPrecioVenta(e.target.value)} className="mt-1" min={0} placeholder="0" />
-            </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -238,14 +223,14 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
           )}
 
           {variantes.map(v => {
-            const costo = v.precio_costo ?? producto?.precio_costo ?? 0
-            const venta = v.precio_venta ?? producto?.precio_venta ?? 0
+            const costo = v.precio_costo
+            const venta = v.precio_venta
             const margenV = costo > 0 && venta > 0 ? Math.round(((venta - costo) / costo) * 100) : null
             const efectivo = venta > 0 ? Math.round(venta * 0.8) : 0
 
             return (
               <div key={v.id} className="rounded-xl border border-gray-200 p-3 space-y-2">
-                {/* Fila 1: Talle + Stock + Eliminar */}
+                {/* Fila 1: Talle + Stock + Código */}
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-black text-gray-800 min-w-[3rem]">{v.talle}</span>
                   <div className="flex items-center gap-2 flex-1">
@@ -276,64 +261,41 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                     <Trash2 size={14} />
                   </Button>
                 </div>
-                {/* Fila 2: Precios — solo para productos con múltiples talles */}
-                {!esProductoUnico && (
-                  <div className="flex items-center gap-3 pl-[3rem]">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-gray-400">Costo:</span>
-                      <Input
-                        type="number"
-                        value={v.precio_costo ?? ''}
-                        onChange={e => {
-                          const val = e.target.value === '' ? null : parseFloat(e.target.value)
-                          actualizarVariante(v.id, 'precio_costo', val)
-                        }}
-                        placeholder="0"
-                        className="h-8 w-24 text-xs"
-                        min={0}
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-gray-400">Venta:</span>
-                      <Input
-                        type="number"
-                        value={v.precio_venta ?? ''}
-                        onChange={e => {
-                          const val = e.target.value === '' ? null : parseFloat(e.target.value)
-                          actualizarVariante(v.id, 'precio_venta', val)
-                        }}
-                        placeholder="0"
-                        className="h-8 w-24 text-xs"
-                        min={0}
-                      />
-                    </div>
-                    {margenV !== null && (
-                      <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
-                        {margenV}%
-                      </span>
-                    )}
-                    {efectivo > 0 && (
-                      <span className="text-xs text-gray-400 ml-auto">
-                        Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
-                      </span>
-                    )}
+                {/* Fila 2: Precios */}
+                <div className="flex items-center gap-3 pl-[3rem]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">Costo:</span>
+                    <Input
+                      type="number"
+                      value={v.precio_costo}
+                      onChange={e => actualizarVariante(v.id, 'precio_costo', parseFloat(e.target.value) || 0)}
+                      placeholder="0"
+                      className="h-8 w-24 text-xs"
+                      min={0}
+                    />
                   </div>
-                )}
-                {/* Margen/etiqueta para productos únicos (precio en la card superior) */}
-                {esProductoUnico && (margenV !== null || efectivo > 0) && (
-                  <div className="flex items-center gap-3 pl-[3rem]">
-                    {margenV !== null && (
-                      <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
-                        Margen: {margenV}%
-                      </span>
-                    )}
-                    {efectivo > 0 && (
-                      <span className="text-xs text-gray-400 ml-auto">
-                        Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
-                      </span>
-                    )}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">Venta:</span>
+                    <Input
+                      type="number"
+                      value={v.precio_venta}
+                      onChange={e => actualizarVariante(v.id, 'precio_venta', parseFloat(e.target.value) || 0)}
+                      placeholder="0"
+                      className="h-8 w-24 text-xs"
+                      min={0}
+                    />
                   </div>
-                )}
+                  {margenV !== null && (
+                    <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
+                      {margenV}%
+                    </span>
+                  )}
+                  {efectivo > 0 && (
+                    <span className="text-xs text-gray-400 ml-auto">
+                      Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
+                    </span>
+                  )}
+                </div>
               </div>
             )
           })}

@@ -20,7 +20,7 @@ export default function ProveedoresPage() {
   const cargarDatos = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
-      .from('proveedores')
+      .from('marcas')
       .select('*')
       .eq('activo', true)
       .order('nombre')

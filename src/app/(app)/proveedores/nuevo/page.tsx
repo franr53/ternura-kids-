@@ -34,7 +34,7 @@ export default function NuevoProveedorPage() {
     if (errNombre || errTel || errEmail) return
 
     setLoading(true)
-    const { error } = await supabase.from('proveedores').insert({
+    const { error } = await supabase.from('marcas').insert({
       nombre: nombre.trim(),
       telefono: telefono || null,
       email: email || null,

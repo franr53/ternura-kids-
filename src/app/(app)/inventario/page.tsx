@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { Producto, Categoria, Proveedor } from '@/types'
+import { Producto, Categoria, Marca } from '@/types'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,22 +30,22 @@ function InventarioContent() {
     const [{ data: prods }, { data: cats }, { data: provs }] = await Promise.all([
       supabase
         .from('productos')
-        .select(`*, categoria:categorias(*), proveedor:proveedores(*), variantes(*)`)
+        .select(`*, categoria:categorias(*), marca:marcas(*), variantes(*)`)
         .eq('activo', true)
-        .order('nombre'),
+        .order('nombre_base'),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
-      supabase.from('proveedores').select('*').eq('activo', true).order('nombre'),
+      supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
     ])
     return {
       productos: (prods || []) as Producto[],
       categorias: (cats || []) as Categoria[],
-      proveedores: (provs || []) as Proveedor[],
+      marcas: (provs || []) as Marca[],
     }
   })
 
   const productos = cachedData?.productos ?? []
   const categorias = cachedData?.categorias ?? []
-  const proveedores = cachedData?.proveedores ?? []
+  const marcas = cachedData?.marcas ?? []
 
   const [busqueda, setBusqueda] = useState('')
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
@@ -82,7 +82,7 @@ function InventarioContent() {
     todosLosCodigos.filter((c, i) => todosLosCodigos.indexOf(c) !== i)
   )
   const nombresContados = productos.reduce<Record<string, number>>((acc, p) => {
-    const n = p.nombre.trim().toLowerCase()
+    const n = p.nombre_base.trim().toLowerCase()
     acc[n] = (acc[n] || 0) + 1
     return acc
   }, {})
@@ -91,16 +91,16 @@ function InventarioContent() {
   const conteoAnomalias = {
     sin_codigo: productos.filter(p => p.variantes?.some(v => !v.codigo_barras)).length,
     cod_duplicado: productos.filter(p => p.variantes?.some(v => v.codigo_barras && codigosDuplicados.has(v.codigo_barras))).length,
-    nombre_repetido: productos.filter(p => nombresRepetidos.has(p.nombre.trim().toLowerCase())).length,
-    precio_invalido: productos.filter(p => p.precio_venta === 0 || p.precio_venta < p.precio_costo).length,
+    nombre_repetido: productos.filter(p => nombresRepetidos.has(p.nombre_base.trim().toLowerCase())).length,
+    precio_invalido: productos.filter(p => p.variantes?.some(v => v.precio_venta === 0 || v.precio_venta < v.precio_costo)).length,
   }
 
   const productosFiltrados = productos.filter(p => {
     const matchBusqueda = busqueda === '' ||
-      p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+      p.nombre_base.toLowerCase().includes(busqueda.toLowerCase()) ||
       p.variantes?.some(v => v.codigo_barras?.includes(busqueda))
     const matchCategoria = filtroCategoria === 'todas' || p.categoria_id === filtroCategoria
-    const matchProveedor = filtroProveedor === 'todos' || p.proveedor_id === filtroProveedor
+    const matchProveedor = filtroProveedor === 'todos' || p.marca_id === filtroProveedor
     const stockTotal = p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     const matchStock =
       filtroStock === 'todos' ? true :
@@ -112,12 +112,13 @@ function InventarioContent() {
     const matchTemporada = filtroTemporada === 'todas' || p.temporada === filtroTemporada
     const precioMin = filtroPrecioMin ? Number(filtroPrecioMin) : 0
     const precioMax = filtroPrecioMax ? Number(filtroPrecioMax) : Infinity
-    const matchPrecio = p.precio_venta >= precioMin && p.precio_venta <= precioMax
+    const matchPrecio = !filtroPrecioMin && !filtroPrecioMax ? true :
+      (p.variantes?.some(v => v.precio_venta >= precioMin && v.precio_venta <= precioMax) ?? false)
     const matchAnomalia = !filtroAnomalia ? true :
       filtroAnomalia === 'sin_codigo' ? p.variantes?.some(v => !v.codigo_barras) :
       filtroAnomalia === 'cod_duplicado' ? p.variantes?.some(v => v.codigo_barras && codigosDuplicados.has(v.codigo_barras)) :
-      filtroAnomalia === 'nombre_repetido' ? nombresRepetidos.has(p.nombre.trim().toLowerCase()) :
-      filtroAnomalia === 'precio_invalido' ? (p.precio_venta === 0 || p.precio_venta < p.precio_costo) :
+      filtroAnomalia === 'nombre_repetido' ? nombresRepetidos.has(p.nombre_base.trim().toLowerCase()) :
+      filtroAnomalia === 'precio_invalido' ? p.variantes?.some(v => v.precio_venta === 0 || v.precio_venta < v.precio_costo) :
       true
     const matchTalle = filtroTalle === 'todos' || p.variantes?.some(v => v.talle === filtroTalle)
     return matchBusqueda && matchCategoria && matchProveedor && matchStock && matchTemporada && matchPrecio && matchAnomalia && matchTalle
@@ -125,13 +126,13 @@ function InventarioContent() {
     const stockA = a.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     const stockB = b.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     switch (orden) {
-      case 'nombre_desc': return b.nombre.localeCompare(a.nombre)
-      case 'precio_asc': return a.precio_venta - b.precio_venta
-      case 'precio_desc': return b.precio_venta - a.precio_venta
+      case 'nombre_desc': return b.nombre_base.localeCompare(a.nombre_base)
+      case 'precio_asc': return (a.variantes?.[0]?.precio_venta ?? 0) - (b.variantes?.[0]?.precio_venta ?? 0)
+      case 'precio_desc': return (b.variantes?.[0]?.precio_venta ?? 0) - (a.variantes?.[0]?.precio_venta ?? 0)
       case 'stock_asc': return stockA - stockB
       case 'stock_desc': return stockB - stockA
       case 'recientes': return b.creado_en.localeCompare(a.creado_en)
-      default: return a.nombre.localeCompare(b.nombre)
+      default: return a.nombre_base.localeCompare(b.nombre_base)
     }
   })
 
@@ -260,12 +261,12 @@ function InventarioContent() {
           </Select>
           <Select value={filtroProveedor} onValueChange={v => setFiltroProveedor(v ?? 'todos')}>
             <SelectTrigger className="w-44">
-              <span className="text-gray-400 text-xs mr-1">Prov:</span>
+              <span className="text-gray-400 text-xs mr-1">Marca:</span>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="todos">Todos</SelectItem>
-              {proveedores.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
+              <SelectItem value="todos">Todas</SelectItem>
+              {marcas.map(p => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -401,7 +402,7 @@ function InventarioContent() {
               <tr>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Producto</th>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Categoría</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Proveedor</th>
+                <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Marca</th>
                 <th className="hidden md:table-cell text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Código</th>
                 <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio</th>
                 <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Stock</th>
@@ -416,7 +417,7 @@ function InventarioContent() {
                   return [(
                     <tr key={producto.id} className="hover:bg-gray-50 transition-colors group">
                       <td className="px-4 py-3">
-                        <span className="font-medium text-gray-800">{producto.nombre}</span>
+                        <span className="font-medium text-gray-800">{producto.nombre_base}</span>
                       </td>
                       <td className="px-4 py-3">
                         {producto.categoria ? (
@@ -425,12 +426,12 @@ function InventarioContent() {
                           </span>
                         ) : <span className="text-gray-400 text-xs">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{producto.proveedor?.nombre ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{producto.marca?.nombre ?? '—'}</td>
                       <td className="hidden md:table-cell px-4 py-3">
                         <span className="text-xs text-gray-300 italic">Sin código</span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className="font-semibold text-gray-800">{formatPrecio(producto.precio_venta)}</span>
+                        <span className="font-semibold text-gray-800">—</span>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">0</span>
@@ -447,8 +448,8 @@ function InventarioContent() {
                   ? variantes.filter(v => v.talle === filtroTalle)
                   : variantes
                 return variantesFiltradas.map((v, vi) => {
-                  const precioVenta = v.precio_venta ?? producto.precio_venta
-                  const precioCosto = v.precio_costo ?? producto.precio_costo
+                  const precioVenta = v.precio_venta
+                  const precioCosto = v.precio_costo
                   const precioInvalido = precioVenta === 0 || precioVenta < precioCosto
                   const esFirst = vi === 0
                   return (
@@ -464,7 +465,7 @@ function InventarioContent() {
                           {v.stock === 0 && <AlertTriangle size={13} className="text-red-400 shrink-0" />}
                           {v.stock > 0 && v.stock <= v.stock_minimo && <AlertTriangle size={13} className="text-orange-400 shrink-0" />}
                           <span className={cn('text-gray-800', esFirst ? 'font-medium' : 'text-gray-600')}>
-                            {formatNombreConTalle(producto.nombre, v.talle)}
+                            {formatNombreConTalle(producto.nombre_base, v.talle)}
                           </span>
                         </div>
                       </td>
@@ -476,7 +477,7 @@ function InventarioContent() {
                         ) : esFirst ? <span className="text-gray-400 text-xs">—</span> : null}
                       </td>
                       <td className="px-4 py-2.5 text-gray-600 text-xs">
-                        {esFirst ? (producto.proveedor?.nombre ?? '—') : null}
+                        {esFirst ? (producto.marca?.nombre ?? '—') : null}
                       </td>
                       <td className="hidden md:table-cell px-4 py-2.5">
                         {editandoCodigo?.varianteId === v.id ? (

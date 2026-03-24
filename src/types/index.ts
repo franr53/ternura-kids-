@@ -21,7 +21,7 @@ export interface Categoria {
   creado_en: string
 }
 
-export interface Proveedor {
+export interface Marca {
   id: string
   nombre: string
   telefono?: string
@@ -30,6 +30,16 @@ export interface Proveedor {
   notas?: string
   alias_cbu?: string
   deuda_total: number
+  activo: boolean
+  creado_en: string
+}
+
+// Alias temporal para no romper archivos que aún usan Proveedor
+export type Proveedor = Marca
+
+export interface Colegio {
+  id: string
+  nombre: string
   activo: boolean
   creado_en: string
 }
@@ -47,18 +57,18 @@ export interface HistorialPrecio {
 
 export interface Producto {
   id: string
-  nombre: string
+  nombre_base: string
   descripcion?: string
   categoria_id?: string
-  proveedor_id?: string
-  precio_costo: number
-  precio_venta: number
+  marca_id?: string
+  colegio_id?: string
   temporada?: Temporada
   activo: boolean
   creado_en: string
   actualizado_en: string
   categoria?: Categoria
-  proveedor?: Proveedor
+  marca?: Marca
+  colegio?: Colegio
   variantes?: Variante[]
 }
 
@@ -69,8 +79,8 @@ export interface Variante {
   codigo_barras?: string
   stock: number
   stock_minimo: number
-  precio_venta?: number | null
-  precio_costo?: number | null
+  precio_venta: number
+  precio_costo: number
   creado_en: string
   producto?: Producto
 }

@@ -106,7 +106,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
   useEffect(() => {
     async function cargar() {
       const [{ data: p }, { data: ing }, { data: pag }, { data: prods }] = await Promise.all([
-        supabase.from('proveedores').select('*').eq('id', id).single(),
+        supabase.from('marcas').select('*').eq('id', id).single(),
         supabase.from('ingresos_mercaderia').select('*').eq('proveedor_id', id).order('creado_en', { ascending: false }).limit(20),
         supabase.from('pagos_proveedores').select('*').eq('proveedor_id', id).order('creado_en', { ascending: false }).limit(20),
         supabase.from('productos').select('id, nombre, precio_costo, precio_venta').eq('activo', true).eq('proveedor_id', id).order('nombre'),
@@ -130,7 +130,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
 
   async function guardar() {
     setGuardando(true)
-    const { error } = await supabase.from('proveedores').update({
+    const { error } = await supabase.from('marcas').update({
       nombre, telefono: telefono || null, email: email || null,
       direccion: direccion || null, notas: notas || null,
       alias_cbu: aliasCbu || null,
@@ -153,7 +153,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
     if (error) { toast.error('Error al registrar pago'); return }
 
     const nuevaDeuda = Math.max(0, (proveedor.deuda_total || 0) - monto)
-    await supabase.from('proveedores').update({ deuda_total: nuevaDeuda }).eq('id', id)
+    await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', id)
     setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
     setPagos(prev => [{ id: Date.now().toString(), proveedor_id: id, monto, metodo: metodoPago, creado_en: new Date().toISOString() }, ...prev])
     setMontoPago('')
