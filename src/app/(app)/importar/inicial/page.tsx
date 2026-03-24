@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Upload, Package, Users, CheckCircle2, Loader2, ChevronDown } from 'lucide-react'
+import { Upload, Package, Users, ShoppingBag, CheckCircle2, Loader2, ChevronDown } from 'lucide-react'
 
 // ── Mapeo Tipo de Producto → nombre de categoría en DB ──────────────────────
 const MAPA_CAT: Record<string, string> = {
@@ -182,6 +182,7 @@ export default function CargaInicialPage() {
 
   // Sección B — Clientes
   const [fileClientes, setFileClientes] = useState<File | null>(null)
+
   const [headersB, setHeadersB] = useState<string[]>([])
   const [colMapB, setColMapB] = useState<Record<string, string>>({})
   const [previewB, setPreviewB] = useState<Record<string, unknown>[]>([])
@@ -189,6 +190,16 @@ export default function CargaInicialPage() {
   const [estadoB, setEstadoB] = useState<'idle' | 'cargado' | 'importando' | 'done'>('idle')
   const [resultadoB, setResultadoB] = useState<ResultadoImport | null>(null)
   const refB = useRef<HTMLInputElement>(null)
+
+  // Sección C — Historial ventas
+  const [fileVentas, setFileVentas] = useState<File | null>(null)
+  const [headersC, setHeadersC] = useState<string[]>([])
+  const [colMapC, setColMapC] = useState<Record<string, string>>({})
+  const [previewC, setPreviewC] = useState<Record<string, unknown>[]>([])
+  const [rawRowsC, setRawRowsC] = useState<Record<string, unknown>[]>([])
+  const [estadoC, setEstadoC] = useState<'idle' | 'cargado' | 'importando' | 'done'>('idle')
+  const [resultadoC, setResultadoC] = useState<ResultadoImport | null>(null)
+  const refC = useRef<HTMLInputElement>(null)
 
   // ── SECCIÓN A: parsear productos ───────────────────────────────────────────
   async function onArchivoProductos(file: File) {
@@ -385,6 +396,124 @@ export default function CargaInicialPage() {
     setResultadoB(res)
     setEstadoB('done')
     if (res.errores.length === 0) toast.success(`✓ ${res.ok} clientes importados`)
+    else toast.warning(`${res.ok} importados, ${res.errores.length} errores`)
+  }
+
+  // ── SECCIÓN C: historial ventas ────────────────────────────────────────────
+  const CAMPOS_VENTAS = [
+    { key: 'id',      label: 'ID de venta',    required: true  },
+    { key: 'cliente', label: 'Nombre cliente',  required: true  },
+    { key: 'producto',label: 'Productos',       required: false },
+    { key: 'cantidad',label: 'Cantidad',        required: false },
+    { key: 'total',   label: 'Total venta ($)', required: false },
+  ]
+
+  async function onArchivoVentas(file: File) {
+    setFileVentas(file)
+    const rows = await leerXLSX(file)
+
+    // Contagram tiene headers en fila 9 (idx 8), intentar auto-detectar
+    let headerIdx = rows.findIndex(r =>
+      r.some(c => ['cliente', 'id', 'venta'].includes(String(c).trim().toLowerCase()))
+    )
+    if (headerIdx === -1) headerIdx = 0
+
+    const headers = (rows[headerIdx] as string[]).map(h => String(h).trim()).filter(Boolean)
+    const data = arraysToObjects(headers, rows.slice(headerIdx + 1))
+      .filter(r => Object.values(r).some(v => String(v).trim() !== ''))
+
+    // Auto-mapear
+    const autoMapVentas: Record<string, string[]> = {
+      id:       ['id', 'nro', 'numero', 'venta id', 'id venta'],
+      cliente:  ['cliente', 'nombre', 'client'],
+      producto: ['producto', 'descripcion', 'articulo', 'item'],
+      cantidad: ['cantidad', 'qty', 'cant'],
+      total:    ['total venta', 'total', 'importe', 'monto'],
+    }
+    const lower = headers.map(h => h.toLowerCase().trim())
+    const detected: Record<string, string> = {}
+    for (const campo of CAMPOS_VENTAS) {
+      const cands = autoMapVentas[campo.key] ?? []
+      const found = headers.find((_, i) => cands.includes(lower[i]))
+      detected[campo.key] = found ?? ''
+    }
+
+    setHeadersC(headers)
+    setColMapC(detected)
+    setRawRowsC(data)
+    setPreviewC(data.slice(0, 5))
+    setEstadoC('cargado')
+    toast.success(`${data.length} filas detectadas — revisá el mapeo de columnas`)
+  }
+
+  async function importarHistorial() {
+    if (!fileVentas || rawRowsC.length === 0) return
+    setEstadoC('importando')
+    const res: ResultadoImport = { ok: 0, saltados: 0, noEncontrados: [], errores: [] }
+
+    try {
+      const { id: colId, cliente: colCliente, producto: colProd, cantidad: colCant, total: colTotal } = colMapC
+      if (!colCliente) { toast.error('Debés mapear la columna "Nombre cliente"'); setEstadoC('cargado'); return }
+
+      // Cargar clientes (mapa por nombre normalizado + palabras)
+      const { data: clientes } = await supabase.from('clientes').select('id, nombre')
+      const clienteMap = new Map<string, string>()
+      const clienteMapPal = new Map<string, string>()
+      for (const c of clientes ?? []) {
+        const k = c.nombre.toLowerCase().trim()
+        clienteMap.set(k, c.id)
+        clienteMapPal.set(k.split(/\s+/).sort().join(' '), c.id)
+      }
+      function buscarCliente(nombre: string) {
+        const k = nombre.toLowerCase().trim()
+        return clienteMap.get(k) ?? clienteMapPal.get(k.split(/\s+/).sort().join(' '))
+      }
+
+      // Agrupar por ID de venta
+      type Grupo = { cliente: string; prods: string[]; total: number }
+      const grupos = new Map<string, Grupo>()
+      for (const fila of rawRowsC) {
+        const id = colId ? getVal(fila, colId) : String(Math.random())
+        const clienteNombre = getVal(fila, colCliente)
+        if (!clienteNombre) continue
+        if (!grupos.has(id)) grupos.set(id, { cliente: clienteNombre, prods: [], total: 0 })
+        const g = grupos.get(id)!
+        if (colProd) {
+          const prod = getVal(fila, colProd)
+          const cant = colCant ? (Number(fila[colCant]) || 1) : 1
+          if (prod) g.prods.push(cant > 1 ? `${prod} x${cant}` : prod)
+        }
+        if (colTotal) g.total = Math.round(Number(fila[colTotal]) || 0)
+      }
+
+      const movimientos = []
+      for (const [id, g] of grupos.entries()) {
+        const clienteId = buscarCliente(g.cliente)
+        if (!clienteId) {
+          if (!res.noEncontrados.includes(g.cliente)) res.noEncontrados.push(g.cliente)
+          continue
+        }
+        const prodsStr = g.prods.slice(0, 8).join(', ') + (g.prods.length > 8 ? ` (+${g.prods.length - 8} más)` : '')
+        const notas = [
+          colId ? `Venta #${id}` : null,
+          prodsStr || null,
+          g.total > 0 ? `Total: $${g.total.toLocaleString('es-AR')}` : null,
+        ].filter(Boolean).join(' · ')
+        movimientos.push({ cliente_id: clienteId, tipo: 'cargo', monto: 0, notas })
+      }
+
+      const errores = await batchInsert(supabase, 'fiado_movimientos', movimientos, 50)
+      res.ok = movimientos.length - errores.length
+      res.noEncontrados = res.noEncontrados
+      res.errores = errores
+      if (res.noEncontrados.length > 0) res.saltados = res.noEncontrados.length
+    } catch (e) {
+      res.errores.push(String(e))
+    }
+
+    setResultadoC(res)
+    setEstadoC('done')
+    if (res.errores.length === 0) toast.success(`✓ ${res.ok} movimientos importados`)
     else toast.warning(`${res.ok} importados, ${res.errores.length} errores`)
   }
 
@@ -588,6 +717,96 @@ export default function CargaInicialPage() {
                 </details>
               )}
               <button onClick={() => { setEstadoB('idle'); setFileClientes(null); setHeadersB([]); setRawRowsB([]) }} className="text-xs text-teal-600 underline">
+                Cargar otro archivo
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── SECCIÓN C: Historial de ventas ──────────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-50 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-teal-500 text-white flex items-center justify-center text-sm font-bold">3</div>
+          <ShoppingBag size={18} className="text-teal-600" />
+          <div className="flex-1">
+            <p className="font-semibold text-gray-900">Historial de ventas</p>
+            <p className="text-xs text-gray-500">Mostrará de dónde viene la deuda de cada cliente</p>
+          </div>
+          {estadoC === 'done' && <CheckCircle2 className="text-green-500" size={20} />}
+          {estadoC === 'importando' && <Loader2 className="text-teal-500 animate-spin" size={20} />}
+        </div>
+
+        <div className="p-4 space-y-4">
+          {estadoC === 'idle' && (
+            <DropZone refEl={refC} onFile={onArchivoVentas} label="Planilla de historial de ventas" />
+          )}
+
+          {(estadoC === 'cargado' || estadoC === 'importando') && (
+            <>
+              <MapeoCols
+                campos={CAMPOS_VENTAS}
+                headers={headersC}
+                mapa={colMapC}
+                onChange={(k, v) => setColMapC(prev => ({ ...prev, [k]: v }))}
+              />
+
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">Vista previa (5 primeras filas)</p>
+                <div className="overflow-x-auto rounded-lg border border-gray-100">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {CAMPOS_VENTAS.filter(c => colMapC[c.key]).map(c => (
+                          <th key={c.key} className="px-3 py-2 text-left text-gray-500 font-medium">{c.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewC.map((row, i) => (
+                        <tr key={i} className="border-t border-gray-50">
+                          {CAMPOS_VENTAS.filter(c => colMapC[c.key]).map(c => (
+                            <td key={c.key} className="px-3 py-1.5 text-gray-700 truncate max-w-[160px]">
+                              {String(row[colMapC[c.key]] ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">{rawRowsC.length} filas en total</p>
+              </div>
+
+              <Button
+                onClick={importarHistorial}
+                disabled={estadoC === 'importando' || !colMapC.cliente}
+                className="w-full bg-teal-500 hover:bg-teal-600"
+              >
+                {estadoC === 'importando'
+                  ? <><Loader2 size={16} className="animate-spin mr-2" /> Importando...</>
+                  : `Importar historial (${rawRowsC.length} filas)`
+                }
+              </Button>
+            </>
+          )}
+
+          {estadoC === 'done' && resultadoC && (
+            <div className="space-y-2">
+              <div className="flex gap-3 flex-wrap">
+                <Badge className="bg-green-100 text-green-700">✓ {resultadoC.ok} registros importados</Badge>
+                {resultadoC.saltados > 0 && <Badge className="bg-yellow-100 text-yellow-700">⚠ {resultadoC.saltados} clientes no encontrados</Badge>}
+                {resultadoC.errores.length > 0 && <Badge className="bg-red-100 text-red-700">✗ {resultadoC.errores.length} errores</Badge>}
+              </div>
+              {resultadoC.noEncontrados.length > 0 && (
+                <details className="text-xs text-yellow-700">
+                  <summary className="cursor-pointer">Ver clientes no encontrados ({resultadoC.noEncontrados.length})</summary>
+                  <ul className="mt-1 space-y-0.5 pl-4 list-disc">
+                    {resultadoC.noEncontrados.slice(0, 20).map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                </details>
+              )}
+              <button onClick={() => { setEstadoC('idle'); setFileVentas(null); setHeadersC([]); setRawRowsC([]) }} className="text-xs text-teal-600 underline">
                 Cargar otro archivo
               </button>
             </div>

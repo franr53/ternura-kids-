@@ -339,8 +339,9 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
   async function handleConfirmarVenta() {
     if (carrito.length === 0) return
-    if (pagos.some(p => p.metodo === 'fiado') && !cliente) {
-      toast.error('Para registrar fiado necesitás seleccionar un cliente')
+    const esOcasional = cliente?.id === '__ocasional__'
+    if (pagos.some(p => p.metodo === 'fiado') && (!cliente || esOcasional)) {
+      toast.error('Para registrar fiado necesitás seleccionar un cliente con cuenta')
       return
     }
     if (esMixto && !pagoListo) {
@@ -363,7 +364,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
         subtotal,
         descuento: montoDesc,
         total,
-        cliente,
+        cliente: esOcasional ? null : cliente,
         proveedorId: proveedorTransferencia?.id,
         montoProveedor: montoTransferencia,
       })
@@ -566,16 +567,16 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               <p className="text-xs font-medium text-gray-500 mb-1.5">Cliente (opcional)</p>
               {cliente ? (
                 <>
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 border border-teal-200">
-                    <User size={14} className="text-teal-500 shrink-0" />
-                    <span className="text-sm font-medium text-teal-700 flex-1 truncate">{cliente.nombre}</span>
+                  <div className={`flex items-center gap-2 p-2.5 rounded-lg border ${cliente.id === '__ocasional__' ? 'bg-gray-50 border-gray-200' : 'bg-teal-50 border-teal-200'}`}>
+                    <User size={14} className={cliente.id === '__ocasional__' ? 'text-gray-400 shrink-0' : 'text-teal-500 shrink-0'} />
+                    <span className={`text-sm font-medium flex-1 truncate ${cliente.id === '__ocasional__' ? 'text-gray-500' : 'text-teal-700'}`}>{cliente.nombre}</span>
                     {cliente.deuda_total > 0 && (
                       <span className="text-xs text-red-500 flex items-center gap-0.5">
                         <AlertTriangle size={10} />
                         {formatPrecio(cliente.deuda_total)}
                       </span>
                     )}
-                    <button onClick={() => { setCliente(null); setTelefonoTemp('') }} className="text-teal-300 hover:text-teal-600">
+                    <button onClick={() => { setCliente(null); setTelefonoTemp('') }} className="text-gray-300 hover:text-gray-600">
                       <X size={14} />
                     </button>
                   </div>
@@ -613,8 +614,16 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                   />
                   {mostrarDropCliente && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-44 overflow-y-auto">
-                      {resultadosCliente.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-3">Sin clientes</p>
+                      {/* Opción cliente ocasional siempre visible */}
+                      <button
+                        onPointerDown={e => { e.preventDefault(); setCliente({ id: '__ocasional__', nombre: 'Cliente ocasional', deuda_total: 0, activo: true, creado_en: '' }); setBusCliente(''); setMostrarDropCliente(false) }}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left border-b border-gray-200"
+                      >
+                        <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-medium">Sin cuenta</span>
+                        <span className="text-sm text-gray-500">Cliente ocasional</span>
+                      </button>
+                      {resultadosCliente.length === 0 && busCliente === '' ? null : resultadosCliente.length === 0 ? (
+                        <p className="text-xs text-gray-400 text-center py-3">Sin resultados</p>
                       ) : (
                         resultadosCliente.map(c => (
                           <button
