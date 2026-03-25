@@ -37,7 +37,7 @@ function InventarioContent() {
     ])
     if (errProds) console.error('[inventario] error cargando productos:', errProds.message)
     const marcasMap = Object.fromEntries((provs || []).map(m => [m.id, m]))
-    const productos = (prods || []).map(p => ({ ...p, marca: marcasMap[p.marca_id] ?? null })) as Producto[]
+    const productos = (prods || []).map(p => ({ ...p, marca: marcasMap[p.marca_id] ?? null })) as unknown as Producto[]
     return {
       productos,
       categorias: (cats || []) as Categoria[],
