@@ -316,7 +316,7 @@ export default function NuevoProductoPage() {
       categoria: 'producto',
       genero: 'categoria',
       producto: 'marca',
-      nombre_nuevo: esCalzado ? 'categoria' : 'genero',
+      nombre_nuevo: 'categoria',
       precio: 'nombre_nuevo',
       precio_existente: 'producto',
       talle: esProductoNuevo ? 'precio' : 'producto',
@@ -483,7 +483,8 @@ export default function NuevoProductoPage() {
       setGeneroSeleccionado(null)
       irA('nombre_nuevo', 'forward')
     } else {
-      irA('genero', 'forward')
+      setGeneroSeleccionado(null)
+      irA('nombre_nuevo', 'forward')
     }
   }
 
