@@ -6,6 +6,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatNombreConTalle(nombre: string, talle: string): string {
+  if (!talle || talle === 'Único' || talle === 'Unico') return nombre
   return `${nombre} T${talle}`
 }
 
