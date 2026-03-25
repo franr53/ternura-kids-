@@ -266,16 +266,20 @@ export default function CargaInicialPage() {
       const { data: provs } = await supabase.from('marcas').select('id, nombre')
       const provMap = new Map<string, string>((provs ?? []).map(p => [p.nombre, p.id]))
 
-      // Insertar productos en lotes
+      // Insertar productos en lotes — IDs generados en cliente para evitar .select()
       const BATCH = 50
       for (let i = 0; i < filas.length; i += BATCH) {
         const lote = filas.slice(i, i + BATCH)
 
-        const productosInsert = lote.map(r => {
+        // Generamos IDs acá para no necesitar RETURNING (evita problema de schema cache)
+        const ids = lote.map(() => crypto.randomUUID())
+
+        const productosInsert = lote.map((r, idx) => {
           const catRaw = colCat ? getVal(r, colCat) : ''
           const catNombre = catRaw ? resolverCategoria(catRaw) : ''
           const marcaNombre = colMarca ? getVal(r, colMarca) : ''
           return {
+            id: ids[idx],
             nombre_base: getVal(r, colNombre),
             categoria_id: catNombre ? (catMap.get(catNombre) ?? null) : null,
             marca_id: marcaNombre ? (provMap.get(marcaNombre) ?? null) : null,
@@ -284,24 +288,21 @@ export default function CargaInicialPage() {
           }
         })
 
-        const { data: insertados, error: errProd } = await supabase
-          .from('productos')
-          .insert(productosInsert)
-          .select('id')
+        const { error: errProd } = await supabase.from('productos').insert(productosInsert)
 
-        if (errProd || !insertados) {
-          res.errores.push(`Lote ${Math.floor(i / BATCH) + 1}: ${errProd?.message}`)
+        if (errProd) {
+          res.errores.push(`Lote ${Math.floor(i / BATCH) + 1}: ${errProd.message}`)
           continue
         }
 
-        const variantesInsert = insertados.map((prod, idx) => {
+        const variantesInsert = ids.map((prodId, idx) => {
           const r = lote[idx]
           const codigoRaw = colCodigo ? getVal(r, colCodigo) : ''
           const barcode = codigoRaw && !barcodesExistentes.has(codigoRaw) ? codigoRaw : null
           if (codigoRaw && barcodesExistentes.has(codigoRaw)) res.saltados++
           if (barcode) barcodesExistentes.add(barcode)
           return {
-            producto_id: prod.id,
+            producto_id: prodId,
             talle: 'Único',
             codigo_barras: barcode,
             stock: colStock ? Math.round(Number(r[colStock]) || 0) : 0,
@@ -312,7 +313,7 @@ export default function CargaInicialPage() {
 
         const errV = await batchInsert(supabase, 'variantes', variantesInsert, BATCH)
         if (errV.length > 0) res.errores.push(...errV)
-        res.ok += insertados.length
+        res.ok += lote.length
       }
     } catch (e) {
       res.errores.push(String(e))
