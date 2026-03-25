@@ -220,6 +220,8 @@ export default function NuevoProductoPage() {
   const [generoPrenda, setGeneroPrenda] = useState<string | null>(null)   // null = aún no elegido, '' = omitido
   const [generoSeleccionado, setGeneroSeleccionado] = useState<GeneroSeleccionado>(null)
   const [otroTipoPrenda, setOtroTipoPrenda] = useState('')
+  const [detalleLibre, setDetalleLibre] = useState('')
+  const [colegioNombre, setColegioNombre] = useState('')
   const [modoLibre, setModoLibre] = useState(false)
   const [nombreLibre, setNombreLibre] = useState('')
   const [precioCosto, setPrecioCosto] = useState('')
@@ -377,12 +379,15 @@ export default function NuevoProductoPage() {
   // Nombre construido por el builder
   const tipoPrendaFinal = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
   const esCalzado = tipo?.sistema_talles === 'calzado'
-  const generoLabel = generoSeleccionado === 'bebe' ? 'Bebé'
-    : generoSeleccionado === 'nena' ? 'Nena'
-    : generoSeleccionado === 'nene' ? 'Nene'
-    : ''  // unisex o null = no agrega nada
-  const nombreGenerado = [tipoPrendaFinal, estiloPrenda || '', generoLabel]
-    .filter(Boolean).join(' ')
+  const esColegial = tipo?.nombre?.toLowerCase().includes('colegia') ?? false
+  // Regla: [Tipo] [Estilo] [Detalle libre] [Marca] + [Colegio si es Colegial]
+  const nombreGenerado = [
+    tipoPrendaFinal,
+    estiloPrenda || '',
+    detalleLibre.trim(),
+    marca?.nombre || '',
+    esColegial ? colegioNombre.trim() : '',
+  ].filter(Boolean).join(' ')
 
   // Cuándo mostrar cada sección del builder
   const builderTipoOk = tipoPrendaFinal.length > 0
@@ -397,6 +402,12 @@ export default function NuevoProductoPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [builderTipoOk, estilosDisponibles.length, estiloPrenda])
+
+  // Resetear detalle al cambiar tipo de prenda
+  useEffect(() => {
+    setDetalleLibre('')
+    setColegioNombre('')
+  }, [tipoPrenda])
 
   // ── Generación de barcode ──────────────────────────────────────
   async function calcularBarcodeParaTalle(talle: string): Promise<string> {
@@ -1203,6 +1214,31 @@ export default function NuevoProductoPage() {
                     <button onClick={() => setEstiloPrenda('')} className="text-xs text-teal-600 font-semibold hover:text-teal-700">
                       {estiloPrenda === '' ? '✓ Continuando sin detalle' : 'Continuar sin detalle →'}
                     </button>
+                  )}
+                </div>
+              )}
+
+              {/* Sección: Detalle libre (revelación progresiva después del estilo) */}
+              {builderEstiloOk && (
+                <div className="tk-slide-forward space-y-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="h-px flex-1 bg-gray-100" />
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Detalle libre</p>
+                    <div className="h-px flex-1 bg-gray-100" />
+                  </div>
+                  <Input
+                    value={detalleLibre}
+                    onChange={e => setDetalleLibre(e.target.value)}
+                    placeholder={esColegial ? 'Ej: Gris, Azul marino, Beige...' : 'Ej: Lisa, Rayada, Estampa Oso...'}
+                    className="h-9 rounded-xl border-gray-200 text-sm"
+                  />
+                  {esColegial && (
+                    <Input
+                      value={colegioNombre}
+                      onChange={e => setColegioNombre(e.target.value)}
+                      placeholder="Colegio: Ej: San Miguel, Santa Rosa..."
+                      className="h-9 rounded-xl border-gray-200 text-sm"
+                    />
                   )}
                 </div>
               )}
