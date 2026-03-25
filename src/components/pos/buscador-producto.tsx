@@ -41,8 +41,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
       .from('variantes')
       .select('*, producto:productos(*, categoria:categorias(nombre, color))')
       .order('talle')
-      .limit(500)
-    return ((data || []).filter(v => v.producto?.activo) as VarianteConProducto[])
+    return ((data || []).filter(v => v.producto?.activo === true) as VarianteConProducto[])
   })
   const todasVariantes = _variantes ?? []
 

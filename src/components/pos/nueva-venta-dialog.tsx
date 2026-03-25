@@ -65,13 +65,12 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
       supabase
         .from('variantes')
         .select('*, producto:productos(*, categoria:categorias(nombre, color))')
-        .order('talle')
-        .limit(500),
+        .order('talle'),
       supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
     ])
     return {
-      variantes: ((variantes || []).filter((v) => v.producto?.activo) as VarianteConProducto[]),
+      variantes: ((variantes || []).filter((v) => v.producto?.activo === true) as VarianteConProducto[]),
       clientes: (clientes || []) as Cliente[],
       proveedores: ((proveedores || []) as Proveedor[]),
     }

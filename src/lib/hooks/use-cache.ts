@@ -7,11 +7,14 @@ interface CacheEntry<T> {
   ts: number
 }
 
+const TTL_MS = 5 * 60 * 1000 // 5 minutos
+
 function readCache<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem('cache:' + key)
     if (!raw) return null
     const entry: CacheEntry<T> = JSON.parse(raw)
+    if (Date.now() - entry.ts > TTL_MS) return null // expirado
     return entry.data
   } catch {
     return null
