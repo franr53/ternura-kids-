@@ -26,18 +26,20 @@ function InventarioContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
 
-  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos', async () => {
-    const [{ data: prods }, { data: cats }, { data: provs }] = await Promise.all([
+  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos:v3', async () => {
+    const [{ data: prods, error: errProds }, { data: cats }, { data: provs }] = await Promise.all([
       supabase
         .from('productos')
-        .select(`*, categoria:categorias(*), marca:marcas(*), variantes(*)`)
-        .eq('activo', true)
-        .order('nombre_base'),
+        .select(`id, nombre_base, categoria_id, marca_id, temporada, activo, creado_en, actualizado_en, categoria:categorias(*), variantes(*)`)
+        .eq('activo', true),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
     ])
+    if (errProds) console.error('[inventario] error cargando productos:', errProds.message)
+    const marcasMap = Object.fromEntries((provs || []).map(m => [m.id, m]))
+    const productos = (prods || []).map(p => ({ ...p, marca: marcasMap[p.marca_id] ?? null })) as Producto[]
     return {
-      productos: (prods || []) as Producto[],
+      productos,
       categorias: (cats || []) as Categoria[],
       marcas: (provs || []) as Marca[],
     }
