@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Categoria, Proveedor } from '@/types'
+import { Categoria, Proveedor, TipoPrenda, Colegio } from '@/types'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { ArrowLeft, Plus, Minus, CheckCircle2, Package, ChevronRight, Search, X, RefreshCw, Sparkles, FileDown, MessageCircle, Phone, Tag, Trash2, ChevronUp, Loader2 } from 'lucide-react'
@@ -25,82 +25,6 @@ const TALLES_POR_SISTEMA: Record<string, string[]> = {
   calzado:  ['18','19','20','21','22','23','24','25','26','27','28','29','30','31','32','33','34','35','36'],
 }
 
-const TIPOS_PRENDA = [
-  'Remera', 'Buzo', 'Campera', 'Pantalón', 'Vestido', 'Pollera',
-  'Musculosa', 'Body', 'Calza', 'Short', 'Bermuda', 'Conjunto',
-  'Camisa', 'Chomba', 'Pijama', 'Medias',
-]
-
-const ESTILOS_POR_TIPO: Record<string, string[]> = {
-  'Remera':   ['MC', 'ML', 'Sin Manga'],
-  'Buzo':     ['Con Friza', 'Sin Friza', 'Canguro', 'Abierto'],
-  'Campera':  ['Con Capucha', 'Inflable', 'Rompevientos', 'Polar'],
-  'Pantalón': ['Jeans', 'Recto', 'Cargo', 'Con Puño', 'Jogging'],
-  'Conjunto': ['Remera + Short', 'Remera + Pantalón', 'Buzo + Calza'],
-  'Short':    ['Jeans', 'Deportivo', 'Con Vuelo'],
-  'Bermuda':  ['Jeans', 'Cargo', 'Deportiva'],
-  'Vestido':  ['Corto', 'Largo', 'Con Volados'],
-}
-
-const GENEROS = ['Nena', 'Nene', 'Unisex']
-
-const TIPOS_CALZADO = ['Zapatilla', 'Sandalia', 'Bota', 'Zapato', 'Pantufla', 'Ojota']
-
-// Prefijos de código de barras por tipo+estilo (patrón real del stock)
-const PREFIJOS_TIPO: Record<string, string> = {
-  // Remera
-  'Remera MC':         'RMC',
-  'Remera ML':         'RML',
-  'Remera Sin Manga':  'RSM',
-  'Remera':            'REM',
-  // Buzo
-  'Buzo Con Friza':    'BCF',
-  'Buzo Sin Friza':    'BSF',
-  'Buzo Canguro':      'BCG',
-  'Buzo Abierto':      'BAB',
-  'Buzo':              'BUZ',
-  // Campera
-  'Campera Con Capucha':   'CCH',
-  'Campera Inflable':      'CIN',
-  'Campera Rompevientos':  'CRV',
-  'Campera Polar':         'CPL',
-  'Campera':               'CAM',
-  // Pantalón
-  'Pantalón Jeans':    'PJN',
-  'Pantalón Recto':    'PRC',
-  'Pantalón Cargo':    'PCG',
-  'Pantalón Con Puño': 'PCP',
-  'Pantalón Jogging':  'PJG',
-  'Pantalón Con Friza':'PCF',
-  'Pantalón Sin Friza':'PSF',
-  'Pantalón':          'PAN',
-  // Vestido
-  'Vestido Corto':       'VSC',
-  'Vestido Largo':       'VSL',
-  'Vestido Con Volados': 'VSV',
-  'Vestido':             'VST',
-  // Resto
-  'Pollera':    'POL',
-  'Musculosa':  'MUS',
-  'Body':       'BOD',
-  'Calza':      'CLZ',
-  'Short Jeans':     'SJN',
-  'Short Deportivo': 'SDP',
-  'Short Con Vuelo': 'SCV',
-  'Short':      'SHT',
-  'Bermuda Jeans':      'BJN',
-  'Bermuda Cargo':      'BCR',
-  'Bermuda Deportiva':  'BDP',
-  'Bermuda':    'BRM',
-  'Conjunto Remera + Short':    'CRS',
-  'Conjunto Remera + Pantalón': 'CRP',
-  'Conjunto Buzo + Calza':      'CBC',
-  'Conjunto':   'CNJ',
-  'Camisa':     'CMS',
-  'Chomba':     'CHO',
-  'Pijama':     'PJM',
-  'Medias':     'MDS',
-}
 
 // ── Tipos ──────────────────────────────────────────────────────
 type QuizStep = 'inicio' | 'buscar_existente' | 'marca' | 'tipo' | 'categoria' | 'genero' | 'producto' | 'nombre_nuevo' | 'precio' | 'precio_existente' | 'talle' | 'revisar_lote' | 'listo'
@@ -176,14 +100,6 @@ function abreviaturaMarca(nombre: string): string {
   return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
 }
 
-function generarCodigoBarras(tipo: string, estilo: string, catNombre: string, marcaNombre: string, talle: string): string {
-  const clave = [tipo, estilo].filter(Boolean).join(' ')
-  const tipoPrefix = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipo] || generarPrefijo(clave || tipo)
-  const subcatCode = subcatParaCategoria(catNombre)
-  const marcaCode  = abreviaturaMarca(marcaNombre)
-  const talleCode  = normalizarTalleParaCodigo(talle)
-  return `${tipoPrefix}${subcatCode}${marcaCode}${talleCode}`
-}
 
 function normalizar(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -198,6 +114,8 @@ export default function NuevoProductoPage() {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
   const [todosProductos, setTodosProductos] = useState<ProductoExistente[]>([])
+  const [tiposPrenda, setTiposPrenda] = useState<TipoPrenda[]>([])
+  const [colegios, setColegios] = useState<Colegio[]>([])
 
   // Wizard state
   const [step, setStep] = useState<QuizStep>('marca')
@@ -215,15 +133,27 @@ export default function NuevoProductoPage() {
 
   // Para nuevos productos
   const [nombreNuevoProducto, setNombreNuevoProducto] = useState('')
-  const [tipoPrenda, setTipoPrenda] = useState('')
-  const [estiloPrenda, setEstiloPrenda] = useState<string | null>(null)  // null = aún no elegido, '' = omitido
-  const [generoPrenda, setGeneroPrenda] = useState<string | null>(null)   // null = aún no elegido, '' = omitido
-  const [generoSeleccionado, setGeneroSeleccionado] = useState<GeneroSeleccionado>(null)
-  const [otroTipoPrenda, setOtroTipoPrenda] = useState('')
+  const [tipoPrendaObj, setTipoPrendaObj] = useState<TipoPrenda | null>(null)
+  const [colegioObj, setColegioObj] = useState<Colegio | null>(null)
   const [detalleLibre, setDetalleLibre] = useState('')
-  const [colegioNombre, setColegioNombre] = useState('')
   const [modoLibre, setModoLibre] = useState(false)
   const [nombreLibre, setNombreLibre] = useState('')
+  // Modales agregar tipo / colegio
+  const [modalTipoAbierto, setModalTipoAbierto] = useState(false)
+  const [nuevoTipoNombre, setNuevoTipoNombre] = useState('')
+  const [nuevoTipoAbrev, setNuevoTipoAbrev] = useState('')
+  const [loadingNuevoTipo, setLoadingNuevoTipo] = useState(false)
+  const [modalColegioAbierto, setModalColegioAbierto] = useState(false)
+  const [nuevoColegioNombre, setNuevoColegioNombre] = useState('')
+  const [nuevoColegioAbrev, setNuevoColegioAbrev] = useState('')
+  const [loadingNuevoColegio, setLoadingNuevoColegio] = useState(false)
+  // estados legacy (mantenidos para compatibilidad con partes no modificadas)
+  const [generoSeleccionado, setGeneroSeleccionado] = useState<GeneroSeleccionado>(null)
+  const [tipoPrenda, setTipoPrenda] = useState('')
+  const [estiloPrenda, setEstiloPrenda] = useState<string | null>(null)
+  const [generoPrenda, setGeneroPrenda] = useState<string | null>(null)
+  const [otroTipoPrenda, setOtroTipoPrenda] = useState('')
+  const [colegioNombre, setColegioNombre] = useState('')
   const [precioCosto, setPrecioCosto] = useState('')
   const [precioVenta, setPrecioVenta] = useState('')
   const [precioVentaEditado, setPrecioVentaEditado] = useState(false)
@@ -274,14 +204,18 @@ export default function NuevoProductoPage() {
 
   // ── Carga de datos ─────────────────────────────────────────────
   const cargarTodo = useCallback(async () => {
-    const [{ data: provs }, { data: cats }, { data: prods }] = await Promise.all([
+    const [{ data: provs }, { data: cats }, { data: prods }, { data: tipos }, { data: cols }] = await Promise.all([
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
       supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo,precio_venta,precio_costo)').eq('activo', true).order('nombre_base'),
+      supabase.from('tipos_prenda').select('*').eq('activo', true).order('nombre'),
+      supabase.from('colegios').select('*').eq('activo', true).order('nombre'),
     ])
     setProveedores(provs || [])
     setCategorias(cats || [])
     setTodosProductos((prods || []) as ProductoExistente[])
+    setTiposPrenda((tipos || []) as TipoPrenda[])
+    setColegios((cols || []) as Colegio[])
   }, [supabase])
 
   useEffect(() => { cargarTodo() }, [cargarTodo])
@@ -377,48 +311,42 @@ export default function NuevoProductoPage() {
   }
 
   // Nombre construido por el builder
-  const tipoPrendaFinal = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
+  const tipoPrendaFinal = tipoPrendaObj?.nombre || ''
   const esCalzado = tipo?.sistema_talles === 'calzado'
   const esColegial = tipo?.nombre?.toLowerCase().includes('colegia') ?? false
-  // Regla: [Tipo] [Estilo] [Detalle libre] [Marca] + [Colegio si es Colegial]
+  // Regla: [Tipo] [Detalle libre] [Marca] + [Colegio si es Colegial]
   const nombreGenerado = [
     tipoPrendaFinal,
-    estiloPrenda || '',
     detalleLibre.trim(),
     marca?.nombre || '',
-    esColegial ? colegioNombre.trim() : '',
+    esColegial ? colegioObj?.nombre || '' : '',
   ].filter(Boolean).join(' ')
 
   // Cuándo mostrar cada sección del builder
-  const builderTipoOk = tipoPrendaFinal.length > 0
-  const builderEstiloOk = builderTipoOk && estiloPrenda !== null
-  const builderGeneroOk = builderEstiloOk
-  const estilosDisponibles = ESTILOS_POR_TIPO[tipoPrenda] || []
-
-  // Auto-omitir estilo si no hay opciones
-  useEffect(() => {
-    if (builderTipoOk && estilosDisponibles.length === 0 && estiloPrenda === null) {
-      setEstiloPrenda('')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builderTipoOk, estilosDisponibles.length, estiloPrenda])
+  const builderTipoOk = tipoPrendaObj !== null
 
   // Resetear detalle al cambiar tipo de prenda
   useEffect(() => {
     setDetalleLibre('')
-    setColegioNombre('')
-  }, [tipoPrenda])
+    setColegioObj(null)
+  }, [tipoPrendaObj])
 
   // ── Generación de barcode ──────────────────────────────────────
+  function calcularPrefijoCodigo(): string {
+    const tipoAbrev = tipoPrendaObj?.abreviatura || generarPrefijo(tipoPrendaObj?.nombre || '')
+    const catAbrev  = tipo ? subcatParaCategoria(tipo.nombre) : 'XX'
+    const marcaAbrev = marca ? abreviaturaMarca(marca.nombre) : 'XX'
+    const colegioAbrev = esColegial && colegioObj ? colegioObj.abreviatura : ''
+    return `${tipoAbrev}${catAbrev}${marcaAbrev}${colegioAbrev}`
+  }
+
   async function calcularBarcodeParaTalle(talle: string): Promise<string> {
-    // Si la variante ya existe, usar su código
     const varExist = tallesExistentes.find(v => v.talle === talle)
     if (varExist?.codigo_barras) return varExist.codigo_barras
 
-    if (esProductoNuevo && tipoPrenda && tipo && marca) {
-      const tipoPrendaStr = tipoPrenda === '__otro__' ? otroTipoPrenda.trim() : tipoPrenda
-      const estiloStr = estiloPrenda || ''
-      return generarCodigoBarras(tipoPrendaStr, estiloStr, tipo.nombre, marca.nombre, talle)
+    if (esProductoNuevo && tipoPrendaObj && tipo && marca) {
+      const talleCode = normalizarTalleParaCodigo(talle)
+      return `${calcularPrefijoCodigo()}${talleCode}`
     } else {
       const nombreProd = producto?.nombre_base || ''
       const prefix = generarPrefijo(nombreProd)
@@ -506,7 +434,8 @@ export default function NuevoProductoPage() {
     setEsProductoNuevo(true)
     setProducto(null)
     setNombreNuevoProducto('')
-    setTipoPrenda(''); setEstiloPrenda(null); setGeneroPrenda(null); setGeneroSeleccionado(null); setOtroTipoPrenda(''); setModoLibre(false); setNombreLibre('')
+    setTipoPrendaObj(null); setColegioObj(null); setDetalleLibre('')
+    setModoLibre(false); setNombreLibre('')
     setPrecioCosto(''); setPrecioVenta(''); setPrecioVentaEditado(false); setTemporada('todo_el_año')
     irA('categoria', 'forward')
   }
@@ -579,6 +508,36 @@ export default function NuevoProductoPage() {
     await toggleTalle(talle, null, true)
   }
 
+  // ── Crear Tipo de Prenda (modal) ───────────────────────────────
+  async function confirmarCrearTipoPrenda() {
+    const nombre = nuevoTipoNombre.trim()
+    const abreviatura = nuevoTipoAbrev.trim().toUpperCase()
+    if (!nombre || !abreviatura) { toast.error('Completá nombre y abreviatura'); return }
+    setLoadingNuevoTipo(true)
+    const { data, error } = await supabase.from('tipos_prenda').insert({ nombre, abreviatura, activo: true }).select().single()
+    if (error || !data) { toast.error(`Error: ${error?.message}`); setLoadingNuevoTipo(false); return }
+    await cargarTodo()
+    setLoadingNuevoTipo(false)
+    setTipoPrendaObj(data as TipoPrenda)
+    setModalTipoAbierto(false)
+    setNuevoTipoNombre(''); setNuevoTipoAbrev('')
+  }
+
+  // ── Crear Colegio (modal) ──────────────────────────────────────
+  async function confirmarCrearColegio() {
+    const nombre = nuevoColegioNombre.trim()
+    const abreviatura = nuevoColegioAbrev.trim().toUpperCase()
+    if (!nombre || !abreviatura) { toast.error('Completá nombre y abreviatura'); return }
+    setLoadingNuevoColegio(true)
+    const { data, error } = await supabase.from('colegios').insert({ nombre, abreviatura, activo: true }).select().single()
+    if (error || !data) { toast.error(`Error: ${error?.message}`); setLoadingNuevoColegio(false); return }
+    await cargarTodo()
+    setLoadingNuevoColegio(false)
+    setColegioObj(data as Colegio)
+    setModalColegioAbierto(false)
+    setNuevoColegioNombre(''); setNuevoColegioAbrev('')
+  }
+
   // ── Builder: confirmar nombre ──────────────────────────────────
   function confirmarNombre() {
     const nombre = nombreGenerado.trim()
@@ -591,7 +550,6 @@ export default function NuevoProductoPage() {
     const nombre = nombreLibre.trim()
     if (!nombre) return
     setNombreNuevoProducto(nombre)
-    setTipoPrenda('')
     irA('precio', 'forward')
   }
 
@@ -1124,13 +1082,13 @@ export default function NuevoProductoPage() {
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-5">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto</p>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto · {tipo?.nombre}</p>
                   <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>
                     {modoLibre ? 'Escribí el nombre' : '¿Qué tipo de prenda?'}
                   </h2>
                 </div>
                 <button
-                  onClick={() => { setModoLibre(!modoLibre); setNombreLibre(''); setTipoPrenda(''); setEstiloPrenda(null) }}
+                  onClick={() => { setModoLibre(!modoLibre); setNombreLibre(''); setTipoPrendaObj(null) }}
                   className="text-xs text-gray-400 hover:text-teal-600 underline mt-1 shrink-0"
                 >
                   {modoLibre ? '← Usar asistente' : 'Nombre libre'}
@@ -1154,77 +1112,43 @@ export default function NuevoProductoPage() {
                       className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
                       style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
                     >
-                      Continuar con "{nombreLibre.trim()}"
+                      Continuar con &quot;{nombreLibre.trim()}&quot;
                     </button>
                   )}
                 </div>
               )}
 
-              {/* Modo asistente */}
+              {/* Modo asistente: selector de tipos desde DB */}
               {!modoLibre && (
-              <div>
                 <div className="flex flex-wrap gap-2">
-                  {(esCalzado ? TIPOS_CALZADO : TIPOS_PRENDA).map(t => (
-                    <button key={t} onClick={() => { setTipoPrenda(t); setEstiloPrenda(null) }}
+                  {tiposPrenda.map(t => (
+                    <button key={t.id}
+                      onClick={() => setTipoPrendaObj(t)}
                       className="py-2 px-4 rounded-2xl text-sm font-bold border transition-all active:scale-95"
                       style={{
-                        background: tipoPrenda === t ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
-                        borderColor: tipoPrenda === t ? '#4EC3BD' : '#e5e7eb',
-                        color: tipoPrenda === t ? 'white' : '#374151',
-                        boxShadow: tipoPrenda === t ? '0 4px 12px rgba(78,195,189,0.3)' : 'none',
+                        background: tipoPrendaObj?.id === t.id ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
+                        borderColor: tipoPrendaObj?.id === t.id ? '#4EC3BD' : '#e5e7eb',
+                        color: tipoPrendaObj?.id === t.id ? 'white' : '#374151',
+                        boxShadow: tipoPrendaObj?.id === t.id ? '0 4px 12px rgba(78,195,189,0.3)' : 'none',
                       }}>
-                      {t}
+                      {t.nombre}
                     </button>
                   ))}
-                  <button onClick={() => { setTipoPrenda('__otro__'); setEstiloPrenda(null) }}
+                  <button
+                    onClick={() => setModalTipoAbierto(true)}
                     className="py-2 px-4 rounded-2xl text-sm font-bold border border-dashed transition-all"
-                    style={{ borderColor: tipoPrenda === '__otro__' ? '#4EC3BD' : '#d1d5db', color: tipoPrenda === '__otro__' ? '#0d9488' : '#9ca3af', background: 'white' }}>
-                    + Otra
+                    style={{ borderColor: '#d1d5db', color: '#9ca3af', background: 'white' }}>
+                    + Agregar tipo
                   </button>
                 </div>
-                {tipoPrenda === '__otro__' && (
-                  <Input
-                    value={otroTipoPrenda}
-                    onChange={e => setOtroTipoPrenda(e.target.value)}
-                    placeholder="Ej: Traje de baño, Calza térmica..."
-                    className="h-9 rounded-xl border-gray-200 text-sm mt-2"
-                    autoFocus
-                  />
-                )}
-              </div>
               )}
 
-              {/* Sección 2: Estilo (revelación progresiva) */}
-              {builderTipoOk && (
-                <div className="tk-slide-forward">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="h-px flex-1 bg-gray-100" />
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                      {estilosDisponibles.length > 0 ? 'Manga / Estilo' : 'Detalle adicional'}
-                    </p>
-                    <div className="h-px flex-1 bg-gray-100" />
-                  </div>
-                  {estilosDisponibles.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {estilosDisponibles.map(e => (
-                        <ChipPeq key={e} label={e} activo={estiloPrenda === e} onClick={() => setEstiloPrenda(estiloPrenda === e ? null : e)} />
-                      ))}
-                      <ChipPeq label="Omitir" activo={estiloPrenda === ''} onClick={() => setEstiloPrenda('')} />
-                    </div>
-                  ) : (
-                    <button onClick={() => setEstiloPrenda('')} className="text-xs text-teal-600 font-semibold hover:text-teal-700">
-                      {estiloPrenda === '' ? '✓ Continuando sin detalle' : 'Continuar sin detalle →'}
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Sección: Detalle libre (revelación progresiva después del estilo) */}
-              {builderEstiloOk && (
+              {/* Detalle libre (revelación progresiva) */}
+              {!modoLibre && builderTipoOk && (
                 <div className="tk-slide-forward space-y-2">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2">
                     <div className="h-px flex-1 bg-gray-100" />
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Detalle libre</p>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Detalle</p>
                     <div className="h-px flex-1 bg-gray-100" />
                   </div>
                   <Input
@@ -1232,32 +1156,56 @@ export default function NuevoProductoPage() {
                     onChange={e => setDetalleLibre(e.target.value)}
                     placeholder={esColegial ? 'Ej: Gris, Azul marino, Beige...' : 'Ej: Lisa, Rayada, Estampa Oso...'}
                     className="h-9 rounded-xl border-gray-200 text-sm"
+                    autoFocus
                   />
-                  {esColegial && (
-                    <Input
-                      value={colegioNombre}
-                      onChange={e => setColegioNombre(e.target.value)}
-                      placeholder="Colegio: Ej: San Miguel, Santa Rosa..."
-                      className="h-9 rounded-xl border-gray-200 text-sm"
-                    />
-                  )}
+                </div>
+              )}
+
+              {/* Colegio (solo si es Colegial) */}
+              {!modoLibre && builderTipoOk && esColegial && (
+                <div className="tk-slide-forward space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-gray-100" />
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Colegio</p>
+                    <div className="h-px flex-1 bg-gray-100" />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {colegios.map(c => (
+                      <button key={c.id}
+                        onClick={() => setColegioObj(colegioObj?.id === c.id ? null : c)}
+                        className="py-1.5 px-3 rounded-2xl text-sm font-bold border transition-all active:scale-95"
+                        style={{
+                          background: colegioObj?.id === c.id ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
+                          borderColor: colegioObj?.id === c.id ? '#4EC3BD' : '#e5e7eb',
+                          color: colegioObj?.id === c.id ? 'white' : '#374151',
+                        }}>
+                        {c.nombre}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setModalColegioAbierto(true)}
+                      className="py-1.5 px-3 rounded-2xl text-sm font-bold border border-dashed"
+                      style={{ borderColor: '#d1d5db', color: '#9ca3af', background: 'white' }}>
+                      + Agregar colegio
+                    </button>
+                  </div>
                 </div>
               )}
 
               {/* Preview del nombre + confirmar */}
-              {builderGeneroOk && nombreGenerado && (
+              {!modoLibre && builderTipoOk && nombreGenerado && (
                 <div className="tk-slide-forward space-y-3">
                   <div className="p-4 rounded-2xl text-center" style={{ background: '#f0fdfb', border: '1px solid rgba(78,195,189,0.25)' }}>
                     <p className="text-xs text-gray-400 mb-1">Nombre generado</p>
                     <p className="text-xl font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>{nombreGenerado}</p>
-                    <p className="text-[10px] text-gray-400 mt-1">Código: <span className="font-mono text-teal-600">{(() => { const clave = [tipoPrendaFinal, estiloPrenda || ''].filter(Boolean).join(' '); const p = PREFIJOS_TIPO[clave] || PREFIJOS_TIPO[tipoPrendaFinal] || generarPrefijo(tipoPrendaFinal); return `${p}${tipo ? subcatParaCategoria(tipo.nombre) : 'XX'}${marca ? abreviaturaMarca(marca.nombre) : 'XX'}` })()}[talle]</span></p>
+                    <p className="text-[10px] text-gray-400 mt-1">Código: <span className="font-mono text-teal-600">{calcularPrefijoCodigo()}[talle]</span></p>
                   </div>
                   <button
                     onClick={confirmarNombre}
                     className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
                     style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
                   >
-                    Continuar con "{nombreGenerado}"
+                    Continuar con &quot;{nombreGenerado}&quot;
                   </button>
                 </div>
               )}
@@ -2061,6 +2009,121 @@ export default function NuevoProductoPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+
+      {/* ── MODAL TIPO DE PRENDA ─────────────────────────────────── */}
+      {modalTipoAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setModalTipoAbierto(false) }}
+        >
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl tk-slide-forward">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Nuevo tipo de prenda</h3>
+              <button onClick={() => setModalTipoAbierto(false)} className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors">
+                <X size={14} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="px-5 pb-5 space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1.5">Nombre</p>
+                <Input
+                  value={nuevoTipoNombre}
+                  onChange={e => setNuevoTipoNombre(e.target.value)}
+                  placeholder="Ej: Remera Sin Manga"
+                  className="h-10 rounded-xl border-gray-200 text-sm"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1.5">Abreviatura (3-4 letras)</p>
+                <Input
+                  value={nuevoTipoAbrev}
+                  onChange={e => setNuevoTipoAbrev(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
+                  placeholder="Ej: RSM"
+                  className="h-10 rounded-xl border-gray-200 text-sm font-mono"
+                  maxLength={4}
+                />
+                <p className="text-[10px] text-gray-400 mt-1">Se usa en el código de barras</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setModalTipoAbierto(false); setNuevoTipoNombre(''); setNuevoTipoAbrev('') }}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium text-sm hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmarCrearTipoPrenda}
+                  disabled={loadingNuevoTipo || !nuevoTipoNombre.trim() || nuevoTipoAbrev.length < 2}
+                  className="flex-1 py-2.5 rounded-xl text-white font-bold text-sm disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' }}
+                >
+                  {loadingNuevoTipo ? '...' : 'Crear'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL COLEGIO ────────────────────────────────────────── */}
+      {modalColegioAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setModalColegioAbierto(false) }}
+        >
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl tk-slide-forward">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Nuevo colegio</h3>
+              <button onClick={() => setModalColegioAbierto(false)} className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors">
+                <X size={14} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="px-5 pb-5 space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1.5">Nombre</p>
+                <Input
+                  value={nuevoColegioNombre}
+                  onChange={e => setNuevoColegioNombre(e.target.value)}
+                  placeholder="Ej: San José"
+                  className="h-10 rounded-xl border-gray-200 text-sm"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-1.5">Abreviatura (3-4 letras)</p>
+                <Input
+                  value={nuevoColegioAbrev}
+                  onChange={e => setNuevoColegioAbrev(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
+                  placeholder="Ej: SJO"
+                  className="h-10 rounded-xl border-gray-200 text-sm font-mono"
+                  maxLength={4}
+                />
+                <p className="text-[10px] text-gray-400 mt-1">Se usa en el código de barras</p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => { setModalColegioAbierto(false); setNuevoColegioNombre(''); setNuevoColegioAbrev('') }}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium text-sm hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmarCrearColegio}
+                  disabled={loadingNuevoColegio || !nuevoColegioNombre.trim() || nuevoColegioAbrev.length < 2}
+                  className="flex-1 py-2.5 rounded-xl text-white font-bold text-sm disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' }}
+                >
+                  {loadingNuevoColegio ? '...' : 'Crear'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

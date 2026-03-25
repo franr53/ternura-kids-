@@ -37,9 +37,18 @@ export interface Marca {
 // Alias temporal para no romper archivos que aún usan Proveedor
 export type Proveedor = Marca
 
+export interface TipoPrenda {
+  id: string
+  nombre: string
+  abreviatura: string
+  activo: boolean
+  creado_en: string
+}
+
 export interface Colegio {
   id: string
   nombre: string
+  abreviatura: string
   activo: boolean
   creado_en: string
 }
