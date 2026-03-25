@@ -472,14 +472,14 @@ function InventarioContent() {
                         </div>
                       </td>
                       <td className="px-4 py-2.5">
-                        {esFirst && producto.categoria ? (
+                        {producto.categoria ? (
                           <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: producto.categoria.color }}>
                             {producto.categoria.nombre}
                           </span>
-                        ) : esFirst ? <span className="text-gray-400 text-xs">—</span> : null}
+                        ) : <span className="text-gray-400 text-xs">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-gray-600 text-xs">
-                        {esFirst ? (producto.marca?.nombre ?? '—') : null}
+                        {producto.marca?.nombre ?? '—'}
                       </td>
                       <td className="hidden md:table-cell px-4 py-2.5">
                         {editandoCodigo?.varianteId === v.id ? (
