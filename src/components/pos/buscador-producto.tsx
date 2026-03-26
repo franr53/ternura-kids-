@@ -179,11 +179,9 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                       </div>
                       <div className="flex items-center gap-2 ml-3 shrink-0">
                         <div className="text-right">
-                          <p className="font-semibold text-gray-800 text-sm">
-                            {precioMin === precioMax
-                              ? formatPrecio(precioMin)
-                              : `${formatPrecio(precioMin)} – ${formatPrecio(precioMax)}`}
-                          </p>
+                          {esUnico && (
+                            <p className="font-semibold text-gray-800 text-sm">{formatPrecio(primera.precio_venta)}</p>
+                          )}
                           {sinStock ? (
                             <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
                           ) : (
@@ -208,6 +206,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                             className="bg-gray-100 hover:bg-teal-50 rounded px-3 py-2 text-sm flex flex-col items-center transition-colors"
                           >
                             <span className="font-medium text-gray-800">{formatTalle(v.talle)}</span>
+                            <span className="text-xs text-teal-600 font-medium">{formatPrecio(v.precio_venta)}</span>
                             {v.stock <= 0 ? (
                               <span className="text-xs text-orange-500">⚠ sin stock</span>
                             ) : (

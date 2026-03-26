@@ -513,9 +513,9 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                                 </div>
                               </div>
                               <div className="shrink-0 ml-3 flex items-center gap-2">
-                                <span className="text-sm font-semibold text-gray-800">
-                                  {precioMin === precioMax ? formatPrecio(precioMin) : `${formatPrecio(precioMin)} – ${formatPrecio(precioMax)}`}
-                                </span>
+                                {esUnico && (
+                                  <span className="text-sm font-semibold text-gray-800">{formatPrecio(primera.precio_venta)}</span>
+                                )}
                                 {esUnico
                                   ? <Plus size={14} className="text-teal-400" />
                                   : (expandido ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />)
@@ -531,6 +531,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                                     className="bg-white hover:bg-teal-50 border border-gray-200 rounded px-2.5 py-1.5 text-sm flex flex-col items-center transition-colors"
                                   >
                                     <span className="font-medium text-gray-800">{formatTalle(v.talle)}</span>
+                                    <span className="text-xs text-teal-600 font-medium">{formatPrecio(v.precio_venta)}</span>
                                     {v.stock <= 0
                                       ? <span className="text-xs text-orange-500">⚠ sin stock</span>
                                       : <span className="text-xs text-gray-400">x{v.stock}</span>
