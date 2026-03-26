@@ -86,7 +86,7 @@ export default function EtiquetasPage() {
     setEtiquetas(prev => [...prev, {
       variante_id: variante.id,
       variante: { ...variante, producto },
-      cantidad: 1,
+      cantidad: Math.max(1, variante.stock),
     }])
     setBusqueda('')
     setProductoSeleccionado(null)

@@ -89,9 +89,7 @@ export default function GastosPage() {
   // Modal categorías — estado SEPARADO para grupo vs subcategoría
   const [mostrarCats, setMostrarCats] = useState(false)
   const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState('')
-  const [nuevoGrupoColor, setNuevoGrupoColor] = useState('#8b5cf6')
   const [nuevaSubNombre, setNuevaSubNombre] = useState('')
-  const [nuevaSubColor, setNuevaSubColor] = useState('#4EC3BD')
   const [nuevaSubPadreId, setNuevaSubPadreId] = useState<string | null>(null)
   const [guardandoCat, setGuardandoCat] = useState(false)
   const [gruposExpandidos, setGruposExpandidos] = useState<Set<string>>(new Set())
@@ -114,6 +112,12 @@ export default function GastosPage() {
   }, [supabase])
 
   // Helpers para categorías jerárquicas
+  const COLOR_PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#14b8a6','#3b82f6','#8b5cf6','#ec4899','#6b7280','#84cc16','#06b6d4','#f43f5e']
+  function elegirColor(): string {
+    const usados = categorias.map(c => c.color).filter(Boolean)
+    return COLOR_PALETTE.find(c => !usados.includes(c)) ?? COLOR_PALETTE[categorias.length % COLOR_PALETTE.length]
+  }
+
   const gruposRaiz = useMemo(() => categorias.filter(c => !c.padre_id), [categorias])
   const subcategorias = useMemo(() => {
     const map = new Map<string, CategoriaGasto[]>()
@@ -232,12 +236,11 @@ export default function GastosPage() {
     setGuardandoCat(true)
     const { data, error } = await supabase
       .from('categorias_gastos')
-      .insert({ nombre: nuevoGrupoNombre.trim(), color: nuevoGrupoColor })
+      .insert({ nombre: nuevoGrupoNombre.trim(), color: elegirColor() })
       .select().single()
     if (error) { toast.error('Error al crear grupo: ' + error.message); setGuardandoCat(false); return }
     setCategorias(prev => [...prev, data as CategoriaGasto].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     setNuevoGrupoNombre('')
-    setNuevoGrupoColor('#8b5cf6')
     setGuardandoCat(false)
     toast.success('Grupo creado')
   }
@@ -248,12 +251,11 @@ export default function GastosPage() {
     setGuardandoCat(true)
     const { data, error } = await supabase
       .from('categorias_gastos')
-      .insert({ nombre: nuevaSubNombre.trim(), color: nuevaSubColor, padre_id: padreId })
+      .insert({ nombre: nuevaSubNombre.trim(), color: elegirColor(), padre_id: padreId })
       .select().single()
     if (error) { toast.error('Error al crear subcategoría: ' + error.message); setGuardandoCat(false); return }
     setCategorias(prev => [...prev, data as CategoriaGasto].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     setNuevaSubNombre('')
-    setNuevaSubColor('#4EC3BD')
     setNuevaSubPadreId(null)
     setGuardandoCat(false)
     toast.success('Subcategoría creada')
@@ -729,12 +731,6 @@ export default function GastosPage() {
                             className="flex-1 h-7 text-xs"
                             onKeyDown={e => { if (e.key === 'Enter') crearSubcategoria(padre.id) }}
                           />
-                          <input
-                            type="color"
-                            value={nuevaSubPadreId === padre.id ? nuevaSubColor : '#4EC3BD'}
-                            onChange={e => { setNuevaSubPadreId(padre.id); setNuevaSubColor(e.target.value) }}
-                            className="w-7 h-7 rounded border border-gray-200 cursor-pointer p-0.5"
-                          />
                           <Button
                             size="sm"
                             onClick={() => crearSubcategoria(padre.id)}
@@ -763,13 +759,6 @@ export default function GastosPage() {
                   placeholder="Ej: Personal, Local..."
                   className="flex-1"
                   onKeyDown={e => { if (e.key === 'Enter') crearGrupo() }}
-                />
-                <input
-                  type="color"
-                  value={nuevoGrupoColor}
-                  onChange={e => setNuevoGrupoColor(e.target.value)}
-                  className="w-10 h-9 rounded-md border border-gray-200 cursor-pointer p-0.5"
-                  title="Color"
                 />
               </div>
               <Button

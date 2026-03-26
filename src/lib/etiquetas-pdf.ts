@@ -20,19 +20,22 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
     const nombre = item.nombre.toUpperCase()
     const marca = item.marca.toUpperCase()
     const talle = item.talle
-    const titulo = marca ? `${nombre} - ${marca} | T:${talle}` : `${nombre} | T:${talle}`
 
     return `
     <div class="etiqueta">
-      <div class="titulo">${titulo}</div>
-      ${item.codigoBarras ? `
-      <div class="barcode-wrap">
-        <svg id="${bcId}" data-barcode="${item.codigoBarras}"></svg>
-      </div>
-      ` : '<div class="barcode-placeholder"></div>'}
-      <div class="precios">
-        <span class="precio-lista"><strong>L: ${formatPrecio(item.precioLista)}</strong></span>
-        <span class="precio-efec">EFEC: <strong>${formatPrecio(item.precioEfectivo)}</strong></span>
+      <div class="acento"></div>
+      <div class="cuerpo">
+        <div class="nombre">${nombre}</div>
+        <div class="sub">${marca ? `<span class="marca">${marca}</span>` : ''}<span class="talle-badge">T${talle}</span></div>
+        ${item.codigoBarras ? `
+        <div class="barcode-wrap">
+          <svg id="${bcId}" data-barcode="${item.codigoBarras}"></svg>
+        </div>
+        ` : '<div class="barcode-placeholder"></div>'}
+        <div class="precios">
+          <div class="precio-efec">${formatPrecio(item.precioEfectivo)}<span class="efec-label">efec</span></div>
+          <div class="precio-lista">L: ${formatPrecio(item.precioLista)}</div>
+        </div>
       </div>
     </div>`
   }).join('')
@@ -44,7 +47,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
   <title>Etiquetas - Ternura Kids</title>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
   <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; color: #000; border-color: #ccc; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; color: #000; }
     body { font-family: Arial, sans-serif; background: #fff; color: #000; }
     .contenedor {
       display: grid;
@@ -54,29 +57,61 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       width: 210mm;
     }
     .etiqueta {
-      border: 1px solid #ccc;
-      padding: 3mm 3.5mm 2.5mm;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
+      border: 1px solid #e0e0e0;
       background: white;
       overflow: hidden;
-      min-height: 28mm;
+      min-height: 30mm;
+      display: flex;
+      flex-direction: column;
     }
-    .titulo {
-      font-size: 8pt;
-      font-weight: bold;
+    .acento {
+      display: none;
+    }
+    .cuerpo {
+      padding: 2mm 3mm 2.5mm;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .nombre {
+      font-size: 7.5pt;
+      font-weight: 700;
       line-height: 1.2;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      color: #111;
+    }
+    .sub {
+      display: flex;
+      align-items: center;
+      gap: 1.5mm;
+      margin-top: 0.5mm;
       margin-bottom: 1mm;
+    }
+    .marca {
+      font-size: 6.5pt;
+      color: #777;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .talle-badge {
+      font-size: 6.5pt;
+      font-weight: 700;
+      background: #fff;
+      color: #111;
+      border: 1px solid #555;
+      padding: 0.3mm 1.5mm;
+      border-radius: 2px;
+      flex-shrink: 0;
     }
     .barcode-wrap {
       display: flex;
       justify-content: center;
       align-items: center;
       flex: 1;
+      margin: 0.5mm 0;
     }
     .barcode-wrap svg {
       max-width: 100%;
@@ -84,18 +119,36 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       display: block;
     }
     .barcode-placeholder {
-      height: 16mm;
+      flex: 1;
+      min-height: 12mm;
     }
     .precios {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      margin-top: 1.5mm;
+      margin-top: 1mm;
+      padding-top: 1mm;
+      border-top: 1px solid #eee;
     }
-    .precio-lista { font-size: 10pt; }
-    .precio-lista strong { font-size: 10pt; }
-    .precio-efec { font-size: 10pt; }
-    .precio-efec strong { font-size: 10pt; }
+    .precio-efec {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #111;
+      display: flex;
+      align-items: baseline;
+      gap: 1mm;
+    }
+    .efec-label {
+      font-size: 6pt;
+      font-weight: 400;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .precio-lista {
+      font-size: 7.5pt;
+      color: #999;
+    }
   </style>
 </head>
 <body>
@@ -105,11 +158,11 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       try {
         JsBarcode(el, el.getAttribute('data-barcode'), {
           format: 'CODE128',
-          width: 1.6,
-          height: 45,
+          width: 1.5,
+          height: 38,
           displayValue: true,
-          fontSize: 9,
-          margin: 2,
+          fontSize: 8,
+          margin: 1,
           lineColor: '#000',
           background: '#fff',
         });
