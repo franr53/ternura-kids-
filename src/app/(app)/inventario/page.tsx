@@ -407,7 +407,7 @@ function InventarioContent() {
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Producto</th>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Categoría</th>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Marca</th>
-                <th className="hidden md:table-cell text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Código</th>
+                <th className="hidden md:table-cell text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Talles / Código</th>
                 <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio</th>
                 <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Stock</th>
                 <th className="px-4 py-3"></th>
@@ -447,7 +447,7 @@ function InventarioContent() {
                     <td className="hidden md:table-cell px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {variantesFiltradas.slice(0, 6).map(v => (
-                          <span key={v.id} className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">T{v.talle}</span>
+                          <span key={v.id} className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">{/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}</span>
                         ))}
                         {variantesFiltradas.length > 6 && <span className="text-xs text-gray-400">+{variantesFiltradas.length - 6}</span>}
                       </div>
@@ -478,7 +478,7 @@ function InventarioContent() {
                     return (
                       <tr key={v.id} className="bg-gray-50/70 border-t-0">
                         <td className="pl-10 pr-4 py-2">
-                          <span className="text-sm text-gray-700 font-mono">T{v.talle}</span>
+                          <span className="text-sm text-gray-700 font-mono">{/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}</span>
                         </td>
                         <td className="px-4 py-2 text-gray-400 text-xs">—</td>
                         <td className="px-4 py-2 text-gray-400 text-xs">—</td>
@@ -499,7 +499,7 @@ function InventarioContent() {
                             <div className="flex items-center gap-1 group/cod">
                               <button onClick={() => { navigator.clipboard.writeText(v.codigo_barras!); toast.success('Código copiado') }}
                                 className="font-mono text-xs text-teal-600 hover:text-teal-800 flex items-center gap-1">
-                                {v.codigo_barras}<Copy size={10} className="opacity-40" />
+                                <span className="text-gray-300">🏷</span>{v.codigo_barras}<Copy size={10} className="opacity-40" />
                               </button>
                               <button onClick={() => setEditandoCodigo({ varianteId: v.id, valor: v.codigo_barras! })}
                                 className="opacity-0 group-hover/cod:opacity-100 text-gray-400 hover:text-gray-600">✏️</button>
