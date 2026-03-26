@@ -1,13 +1,13 @@
-﻿'use client'
+'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Variante, Producto } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Search, X, Package } from 'lucide-react'
-import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
+import { Search, X, Package, ChevronDown, ChevronUp } from 'lucide-react'
+import { formatPrecio } from '@/lib/utils'
 
 type VarianteConProducto = Variante & { producto: Producto & { categoria?: { nombre: string; color: string } } }
 
@@ -32,9 +32,27 @@ function matchVariante(v: VarianteConProducto, query: string): boolean {
   return fuzzyMatch(`${v.producto.nombre_base} ${v.talle}`, q)
 }
 
+function sortVariantes(variantes: VarianteConProducto[]): VarianteConProducto[] {
+  return [...variantes].sort((a, b) => {
+    const na = Number(a.talle)
+    const nb = Number(b.talle)
+    const aNum = !isNaN(na)
+    const bNum = !isNaN(nb)
+    if (aNum && bNum) return na - nb
+    if (aNum) return -1
+    if (bNum) return 1
+    return a.talle.localeCompare(b.talle)
+  })
+}
+
+function formatTalle(talle: string): string {
+  return /^\d+$/.test(talle) ? `T${talle}` : talle
+}
+
 export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
   const supabase = createClient()
   const [busqueda, setBusqueda] = useState('')
+  const [productoExpandido, setProductoExpandido] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes:v2', async () => {
@@ -48,9 +66,41 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
+  // Reset expanded product when search changes
+  useEffect(() => { setProductoExpandido(null) }, [busqueda])
+
   const resultados = busqueda.trim()
     ? todasVariantes.filter(v => matchVariante(v, busqueda))
     : []
+
+  // Group results by producto_id
+  const productosResultados = useMemo(() => {
+    const map = new Map<string, VarianteConProducto[]>()
+    resultados.forEach(v => {
+      if (!map.has(v.producto_id)) map.set(v.producto_id, [])
+      map.get(v.producto_id)!.push(v)
+    })
+    // Sort variantes within each group
+    const entries = Array.from(map.entries()).map(([id, variantes]) => ({
+      producto_id: id,
+      variantes: sortVariantes(variantes),
+    }))
+    return entries
+  }, [resultados])
+
+  function handleSeleccionarVariante(v: VarianteConProducto) {
+    onSeleccionar(v)
+    onCerrar()
+  }
+
+  function handleClickProducto(grupo: { producto_id: string; variantes: VarianteConProducto[] }) {
+    const { variantes } = grupo
+    if (variantes.length === 1 || (variantes.length > 0 && variantes[0].talle.toLowerCase() === 'único')) {
+      handleSeleccionarVariante(variantes[0])
+      return
+    }
+    setProductoExpandido(prev => prev === grupo.producto_id ? null : grupo.producto_id)
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-16 px-4" onClick={onCerrar}>
@@ -83,43 +133,93 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
               <p className="text-sm">Escribí el nombre del producto</p>
             </div>
           )}
-          {!loading && busqueda.trim() && resultados.length === 0 && (
+          {!loading && busqueda.trim() && productosResultados.length === 0 && (
             <div className="p-8 text-center text-gray-400">
               <Package size={32} className="mx-auto mb-2" />
               <p className="text-sm">No se encontraron productos para &ldquo;{busqueda}&rdquo;</p>
             </div>
           )}
-          {!loading && resultados.length > 0 && (
+          {!loading && productosResultados.length > 0 && (
             <div className="divide-y divide-gray-50">
-              {resultados.map(variante => (
-                <button
-                  key={variante.id}
-                  onClick={() => { onSeleccionar(variante); onCerrar() }}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-800 text-sm truncate">{formatNombreConTalle(variante.producto.nombre_base, variante.talle)}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {variante.producto.categoria && (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-full text-white"
-                          style={{ backgroundColor: variante.producto.categoria.color }}
-                        >
-                          {variante.producto.categoria.nombre}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right ml-3 shrink-0">
-                    <p className="font-semibold text-gray-800 text-sm">{formatPrecio(variante.precio_venta)}</p>
-                    {variante.stock <= 0 ? (
-                      <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-xs">Stock: {variante.stock}</Badge>
+              {productosResultados.map(grupo => {
+                const { producto_id, variantes } = grupo
+                const primera = variantes[0]
+                const producto = primera.producto
+                const esUnico = variantes.length === 1 || variantes[0].talle.toLowerCase() === 'único'
+                const expandido = productoExpandido === producto_id
+
+                const precios = variantes.map(v => v.precio_venta)
+                const precioMin = Math.min(...precios)
+                const precioMax = Math.max(...precios)
+                const stockTotal = variantes.reduce((acc, v) => acc + v.stock, 0)
+                const sinStock = stockTotal <= 0
+
+                return (
+                  <div key={producto_id}>
+                    {/* Product row */}
+                    <button
+                      onClick={() => handleClickProducto(grupo)}
+                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-800 text-sm truncate">{producto.nombre_base}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {producto.categoria && (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded-full text-white"
+                              style={{ backgroundColor: producto.categoria.color }}
+                            >
+                              {producto.categoria.nombre}
+                            </span>
+                          )}
+                          {!esUnico && (
+                            <span className="text-xs text-gray-400">{variantes.length} talles</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 ml-3 shrink-0">
+                        <div className="text-right">
+                          <p className="font-semibold text-gray-800 text-sm">
+                            {precioMin === precioMax
+                              ? formatPrecio(precioMin)
+                              : `${formatPrecio(precioMin)} – ${formatPrecio(precioMax)}`}
+                          </p>
+                          {sinStock ? (
+                            <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">Stock: {stockTotal}</Badge>
+                          )}
+                        </div>
+                        {!esUnico && (
+                          <span className="text-gray-400">
+                            {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Talle picker */}
+                    {!esUnico && expandido && (
+                      <div className="px-4 pb-3 flex flex-wrap gap-2 bg-gray-50">
+                        {variantes.map(v => (
+                          <button
+                            key={v.id}
+                            onClick={() => handleSeleccionarVariante(v)}
+                            className="bg-gray-100 hover:bg-teal-50 rounded px-3 py-2 text-sm flex flex-col items-center transition-colors"
+                          >
+                            <span className="font-medium text-gray-800">{formatTalle(v.talle)}</span>
+                            {v.stock <= 0 ? (
+                              <span className="text-xs text-orange-500">⚠ sin stock</span>
+                            ) : (
+                              <span className="text-xs text-gray-400">x{v.stock}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
-                </button>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
-import { Wallet, Plus, Lock, Unlock, History, ChevronDown, ChevronRight, X, Receipt, AlertTriangle } from 'lucide-react'
+import { Wallet, Plus, Lock, Unlock, History, ChevronDown, ChevronRight, X, Receipt } from 'lucide-react'
 import { formatPrecio, cn } from '@/lib/utils'
 import Link from 'next/link'
 
@@ -80,39 +80,27 @@ export default function CajaPage() {
     }
   }, [cajaCache])
 
-  // Detectar cajas pendientes de días anteriores
+  // Auto-cerrar cajas abiertas de días anteriores al cargar la página
   useEffect(() => {
-    async function detectarCajasPendientes() {
+    async function cerrarCajasAnteriores() {
       const hoy = new Date().toISOString().split('T')[0]
       const { data } = await supabase
         .from('cajas')
-        .select('*')
+        .select('id, fecha')
         .eq('estado', 'abierta')
         .lt('fecha', hoy)
-        .order('fecha', { ascending: false })
       if (!data || data.length === 0) return
 
-      // Auto-cerrar cajas de 3+ días
-      const tresDiasAtras = new Date()
-      tresDiasAtras.setDate(tresDiasAtras.getDate() - 3)
-      const limite = tresDiasAtras.toISOString().split('T')[0]
-
-      const autoCerrar = data.filter(c => c.fecha < limite)
-      const manuales = data.filter(c => c.fecha >= limite)
-
-      if (autoCerrar.length > 0) {
-        for (const c of autoCerrar) {
-          await supabase.from('cajas').update({
-            estado: 'cerrada',
-            cerrada_en: new Date().toISOString(),
-          }).eq('id', c.id)
-        }
-        toast.info(`Se cerraron automáticamente ${autoCerrar.length} caja(s) de más de 3 días`)
-      }
-
-      setCajasPendientes(manuales as Caja[])
+      await Promise.all(data.map(c =>
+        supabase.from('cajas').update({
+          estado: 'cerrada',
+          cerrada_en: new Date().toISOString(),
+          notas: 'Cierre automático al inicio del día siguiente',
+        }).eq('id', c.id)
+      ))
+      toast.info(`Se cerró automáticamente la caja del día anterior`)
     }
-    detectarCajasPendientes()
+    cerrarCajasAnteriores()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -122,10 +110,6 @@ export default function CajaPage() {
   const [montoRetiro, setMontoRetiro] = useState('')
   const [motivoRetiro, setMotivoRetiro] = useState('')
 
-  // Cajas pendientes (sin cerrar de días anteriores)
-  const [cajasPendientes, setCajasPendientes] = useState<Caja[]>([])
-  const [notasCierrePendientes, setNotasCierrePendientes] = useState<Record<string, string>>({})
-  const [cerrandoPendiente, setCerrandoPendiente] = useState<string | null>(null)
   const [notasCierreHoy, setNotasCierreHoy] = useState('')
 
   // Cajas anteriores
@@ -222,34 +206,6 @@ export default function CajaPage() {
     toast.success('Retiro registrado')
   }
 
-  async function cerrarCajaPendiente(cajaId: string) {
-    setCerrandoPendiente(cajaId)
-    const notas = notasCierrePendientes[cajaId]?.trim() || null
-    const { error } = await supabase.from('cajas').update({
-      estado: 'cerrada',
-      cerrada_en: new Date().toISOString(),
-      notas_cierre: notas,
-    }).eq('id', cajaId)
-    if (error) { toast.error('Error al cerrar: ' + error.message); setCerrandoPendiente(null); return }
-    toast.success('Caja cerrada')
-    setCajasPendientes(prev => prev.filter(c => c.id !== cajaId))
-    setCerrandoPendiente(null)
-  }
-
-  async function cerrarTodasPendientes() {
-    setCerrandoPendiente('all')
-    for (const c of cajasPendientes) {
-      const notas = notasCierrePendientes[c.id]?.trim() || null
-      await supabase.from('cajas').update({
-        estado: 'cerrada',
-        cerrada_en: new Date().toISOString(),
-        notas_cierre: notas,
-      }).eq('id', c.id)
-    }
-    toast.success(`${cajasPendientes.length} caja(s) cerrada(s)`)
-    setCajasPendientes([])
-    setCerrandoPendiente(null)
-  }
 
   async function verAnteriores(dias?: number) {
     setMostrarAnteriores(true)
@@ -311,68 +267,6 @@ export default function CajaPage() {
         </div>
       </div>
 
-      {/* Alerta: cajas sin cerrar de días anteriores */}
-      {cajasPendientes.length > 0 && (
-        <Card className="border-amber-300 bg-amber-50">
-          <CardContent className="pt-5 pb-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={18} className="text-amber-600 shrink-0" />
-              <p className="text-sm font-semibold text-amber-800">
-                {cajasPendientes.length === 1
-                  ? 'Hay 1 caja sin cerrar de un día anterior'
-                  : `Hay ${cajasPendientes.length} cajas sin cerrar de días anteriores`}
-              </p>
-            </div>
-            <div className="space-y-3">
-              {cajasPendientes.map(cp => {
-                const totalVentasCp = (cp.total_efectivo || 0) + (cp.total_transferencia || 0) + (cp.total_debito || 0) + (cp.total_credito || 0) + (cp.total_fiado || 0)
-                const efectivoCp = (cp.monto_inicial || 0) + (cp.total_efectivo || 0) - (cp.total_retiros || 0)
-                return (
-                  <div key={cp.id} className="bg-white rounded-xl border border-amber-200 p-3 space-y-2">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">
-                        {new Date(cp.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
-                      </p>
-                      <div className="flex gap-3 text-xs text-gray-500 mt-0.5">
-                        <span>Ventas: <span className="font-medium text-gray-700">{formatPrecio(totalVentasCp)}</span></span>
-                        <span>Efectivo en caja: <span className="font-medium text-gray-700">{formatPrecio(efectivoCp)}</span></span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 items-end">
-                      <Input
-                        value={notasCierrePendientes[cp.id] || ''}
-                        onChange={e => setNotasCierrePendientes(prev => ({ ...prev, [cp.id]: e.target.value }))}
-                        placeholder="Notas o anomalías (opcional)"
-                        className="flex-1 text-sm h-9"
-                      />
-                      <Button
-                        onClick={() => cerrarCajaPendiente(cp.id)}
-                        disabled={cerrandoPendiente !== null}
-                        size="sm"
-                        className="bg-amber-500 hover:bg-amber-600 text-white gap-1 shrink-0"
-                      >
-                        <Lock size={14} />
-                        {cerrandoPendiente === cp.id ? 'Cerrando...' : 'Cerrar'}
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            {cajasPendientes.length > 1 && (
-              <Button
-                onClick={cerrarTodasPendientes}
-                disabled={cerrandoPendiente !== null}
-                variant="outline"
-                className="w-full border-amber-300 text-amber-700 hover:bg-amber-100 gap-2"
-              >
-                <Lock size={14} />
-                {cerrandoPendiente === 'all' ? 'Cerrando...' : 'Cerrar todas'}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Sin caja hoy */}
       {!caja && (
