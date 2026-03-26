@@ -25,6 +25,21 @@ const TALLES_POR_SISTEMA: Record<string, string[]> = {
   calzado:  ['18','19','20','21','22','23','24','25','26','27','28','29','30','31','32','33','34','35','36'],
 }
 
+const DETALLES_POR_TIPO: Record<string, string[]> = {
+  remera:   ['Lisa', 'Estampada', 'M/C', 'M/L', 'Rayada', 'Fit'],
+  pantalon: ['Liso', 'Cargo', 'Recto', 'Jogger', 'Oxford'],
+  buzo:     ['Liso', 'Estampado', 'Canguro', 'Frisa'],
+  campera:  ['Lisa', 'Con capucha', 'Rompeviento', 'Pluma'],
+  bermuda:  ['Lisa', 'Cargo', 'Jogger'],
+  short:    ['Liso', 'Deportivo', 'Cargo'],
+  vestido:  ['Liso', 'Estampado', 'Con vuelo'],
+  calza:    ['Lisa', 'Estampada', 'Ciclista'],
+  medias:   ['Lisas', 'Con diseño', 'Antideslizante'],
+  body:     ['Manga corta', 'Manga larga', 'Sin mangas'],
+  mameluco: ['Liso', 'Estampado'],
+  ajuar:    ['Completo', 'Set 2 piezas'],
+}
+
 
 // ── Tipos ──────────────────────────────────────────────────────
 type QuizStep = 'inicio' | 'buscar_existente' | 'marca' | 'tipo' | 'categoria' | 'genero' | 'producto' | 'nombre_nuevo' | 'precio' | 'precio_existente' | 'talle' | 'revisar_lote' | 'listo'
@@ -105,6 +120,28 @@ function normalizar(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
+function getDetallesIniciales(tipoPrendaNombre: string): string[] {
+  const n = normalizar(tipoPrendaNombre)
+  const key = Object.keys(DETALLES_POR_TIPO).find(k => n.includes(k))
+  return key ? DETALLES_POR_TIPO[key] : []
+}
+
+function cargarDetallesGuardados(tipoPrendaId: string): string[] {
+  try {
+    const raw = localStorage.getItem(`inv:detalles:${tipoPrendaId}`)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+function guardarDetalleNuevo(tipoPrendaId: string, detalle: string): void {
+  try {
+    const actuales = cargarDetallesGuardados(tipoPrendaId)
+    if (!actuales.includes(detalle)) {
+      localStorage.setItem(`inv:detalles:${tipoPrendaId}`, JSON.stringify([...actuales, detalle]))
+    }
+  } catch { /* ignore */ }
+}
+
 // ── Componente principal ───────────────────────────────────────
 export default function NuevoProductoPage() {
   const router = useRouter()
@@ -136,12 +173,16 @@ export default function NuevoProductoPage() {
   const [tipoPrendaObj, setTipoPrendaObj] = useState<TipoPrenda | null>(null)
   const [colegioObj, setColegioObj] = useState<Colegio | null>(null)
   const [detalleLibre, setDetalleLibre] = useState('')
+  const [detallesDisponibles, setDetallesDisponibles] = useState<string[]>([])
+  const [inputNuevoDetalle, setInputNuevoDetalle] = useState('')
+  const [mostrarInputNuevoDetalle, setMostrarInputNuevoDetalle] = useState(false)
   const [modoLibre, setModoLibre] = useState(false)
   const [nombreLibre, setNombreLibre] = useState('')
   // Modales agregar tipo / colegio
   const [modalTipoAbierto, setModalTipoAbierto] = useState(false)
   const [nuevoTipoNombre, setNuevoTipoNombre] = useState('')
   const [nuevoTipoAbrev, setNuevoTipoAbrev] = useState('')
+  const [nuevoTipoAbrevManual, setNuevoTipoAbrevManual] = useState(false)
   const [loadingNuevoTipo, setLoadingNuevoTipo] = useState(false)
   const [modalColegioAbierto, setModalColegioAbierto] = useState(false)
   const [nuevoColegioNombre, setNuevoColegioNombre] = useState('')
@@ -296,6 +337,12 @@ export default function NuevoProductoPage() {
   const precioLista = parseFloat(precioVenta) || 0
   const precioEfectivo = Math.round(precioLista * 0.8)
 
+  const precioCostoNum = parseFloat(precioCosto) || 0
+  const precioVentaNum = parseFloat(precioVenta) || 0
+  const errorVentaMenorCosto = precioVentaNum > 0 && precioCostoNum > 0 && precioVentaNum < precioCostoNum
+  const advertenciaMargenBajo = margen !== null && Number(margen) >= 0 && Number(margen) < 20 && !errorVentaMenorCosto
+  const advertenciaMargenAlto = margen !== null && Number(margen) > 300 && !errorVentaMenorCosto
+
   function handleCostoChange(valor: string) {
     setPrecioCosto(valor)
     const costo = parseFloat(valor)
@@ -325,10 +372,21 @@ export default function NuevoProductoPage() {
   // Cuándo mostrar cada sección del builder
   const builderTipoOk = tipoPrendaObj !== null
 
-  // Resetear detalle al cambiar tipo de prenda
+  // Resetear detalle al cambiar tipo de prenda y cargar chips
   useEffect(() => {
     setDetalleLibre('')
     setColegioObj(null)
+    setInputNuevoDetalle('')
+    setMostrarInputNuevoDetalle(false)
+    if (tipoPrendaObj) {
+      const iniciales = getDetallesIniciales(tipoPrendaObj.nombre)
+      const guardados = cargarDetallesGuardados(tipoPrendaObj.id)
+      const todos = [...iniciales]
+      guardados.forEach(d => { if (!todos.includes(d)) todos.push(d) })
+      setDetallesDisponibles(todos)
+    } else {
+      setDetallesDisponibles([])
+    }
   }, [tipoPrendaObj])
 
   // ── Generación de barcode ──────────────────────────────────────
@@ -520,7 +578,7 @@ export default function NuevoProductoPage() {
     setLoadingNuevoTipo(false)
     setTipoPrendaObj(data as TipoPrenda)
     setModalTipoAbierto(false)
-    setNuevoTipoNombre(''); setNuevoTipoAbrev('')
+    setNuevoTipoNombre(''); setNuevoTipoAbrev(''); setNuevoTipoAbrevManual(false)
   }
 
   // ── Crear Colegio (modal) ──────────────────────────────────────
@@ -1080,24 +1138,27 @@ export default function NuevoProductoPage() {
         {step === 'nombre_nuevo' && (
           <div className={animClass}>
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-5">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto · {tipo?.nombre}</p>
-                  <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>
-                    {modoLibre ? 'Escribí el nombre' : '¿Qué tipo de prenda?'}
-                  </h2>
-                </div>
-                <button
-                  onClick={() => { setModoLibre(!modoLibre); setNombreLibre(''); setTipoPrendaObj(null) }}
-                  className="text-xs text-gray-400 hover:text-teal-600 underline mt-1 shrink-0"
-                >
-                  {modoLibre ? '← Usar asistente' : 'Nombre libre'}
-                </button>
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">Nuevo producto · {tipo?.nombre}</p>
+                <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>
+                  {modoLibre ? 'Escribí el nombre' : '¿Qué tipo de prenda?'}
+                </h2>
+                {modoLibre && (
+                  <button
+                    onClick={() => { setModoLibre(false); setNombreLibre('') }}
+                    className="text-xs text-teal-600 hover:text-teal-700 underline mt-0.5"
+                  >
+                    ← Usar asistente de nombre
+                  </button>
+                )}
               </div>
 
               {/* Modo libre: input directo */}
               {modoLibre && (
                 <div className="space-y-3">
+                  <div className="px-3 py-2 rounded-xl text-xs font-medium" style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+                    ⚠ El nombre libre no sigue el formato estándar y puede generar inconsistencias.
+                  </div>
                   <Input
                     value={nombreLibre}
                     onChange={e => setNombreLibre(e.target.value)}
@@ -1144,7 +1205,7 @@ export default function NuevoProductoPage() {
                 </div>
               )}
 
-              {/* Detalle libre (revelación progresiva) */}
+              {/* Detalle (chips con historial) */}
               {!modoLibre && builderTipoOk && (
                 <div className="tk-slide-forward space-y-2">
                   <div className="flex items-center gap-2">
@@ -1152,14 +1213,75 @@ export default function NuevoProductoPage() {
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Detalle</p>
                     <div className="h-px flex-1 bg-gray-100" />
                   </div>
-                  <Input
-                    value={detalleLibre}
-                    onChange={e => setDetalleLibre(e.target.value)}
-                    placeholder={esColegial ? 'Ej: Gris, Azul marino, Beige...' : 'Ej: Lisa, Rayada, Estampa Oso...'}
-                    className="h-9 rounded-xl border-gray-200 text-sm"
-                    autoFocus
-                  />
-                  <p className="text-xs text-teal-600 mt-1">💡 No incluyas el talle — se elige en el paso siguiente</p>
+                  <div className="flex flex-wrap gap-2">
+                    {detallesDisponibles.map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setDetalleLibre(detalleLibre === d ? '' : d)}
+                        className="py-1.5 px-3 rounded-2xl text-sm font-semibold border transition-all active:scale-95"
+                        style={{
+                          background: detalleLibre === d ? 'rgba(78,195,189,0.12)' : 'white',
+                          borderColor: detalleLibre === d ? '#4EC3BD' : '#e5e7eb',
+                          color: detalleLibre === d ? '#0d9488' : '#6b7280',
+                        }}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                    {!mostrarInputNuevoDetalle && (
+                      <button
+                        onClick={() => setMostrarInputNuevoDetalle(true)}
+                        className="py-1.5 px-3 rounded-2xl text-sm font-semibold border border-dashed transition-all"
+                        style={{ borderColor: '#d1d5db', color: '#9ca3af', background: 'white' }}
+                      >
+                        + Otro
+                      </button>
+                    )}
+                  </div>
+                  {mostrarInputNuevoDetalle && (
+                    <div className="flex gap-2">
+                      <Input
+                        value={inputNuevoDetalle}
+                        onChange={e => setInputNuevoDetalle(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && inputNuevoDetalle.trim()) {
+                            const cap = inputNuevoDetalle.trim().replace(/\b\w/g, c => c.toUpperCase())
+                            if (tipoPrendaObj) guardarDetalleNuevo(tipoPrendaObj.id, cap)
+                            setDetallesDisponibles(prev => prev.includes(cap) ? prev : [...prev, cap])
+                            setDetalleLibre(cap)
+                            setInputNuevoDetalle('')
+                            setMostrarInputNuevoDetalle(false)
+                          }
+                          if (e.key === 'Escape') { setMostrarInputNuevoDetalle(false); setInputNuevoDetalle('') }
+                        }}
+                        placeholder="Escribí el detalle..."
+                        className="h-9 rounded-xl border-gray-200 text-sm flex-1"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => {
+                          if (!inputNuevoDetalle.trim()) { setMostrarInputNuevoDetalle(false); return }
+                          const cap = inputNuevoDetalle.trim().replace(/\b\w/g, c => c.toUpperCase())
+                          if (tipoPrendaObj) guardarDetalleNuevo(tipoPrendaObj.id, cap)
+                          setDetallesDisponibles(prev => prev.includes(cap) ? prev : [...prev, cap])
+                          setDetalleLibre(cap)
+                          setInputNuevoDetalle('')
+                          setMostrarInputNuevoDetalle(false)
+                        }}
+                        className="px-4 py-2 rounded-xl text-white text-sm font-bold shrink-0"
+                        style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' }}
+                      >
+                        OK
+                      </button>
+                      <button
+                        onClick={() => { setMostrarInputNuevoDetalle(false); setInputNuevoDetalle('') }}
+                        className="px-3 py-2 rounded-xl border border-gray-200 text-gray-500 text-sm shrink-0"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-xs text-teal-600">💡 No incluyas el talle — se elige en el paso siguiente</p>
                 </div>
               )}
 
@@ -1208,6 +1330,12 @@ export default function NuevoProductoPage() {
                     style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
                   >
                     Continuar con &quot;{nombreGenerado}&quot;
+                  </button>
+                  <button
+                    onClick={() => { setModoLibre(true); setTipoPrendaObj(null); setDetalleLibre('') }}
+                    className="w-full text-center text-xs text-gray-400 hover:text-gray-600 py-1 transition-colors"
+                  >
+                    ¿El nombre no cierra? → Modo avanzado
                   </button>
                 </div>
               )}
@@ -1273,9 +1401,25 @@ export default function NuevoProductoPage() {
                   </div>
                 </div>
 
+                {errorVentaMenorCosto && (
+                  <div className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}>
+                    ⛔ El precio de venta no puede ser menor al costo
+                  </div>
+                )}
+                {advertenciaMargenBajo && (
+                  <div className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#c2410c' }}>
+                    ⚠ Margen muy bajo — ¿confirmás el precio?
+                  </div>
+                )}
+                {advertenciaMargenAlto && (
+                  <div className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+                    ⚠ Margen muy alto ({margen}%) — ¿verificaste el precio?
+                  </div>
+                )}
                 <button
                   onClick={() => irA('talle', 'forward')}
-                  className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95"
+                  disabled={errorVentaMenorCosto}
+                  className="w-full py-3 rounded-2xl font-bold text-sm text-white transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                   style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)', boxShadow: '0 4px 14px rgba(78,195,189,0.3)' }}
                 >
                   Siguiente → Elegir talle
@@ -2035,7 +2179,14 @@ export default function NuevoProductoPage() {
                 <p className="text-xs font-semibold text-gray-500 mb-1.5">Nombre</p>
                 <Input
                   value={nuevoTipoNombre}
-                  onChange={e => setNuevoTipoNombre(e.target.value)}
+                  onChange={e => {
+                    const nombre = e.target.value
+                    setNuevoTipoNombre(nombre)
+                    if (!nuevoTipoAbrevManual) {
+                      const sug = nombre.trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/g, '').slice(0, 3)
+                      setNuevoTipoAbrev(sug)
+                    }
+                  }}
                   placeholder="Ej: Remera Sin Manga"
                   className="h-10 rounded-xl border-gray-200 text-sm"
                   autoFocus
@@ -2045,16 +2196,23 @@ export default function NuevoProductoPage() {
                 <p className="text-xs font-semibold text-gray-500 mb-1.5">Abreviatura (3-4 letras)</p>
                 <Input
                   value={nuevoTipoAbrev}
-                  onChange={e => setNuevoTipoAbrev(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
+                  onChange={e => {
+                    setNuevoTipoAbrevManual(true)
+                    setNuevoTipoAbrev(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))
+                  }}
                   placeholder="Ej: RSM"
                   className="h-10 rounded-xl border-gray-200 text-sm font-mono"
                   maxLength={4}
                 />
-                <p className="text-[10px] text-gray-400 mt-1">Se usa en el código de barras</p>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  {nuevoTipoAbrev
+                    ? <>Barcode preview: <span className="font-mono text-teal-600">{nuevoTipoAbrev}[cat][marca][talle]</span></>
+                    : 'Se sugiere automáticamente al escribir el nombre'}
+                </p>
               </div>
               <div className="flex gap-2 pt-1">
                 <button
-                  onClick={() => { setModalTipoAbierto(false); setNuevoTipoNombre(''); setNuevoTipoAbrev('') }}
+                  onClick={() => { setModalTipoAbierto(false); setNuevoTipoNombre(''); setNuevoTipoAbrev(''); setNuevoTipoAbrevManual(false) }}
                   className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 font-medium text-sm hover:bg-gray-50"
                 >
                   Cancelar

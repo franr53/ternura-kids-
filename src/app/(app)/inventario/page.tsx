@@ -9,7 +9,7 @@ import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 
@@ -61,6 +61,7 @@ function InventarioContent() {
   const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
   const [filtroTalle, setFiltroTalle] = useState('todos')
   const [editandoCodigo, setEditandoCodigo] = useState<{ varianteId: string; valor: string } | null>(null)
+  const [editandoPrecio, setEditandoPrecio] = useState<{ varianteId: string; precioCosto: string; precioVenta: string } | null>(null)
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
   const toggleExpand = (id: string) => setExpandidos(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
 
@@ -78,6 +79,20 @@ function InventarioContent() {
       cargarDatos()
     }
     setEditandoCodigo(null)
+  }
+
+  async function guardarPrecio(varianteId: string, precioCosto: string, precioVenta: string) {
+    const costo = Math.round(parseFloat(precioCosto) || 0)
+    const venta = Math.round(parseFloat(precioVenta) || 0)
+    if (venta > 0 && costo > 0 && venta < costo) {
+      toast.error('El precio de venta no puede ser menor al costo')
+      return
+    }
+    const { error } = await supabase.from('variantes').update({ precio_costo: costo || null, precio_venta: venta || null }).eq('id', varianteId)
+    if (error) { toast.error('Error al guardar: ' + error.message); return }
+    toast.success('Precio actualizado')
+    setEditandoPrecio(null)
+    cargarDatos()
   }
 
   // Cálculo de anomalías (client-side)
@@ -408,7 +423,7 @@ function InventarioContent() {
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Categoría</th>
                 <th className="text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Marca</th>
                 <th className="hidden md:table-cell text-left px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Talles / Código</th>
-                <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio</th>
+                <th className="text-right px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Precio venta</th>
                 <th className="text-center px-4 py-3 text-gray-500 font-medium text-xs uppercase tracking-wide">Stock</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -452,11 +467,7 @@ function InventarioContent() {
                         {variantesFiltradas.length > 6 && <span className="text-xs text-gray-400">+{variantesFiltradas.length - 6}</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-semibold text-gray-800">
-                        {precioMin === precioMax ? formatPrecio(precioMin) : `${formatPrecio(precioMin)} – ${formatPrecio(precioMax)}`}
-                      </span>
-                    </td>
+                    <td className="px-4 py-3" />
                     <td className="px-4 py-3 text-center">
                       <span className={cn(
                         'inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold',
@@ -473,10 +484,11 @@ function InventarioContent() {
                     </td>
                   </tr>,
                   // Filas variante (visibles solo si expandido)
-                  ...(expandido ? variantesFiltradas.map(v => {
+                  ...(expandido ? variantesFiltradas.flatMap(v => {
                     const precioInvalido = v.precio_venta === 0 || v.precio_venta < v.precio_costo
-                    return (
-                      <tr key={v.id} className="bg-gray-50/70 border-t-0">
+                    const editandoEstaVariante = editandoPrecio?.varianteId === v.id
+                    const rows = [
+                      <tr key={v.id} className="bg-gray-50/70 border-t-0 hover:bg-teal-50/30 transition-colors">
                         <td className="pl-10 pr-4 py-2">
                           <span className="text-sm text-gray-700 font-mono">{/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}</span>
                         </td>
@@ -510,9 +522,16 @@ function InventarioContent() {
                           )}
                         </td>
                         <td className="px-4 py-2 text-right">
-                          <span className={cn('text-sm font-medium', precioInvalido ? 'text-red-500' : 'text-gray-700')}>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation()
+                              setEditandoPrecio(editandoEstaVariante ? null : { varianteId: v.id, precioCosto: String(v.precio_costo || ''), precioVenta: String(v.precio_venta || '') })
+                            }}
+                            className={cn('text-sm font-medium group/precio inline-flex items-center gap-1 hover:text-teal-600 transition-colors', precioInvalido ? 'text-red-500' : 'text-gray-700')}
+                          >
                             {formatPrecio(v.precio_venta)}
-                          </span>
+                            <Pencil size={10} className="opacity-0 group-hover/precio:opacity-50 transition-opacity" />
+                          </button>
                           {precioInvalido && v.precio_venta > 0 && (
                             <p className="text-xs text-red-400">costo: {formatPrecio(v.precio_costo)}</p>
                           )}
@@ -525,7 +544,73 @@ function InventarioContent() {
                         </td>
                         <td className="px-4 py-2" />
                       </tr>
-                    )
+                    ]
+                    if (editandoEstaVariante && editandoPrecio) {
+                      const c = parseFloat(editandoPrecio.precioCosto) || 0
+                      const vv = parseFloat(editandoPrecio.precioVenta) || 0
+                      const margenEdit = c > 0 && vv > 0 ? Math.round(((vv - c) / c) * 100) : null
+                      const errorEdit = vv > 0 && c > 0 && vv < c
+                      rows.push(
+                        <tr key={`edit-${v.id}`} className="bg-teal-50/60 border-t border-teal-100">
+                          <td colSpan={7} className="pl-10 pr-4 py-3">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="text-xs font-semibold text-teal-700 uppercase tracking-wide shrink-0">
+                                Editar precios · {/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-500 shrink-0">Costo:</label>
+                                <input
+                                  type="number"
+                                  value={editandoPrecio.precioCosto}
+                                  onChange={e => setEditandoPrecio(prev => prev ? { ...prev, precioCosto: e.target.value } : null)}
+                                  onKeyDown={e => { if (e.key === 'Escape') setEditandoPrecio(null) }}
+                                  className="w-28 h-8 border border-gray-200 rounded-lg px-2 text-sm focus:ring-1 focus:ring-teal-400 focus:outline-none"
+                                  placeholder="0"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-500 shrink-0">Venta:</label>
+                                <input
+                                  type="number"
+                                  value={editandoPrecio.precioVenta}
+                                  onChange={e => setEditandoPrecio(prev => prev ? { ...prev, precioVenta: e.target.value } : null)}
+                                  onKeyDown={e => { if (e.key === 'Enter') guardarPrecio(v.id, editandoPrecio.precioCosto, editandoPrecio.precioVenta); if (e.key === 'Escape') setEditandoPrecio(null) }}
+                                  className="w-28 h-8 border border-gray-200 rounded-lg px-2 text-sm focus:ring-1 focus:ring-teal-400 focus:outline-none"
+                                  placeholder="0"
+                                  autoFocus
+                                />
+                              </div>
+                              {margenEdit !== null && (
+                                <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full shrink-0',
+                                  errorEdit ? 'bg-red-100 text-red-600' : margenEdit < 20 ? 'bg-orange-100 text-orange-600' : 'bg-teal-50 text-teal-700')}>
+                                  {errorEdit ? '⚠ venta < costo' : `${margenEdit}% margen`}
+                                </span>
+                              )}
+                              <div className="flex gap-2 ml-auto">
+                                <button
+                                  onClick={() => setEditandoPrecio(null)}
+                                  className="px-3 py-1.5 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  onClick={() => guardarPrecio(v.id, editandoPrecio.precioCosto, editandoPrecio.precioVenta)}
+                                  disabled={errorEdit}
+                                  className="px-3 py-1.5 text-xs font-bold text-white rounded-lg disabled:opacity-50 transition-opacity"
+                                  style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' }}
+                                >
+                                  Guardar
+                                </button>
+                              </div>
+                            </div>
+                            {errorEdit && (
+                              <p className="text-xs text-red-500 mt-1.5">⛔ El precio de venta no puede ser menor al costo</p>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    }
+                    return rows
                   }) : [])
                 ]
               })}
