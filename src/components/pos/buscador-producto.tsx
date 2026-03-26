@@ -93,15 +93,6 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
     onCerrar()
   }
 
-  function handleClickProducto(grupo: { producto_id: string; variantes: VarianteConProducto[] }) {
-    const { variantes } = grupo
-    if (variantes.length === 1 || (variantes.length > 0 && variantes[0].talle.toLowerCase() === 'único')) {
-      handleSeleccionarVariante(variantes[0])
-      return
-    }
-    setProductoExpandido(prev => prev === grupo.producto_id ? null : grupo.producto_id)
-  }
-
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-16 px-4" onClick={onCerrar}>
       <div className="bg-white rounded-xl w-full max-w-xl shadow-2xl max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -145,12 +136,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                 const { producto_id, variantes } = grupo
                 const primera = variantes[0]
                 const producto = primera.producto
-                const esUnico = variantes.length === 1 || variantes[0].talle.toLowerCase() === 'único'
                 const expandido = productoExpandido === producto_id
-
-                const precios = variantes.map(v => v.precio_venta)
-                const precioMin = Math.min(...precios)
-                const precioMax = Math.max(...precios)
                 const stockTotal = variantes.reduce((acc, v) => acc + v.stock, 0)
                 const sinStock = stockTotal <= 0
 
@@ -158,7 +144,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                   <div key={producto_id}>
                     {/* Product row */}
                     <button
-                      onClick={() => handleClickProducto(grupo)}
+                      onClick={() => setProductoExpandido(prev => prev === producto_id ? null : producto_id)}
                       className="w-full flex items-center justify-between px-4 py-3 hover:bg-teal-50 transition-colors text-left"
                     >
                       <div className="flex-1 min-w-0">
@@ -172,32 +158,25 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
                               {producto.categoria.nombre}
                             </span>
                           )}
-                          {!esUnico && (
+                          {variantes.length > 1 && (
                             <span className="text-xs text-gray-400">{variantes.length} talles</span>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 ml-3 shrink-0">
-                        <div className="text-right">
-                          {esUnico && (
-                            <p className="font-semibold text-gray-800 text-sm">{formatPrecio(primera.precio_venta)}</p>
-                          )}
-                          {sinStock ? (
-                            <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">Stock: {stockTotal}</Badge>
-                          )}
-                        </div>
-                        {!esUnico && (
-                          <span className="text-gray-400">
-                            {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          </span>
+                        {sinStock ? (
+                          <Badge className="text-xs bg-orange-500 hover:bg-orange-500">⚠ Sin stock</Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">Stock: {stockTotal}</Badge>
                         )}
+                        <span className="text-gray-400">
+                          {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </span>
                       </div>
                     </button>
 
                     {/* Talle picker */}
-                    {!esUnico && expandido && (
+                    {expandido && (
                       <div className="px-4 pb-3 flex flex-wrap gap-2 bg-gray-50">
                         {variantes.map(v => (
                           <button

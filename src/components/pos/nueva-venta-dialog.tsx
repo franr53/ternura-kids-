@@ -482,19 +482,12 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                         const { producto_id, variantes } = grupo
                         const primera = variantes[0]
                         const producto = primera.producto
-                        const esUnico = variantes.length === 1 || variantes[0].talle.toLowerCase() === 'único'
                         const expandido = productoExpandido === producto_id
                         const stockTotal = variantes.reduce((acc, v) => acc + v.stock, 0)
-                        const precios = variantes.map(v => v.precio_venta)
-                        const precioMin = Math.min(...precios)
-                        const precioMax = Math.max(...precios)
                         return (
                           <div key={producto_id}>
                             <button
-                              onClick={() => {
-                                if (esUnico) { agregarAlCarrito(primera); return }
-                                setProductoExpandido(prev => prev === producto_id ? null : producto_id)
-                              }}
+                              onClick={() => setProductoExpandido(prev => prev === producto_id ? null : producto_id)}
                               className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-50 text-left transition-colors"
                             >
                               <div className="min-w-0 flex-1">
@@ -509,20 +502,14 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                                       {producto.categoria.nombre}
                                     </span>
                                   )}
-                                  {!esUnico && <span className="text-xs text-gray-400">{variantes.length} talles</span>}
+                                  {variantes.length > 1 && <span className="text-xs text-gray-400">{variantes.length} talles</span>}
                                 </div>
                               </div>
-                              <div className="shrink-0 ml-3 flex items-center gap-2">
-                                {esUnico && (
-                                  <span className="text-sm font-semibold text-gray-800">{formatPrecio(primera.precio_venta)}</span>
-                                )}
-                                {esUnico
-                                  ? <Plus size={14} className="text-teal-400" />
-                                  : (expandido ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />)
-                                }
+                              <div className="shrink-0 ml-3">
+                                {expandido ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
                               </div>
                             </button>
-                            {!esUnico && expandido && (
+                            {expandido && (
                               <div className="px-3 pb-2 flex flex-wrap gap-1.5 bg-gray-50">
                                 {variantes.map(v => (
                                   <button
