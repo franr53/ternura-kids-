@@ -1106,6 +1106,7 @@ export default function NuevoProductoPage() {
                     autoFocus
                     onKeyDown={e => e.key === 'Enter' && nombreLibre.trim() && confirmarNombreLibre()}
                   />
+                  <p className="text-xs text-teal-600 mt-1">💡 No incluyas el talle en el nombre — se elige en el paso siguiente</p>
                   {nombreLibre.trim() && (
                     <button
                       onClick={confirmarNombreLibre}
@@ -1158,6 +1159,7 @@ export default function NuevoProductoPage() {
                     className="h-9 rounded-xl border-gray-200 text-sm"
                     autoFocus
                   />
+                  <p className="text-xs text-teal-600 mt-1">💡 No incluyas el talle — se elige en el paso siguiente</p>
                 </div>
               )}
 
@@ -1396,7 +1398,7 @@ export default function NuevoProductoPage() {
             <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
               <div>
                 <h2 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Talles y cantidades</h2>
-                <p className="text-xs text-gray-400 mt-0.5">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre_base} — Tocá para seleccionar</p>
+                <p className="text-xs text-gray-400 mt-0.5">Producto: <span className="font-medium text-gray-700">{esProductoNuevo ? nombreNuevoProducto : producto?.nombre_base}</span> — Tocá para seleccionar</p>
               </div>
               <div className="space-y-4">
                 {/* Talles existentes (producto existente) */}

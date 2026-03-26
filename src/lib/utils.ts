@@ -7,7 +7,13 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatNombreConTalle(nombre: string, talle: string): string {
   if (!talle || talle === 'Único' || talle === 'Unico') return nombre
-  return `${nombre} T${talle}`
+  const n = nombre.trim()
+  const t = talle.trim()
+  // No duplicar si el nombre ya termina con "T{talle}" (productos legacy no migrados)
+  if (n.toUpperCase().endsWith(`T${t.toUpperCase()}`)) return n
+  // No duplicar si el nombre ya termina con el talle literal (talles letra: XL, S, M)
+  if (n.toUpperCase().endsWith(` ${t.toUpperCase()}`)) return n
+  return `${n} T${t}`
 }
 
 export function formatPrecio(valor: number): string {
