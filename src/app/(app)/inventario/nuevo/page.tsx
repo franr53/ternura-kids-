@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Categoria, Proveedor, TipoPrenda, Colegio } from '@/types'
@@ -23,6 +23,17 @@ const TALLES_POR_SISTEMA: Record<string, string[]> = {
   numerico: ['2', '4', '6', '8', '10', '12', '14', '16'],
   letras:   ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
   calzado:  ['18','19','20','21','22','23','24','25','26','27','28','29','30','31','32','33','34','35','36'],
+}
+
+// Tipos sugeridos por categoría (para ordenar el selector)
+const TIPOS_POR_CATEGORIA: Record<string, string[]> = {
+  nena:     ['Remera', 'Vestido', 'Calza', 'Buzo', 'Campera', 'Bermuda', 'Short', 'Pantalón', 'Body', 'Medias'],
+  nene:     ['Remera', 'Pantalón', 'Bermuda', 'Buzo', 'Campera', 'Short', 'Medias'],
+  bebe:     ['Body', 'Mameluco', 'Ajuar', 'Remera', 'Pantalón', 'Buzo', 'Medias'],
+  colegial: ['Chomba', 'Pantalón', 'Calza', 'Campera', 'Buzo', 'Remera'],
+  calzado:  ['Zapatilla', 'Sandalia', 'Bota', 'Pantufla', 'Ojota', 'Zapato'],
+  ropa:     ['Remera', 'Calza', 'Buzo', 'Campera', 'Pantalón', 'Short'],
+  acceso:   ['Mochila', 'Cartera', 'Gorro', 'Bufanda', 'Cinturón'],
 }
 
 const DETALLES_POR_TIPO: Record<string, string[]> = {
@@ -325,6 +336,33 @@ export default function NuevoProductoPage() {
   const productosPorCategoria = categorias
     .filter(c => productosFiltrados.some(p => p.categoria_id === c.id))
     .map(c => ({ categoria: c, productos: productosFiltrados.filter(p => p.categoria_id === c.id) }))
+
+  // Tipos de prenda ordenados por relevancia para la categoría y marca actuales
+  const productosDeEstaMarcaYCat = useMemo(() =>
+    todosProductos.filter(p => p.marca_id === marca?.id && (!tipo || p.categoria_id === tipo.id)),
+    [todosProductos, marca, tipo]
+  )
+
+  const tiposOrdenados = useMemo(() => {
+    const catNorm = tipo ? normalizar(tipo.nombre) : ''
+    const catKey = Object.keys(TIPOS_POR_CATEGORIA).find(k => catNorm.includes(k))
+    const sugeridos = catKey ? TIPOS_POR_CATEGORIA[catKey] : []
+    const conteos = new Map<string, number>()
+    tiposPrenda.forEach(t => {
+      const c = productosDeEstaMarcaYCat.filter(p =>
+        normalizar(p.nombre_base).startsWith(normalizar(t.nombre))
+      ).length
+      if (c > 0) conteos.set(t.id, c)
+    })
+    return [...tiposPrenda].sort((a, b) => {
+      const ai = sugeridos.findIndex(s => normalizar(s) === normalizar(a.nombre))
+      const bi = sugeridos.findIndex(s => normalizar(s) === normalizar(b.nombre))
+      const aIdx = ai === -1 ? 999 : ai
+      const bIdx = bi === -1 ? 999 : bi
+      if (aIdx !== bIdx) return aIdx - bIdx
+      return (conteos.get(b.id) ?? 0) - (conteos.get(a.id) ?? 0)
+    })
+  }, [tiposPrenda, productosDeEstaMarcaYCat, tipo])
 
   const tallesSugeridos = tipo?.sistema_talles ? (TALLES_POR_SISTEMA[tipo.sistema_talles] || []) : []
   const tallesExistentes = producto?.variantes || []
@@ -1180,27 +1218,47 @@ export default function NuevoProductoPage() {
                 </div>
               )}
 
-              {/* Modo asistente: selector de tipos desde DB */}
+              {/* Modo asistente: cards de tipos ordenados por relevancia */}
               {!modoLibre && (
-                <div className="flex flex-wrap gap-2">
-                  {tiposPrenda.map(t => (
-                    <button key={t.id}
-                      onClick={() => setTipoPrendaObj(t)}
-                      className="py-2 px-4 rounded-2xl text-sm font-bold border transition-all active:scale-95"
-                      style={{
-                        background: tipoPrendaObj?.id === t.id ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
-                        borderColor: tipoPrendaObj?.id === t.id ? '#4EC3BD' : '#e5e7eb',
-                        color: tipoPrendaObj?.id === t.id ? 'white' : '#374151',
-                        boxShadow: tipoPrendaObj?.id === t.id ? '0 4px 12px rgba(78,195,189,0.3)' : 'none',
-                      }}>
-                      {t.nombre}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-3 gap-2">
+                  {tiposOrdenados.map(t => {
+                    const count = productosDeEstaMarcaYCat.filter(p =>
+                      normalizar(p.nombre_base).startsWith(normalizar(t.nombre))
+                    ).length
+                    const activo = tipoPrendaObj?.id === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => setTipoPrendaObj(t)}
+                        className="relative flex flex-col items-center justify-center rounded-2xl border py-4 px-2 transition-all active:scale-95 hover:scale-[1.02]"
+                        style={{
+                          background: activo ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
+                          borderColor: activo ? '#4EC3BD' : '#e5e7eb',
+                          color: activo ? 'white' : '#374151',
+                          boxShadow: activo ? '0 4px 12px rgba(78,195,189,0.35)' : '0 1px 3px rgba(0,0,0,0.05)',
+                        }}
+                      >
+                        {count > 0 && (
+                          <span
+                            className="absolute top-1.5 right-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none"
+                            style={{
+                              background: activo ? 'rgba(255,255,255,0.25)' : 'rgba(78,195,189,0.12)',
+                              color: activo ? 'white' : '#0d9488',
+                            }}
+                          >{count}</span>
+                        )}
+                        <span className="text-sm font-bold text-center leading-tight">{t.nombre}</span>
+                        <span className="text-[10px] font-mono mt-0.5" style={{ opacity: activo ? 0.7 : 0.4 }}>{t.abreviatura}</span>
+                      </button>
+                    )
+                  })}
                   <button
                     onClick={() => setModalTipoAbierto(true)}
-                    className="py-2 px-4 rounded-2xl text-sm font-bold border border-dashed transition-all"
-                    style={{ borderColor: '#d1d5db', color: '#9ca3af', background: 'white' }}>
-                    + Agregar tipo
+                    className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed py-4 px-2 transition-all hover:border-teal-400"
+                    style={{ borderColor: '#d1d5db', color: '#9ca3af', background: 'white' }}
+                  >
+                    <Plus size={16} style={{ color: '#9ca3af' }} />
+                    <span className="text-xs font-semibold mt-1">Nuevo tipo</span>
                   </button>
                 </div>
               )}
