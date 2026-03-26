@@ -28,7 +28,8 @@ function fuzzyMatch(texto: string, query: string): boolean {
 function matchVariante(v: VarianteConProducto, query: string): boolean {
   const q = query.trim()
   if (v.codigo_barras && v.codigo_barras.includes(q)) return true
-  return fuzzyMatch(v.producto.nombre_base, q)
+  // Incluir talle en el texto para poder buscar "Baiker 6" o "remera M"
+  return fuzzyMatch(`${v.producto.nombre_base} ${v.talle}`, q)
 }
 
 export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
@@ -58,7 +59,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
           <Search size={18} className="text-gray-400" />
           <Input
             ref={inputRef}
-            placeholder="Buscar producto..."
+            placeholder="Buscar por nombre, talle o código..."
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
             onKeyDown={e => {
