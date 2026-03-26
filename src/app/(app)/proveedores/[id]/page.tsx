@@ -30,6 +30,7 @@ interface PagoProveedor {
   monto: number
   metodo: string
   notas?: string
+  gasto_id?: string
   creado_en: string
 }
 
@@ -80,6 +81,10 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
   const [montoPago, setMontoPago] = useState('')
   const [metodoPago, setMetodoPago] = useState('efectivo')
 
+  const [montoDeuda, setMontoDeuda] = useState('')
+  const [remitoDeuda, setRemitoDeuda] = useState('')
+  const [registrandoDeuda, setRegistrandoDeuda] = useState(false)
+
   // Lista de precios Excel
   const [cambiosPrecio, setCambiosPrecio] = useState<CambioPrecio[]>([])
   const [aplicandoPrecios, setAplicandoPrecios] = useState(false)
@@ -108,7 +113,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
       const [{ data: p }, { data: ing }, { data: pag }, { data: prods }] = await Promise.all([
         supabase.from('marcas').select('*').eq('id', id).single(),
         supabase.from('ingresos_mercaderia').select('*').eq('proveedor_id', id).order('creado_en', { ascending: false }).limit(20),
-        supabase.from('pagos_proveedores').select('*').eq('proveedor_id', id).order('creado_en', { ascending: false }).limit(20),
+        supabase.from('pagos_proveedores').select('id, proveedor_id, monto, metodo, notas, gasto_id, creado_en').eq('proveedor_id', id).order('creado_en', { ascending: false }).limit(20),
         supabase.from('productos').select('id, nombre, precio_costo, precio_venta').eq('activo', true).eq('proveedor_id', id).order('nombre'),
       ])
       if (p) {
@@ -158,6 +163,30 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
     setPagos(prev => [{ id: Date.now().toString(), proveedor_id: id, monto, metodo: metodoPago, creado_en: new Date().toISOString() }, ...prev])
     setMontoPago('')
     toast.success(`Pago de ${formatPrecio(monto)} registrado`)
+  }
+
+  async function registrarDeuda() {
+    const monto = parseFloat(montoDeuda)
+    if (!monto || monto <= 0) { toast.error('Ingresá un monto válido'); return }
+    if (!proveedor) return
+
+    setRegistrandoDeuda(true)
+    const { data: ing, error } = await supabase.from('ingresos_mercaderia').insert({
+      proveedor_id: id,
+      numero_remito: remitoDeuda.trim() || null,
+      total: monto,
+    }).select().single()
+
+    if (error) { toast.error('Error: ' + error.message); setRegistrandoDeuda(false); return }
+
+    const nuevaDeuda = (proveedor.deuda_total || 0) + monto
+    await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', id)
+    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
+    setIngresos(prev => [ing as IngresoMercaderia, ...prev])
+    setMontoDeuda('')
+    setRemitoDeuda('')
+    toast.success(`Deuda de ${formatPrecio(monto)} registrada`)
+    setRegistrandoDeuda(false)
   }
 
   function procesarExcel(e: React.ChangeEvent<HTMLInputElement>) {
@@ -355,6 +384,27 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
                 </Button>
               </CardContent>
             </Card>
+
+            {/* Registrar deuda */}
+            <Card>
+              <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp size={16} className="text-red-400" /> Registrar deuda</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label>Monto *</Label>
+                  <Input type="number" value={montoDeuda} onChange={e => setMontoDeuda(e.target.value)}
+                    placeholder="0" className="mt-1" />
+                </div>
+                <div>
+                  <Label>N° Remito (opcional)</Label>
+                  <Input value={remitoDeuda} onChange={e => setRemitoDeuda(e.target.value)}
+                    placeholder="Ej: 0001-00045" className="mt-1" />
+                </div>
+                <Button onClick={registrarDeuda} disabled={registrandoDeuda}
+                  className="w-full bg-red-500 hover:bg-red-600 gap-2">
+                  <Plus size={16} /> {registrandoDeuda ? 'Guardando...' : 'Registrar deuda'}
+                </Button>
+              </CardContent>
+            </Card>
           </div>
 
           {/* Ingresos recientes */}
@@ -392,9 +442,17 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
                 <div className="space-y-2">
                   {pagos.map(pago => (
                     <div key={pago.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                      <div>
-                        <Badge variant="secondary" className="capitalize">{pago.metodo}</Badge>
-                        <span className="text-xs text-gray-400 ml-2">{new Date(pago.creado_en).toLocaleDateString('es-AR')}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="capitalize">{pago.metodo}</Badge>
+                          {pago.gasto_id && (
+                            <Badge variant="outline" className="text-[10px] text-teal-600 border-teal-300 py-0">Desde Gastos</Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">{new Date(pago.creado_en).toLocaleDateString('es-AR')}</span>
+                          {pago.notas && <span className="text-xs text-gray-400 truncate max-w-[180px]">{pago.notas}</span>}
+                        </div>
                       </div>
                       <p className="font-semibold text-green-600">{formatPrecio(pago.monto)}</p>
                     </div>

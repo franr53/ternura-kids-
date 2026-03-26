@@ -186,10 +186,24 @@ export interface Gasto {
   categoria_id?: string
   monto: number
   metodo_pago: 'efectivo' | 'transferencia' | 'debito' | 'credito'
+  fuente_pago?: 'caja_hoy' | 'retiro_anterior'
+  proveedor_id?: string
   notas?: string
   usuario_id?: string
   creado_en: string
   categoria?: CategoriaGasto
+  proveedor?: Marca
+}
+
+export interface PagoProveedor {
+  id: string
+  proveedor_id: string
+  monto: number
+  metodo: 'efectivo' | 'transferencia' | 'cheque' | 'otro'
+  notas?: string
+  gasto_id?: string
+  usuario_id?: string
+  creado_en: string
 }
 
 export interface IngresoMercaderia {

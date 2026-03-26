@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
-import { CategoriaGasto, Gasto } from '@/types'
+import { CategoriaGasto, Gasto, Marca } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -82,6 +82,9 @@ export default function GastosPage() {
   const [monto, setMonto] = useState('')
   const [categoriaId, setCategoriaId] = useState('')
   const [metodo, setMetodo] = useState<Gasto['metodo_pago']>('efectivo')
+  const [fuentePago, setFuentePago] = useState<'caja_hoy' | 'retiro_anterior'>('caja_hoy')
+  const [proveedorGastoId, setProveedorGastoId] = useState('')
+  const [marcas, setMarcas] = useState<Marca[]>([])
   const [notas, setNotas] = useState('')
   const [fechaGasto, setFechaGasto] = useState(() => new Date().toISOString().split('T')[0])
   const [guardando, setGuardando] = useState(false)
@@ -108,6 +111,13 @@ export default function GastosPage() {
   useEffect(() => {
     supabase.from('categorias_gastos').select('*').order('nombre').then(({ data }) => {
       if (data) setCategorias(data)
+    })
+  }, [supabase])
+
+  // Cargar proveedores/marcas para el selector de pago a proveedor
+  useEffect(() => {
+    supabase.from('marcas').select('id, nombre, alias_cbu, deuda_total').eq('activo', true).order('nombre').then(({ data }) => {
+      if (data) setMarcas(data as Marca[])
     })
   }, [supabase])
 
@@ -204,18 +214,44 @@ export default function GastosPage() {
       monto: montoNum,
       categoria_id: categoriaId || null,
       metodo_pago: metodo,
+      fuente_pago: metodo === 'efectivo' ? fuentePago : 'caja_hoy',
+      proveedor_id: proveedorGastoId || null,
       notas: notas.trim() || null,
       fecha: fechaGasto,
     }).select('*, categoria:categorias_gastos(*)').single()
 
     if (error) { toast.error('Error al guardar: ' + error.message); setGuardando(false); return }
 
+    // Si hay proveedor vinculado: registrar pago en historial del proveedor
+    if (proveedorGastoId && data) {
+      const metodoPagoProveedor = metodo === 'efectivo' ? 'efectivo'
+        : metodo === 'transferencia' ? 'transferencia' : 'otro'
+
+      await supabase.from('pagos_proveedores').insert({
+        proveedor_id: proveedorGastoId,
+        monto: montoNum,
+        metodo: metodoPagoProveedor,
+        gasto_id: (data as unknown as Gasto).id,
+        notas: concepto.trim(),
+      })
+
+      // Reducir deuda solo si el proveedor tiene deuda > 0
+      const marca = marcas.find(m => m.id === proveedorGastoId)
+      if (marca && marca.deuda_total > 0) {
+        const nuevaDeuda = Math.max(0, marca.deuda_total - montoNum)
+        await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', proveedorGastoId)
+        setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda } : m))
+      }
+    }
+
     setGastos(prev => [data as unknown as Gasto, ...prev])
     setConcepto('')
     setMonto('')
     setNotas('')
     setCategoriaId('')
-    toast.success('Gasto registrado')
+    setProveedorGastoId('')
+    setFuentePago('caja_hoy')
+    toast.success(proveedorGastoId ? 'Gasto registrado y pago enviado al proveedor' : 'Gasto registrado')
     setGuardando(false)
     cargarBar()
     cargarPie()
@@ -435,7 +471,7 @@ export default function GastosPage() {
 
               <div className="col-span-2">
                 <Label className="text-xs text-gray-500 mb-1.5 block">Método de pago</Label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {(Object.entries(METODO_CONFIG) as [Gasto['metodo_pago'], typeof METODO_CONFIG[Gasto['metodo_pago']]][]).map(([key, cfg]) => (
                     <button
                       key={key}
@@ -449,6 +485,62 @@ export default function GastosPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Fuente de pago — solo cuando método es efectivo */}
+              {metodo === 'efectivo' && (
+                <div className="col-span-2">
+                  <Label className="text-xs text-gray-500 mb-1.5 block">¿De dónde sale la plata?</Label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setFuentePago('caja_hoy')}
+                      className={cn(
+                        'flex flex-col items-start px-3 py-2 rounded-lg border text-xs font-semibold transition-all',
+                        fuentePago === 'caja_hoy'
+                          ? 'bg-green-50 border-green-400 text-green-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      <span>Caja de hoy</span>
+                      <span className="font-normal text-[10px] opacity-70">Descuenta del efectivo del día</span>
+                    </button>
+                    <button
+                      onClick={() => setFuentePago('retiro_anterior')}
+                      className={cn(
+                        'flex flex-col items-start px-3 py-2 rounded-lg border text-xs font-semibold transition-all',
+                        fuentePago === 'retiro_anterior'
+                          ? 'bg-amber-50 border-amber-400 text-amber-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      )}
+                    >
+                      <span>Retiro anterior</span>
+                      <span className="font-normal text-[10px] opacity-70">Plata retirada en días previos</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Proveedor vinculado (opcional) */}
+              <div className="col-span-2">
+                <Label className="text-xs text-gray-500">Proveedor (opcional)</Label>
+                <select
+                  value={proveedorGastoId}
+                  onChange={e => setProveedorGastoId(e.target.value)}
+                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
+                >
+                  <option value="">Sin proveedor</option>
+                  {marcas.map(m => (
+                    <option key={m.id} value={m.id}>{m.nombre}</option>
+                  ))}
+                </select>
+                {proveedorGastoId && (
+                  <p className="text-[10px] text-teal-600 mt-1">
+                    El pago quedará registrado en el historial de este proveedor
+                    {marcas.find(m => m.id === proveedorGastoId)?.deuda_total ?? 0 > 0
+                      ? ' y reducirá su deuda.'
+                      : '.'}
+                  </p>
+                )}
               </div>
 
               <div className="col-span-2">

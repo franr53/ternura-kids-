@@ -20,6 +20,7 @@ interface GastoDia {
   concepto: string
   monto: number
   metodo_pago: string
+  fuente_pago?: 'caja_hoy' | 'retiro_anterior'
   categoria?: { nombre: string; color: string } | null
 }
 
@@ -46,7 +47,7 @@ export default function CajaPage() {
         .maybeSingle(),
       supabase
         .from('gastos')
-        .select('id, concepto, monto, metodo_pago, categoria:categorias_gastos(nombre, color)')
+        .select('id, concepto, monto, metodo_pago, fuente_pago, categoria:categorias_gastos(nombre, color)')
         .eq('fecha', hoy),
     ])
 
@@ -237,7 +238,9 @@ export default function CajaPage() {
     : 0
 
   const totalGastosDia = gastosDia.reduce((s, g) => s + g.monto, 0)
-  const gastosEfectivo = gastosDia.filter(g => g.metodo_pago === 'efectivo').reduce((s, g) => s + g.monto, 0)
+  const gastosEfectivo = gastosDia
+    .filter(g => g.metodo_pago === 'efectivo' && (g.fuente_pago === 'caja_hoy' || !g.fuente_pago))
+    .reduce((s, g) => s + g.monto, 0)
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
