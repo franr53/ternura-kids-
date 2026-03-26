@@ -26,7 +26,7 @@ function InventarioContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
 
-  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos:v3', async () => {
+  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos:v4', async () => {
     const [{ data: prods, error: errProds }, { data: cats }, { data: provs }] = await Promise.all([
       supabase
         .from('productos')
