@@ -36,7 +36,7 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
   const [busqueda, setBusqueda] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes', async () => {
+  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes:v2', async () => {
     const { data } = await supabase
       .from('variantes')
       .select('*, producto:productos(*, categoria:categorias(nombre, color))')
@@ -52,8 +52,8 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
     : []
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-16 px-4">
-      <div className="bg-white rounded-xl w-full max-w-xl shadow-2xl max-h-[70vh] flex flex-col">
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center pt-16 px-4" onClick={onCerrar}>
+      <div className="bg-white rounded-xl w-full max-w-xl shadow-2xl max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-gray-100 flex items-center gap-3">
           <Search size={18} className="text-gray-400" />
           <Input

@@ -61,6 +61,8 @@ function InventarioContent() {
   const [filtroAnomalia, setFiltroAnomalia] = useState<string | null>(null)
   const [filtroTalle, setFiltroTalle] = useState('todos')
   const [editandoCodigo, setEditandoCodigo] = useState<{ varianteId: string; valor: string } | null>(null)
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const toggleExpand = (id: string) => setExpandidos(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
 
   async function guardarCodigo(varianteId: string, nuevo: string) {
     const valor = nuevo.trim() || null
@@ -412,141 +414,120 @@ function InventarioContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {productosFiltrados.flatMap(producto => {
+              {productosFiltrados.map(producto => {
                 const variantes = producto.variantes || []
-                if (variantes.length === 0) {
-                  // Producto sin variantes: mostrar una fila sola
-                  return [(
-                    <tr key={producto.id} className="hover:bg-gray-50 transition-colors group">
-                      <td className="px-4 py-3">
-                        <span className="font-medium text-gray-800">{producto.nombre_base}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {producto.categoria ? (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: producto.categoria.color }}>
-                            {producto.categoria.nombre}
-                          </span>
-                        ) : <span className="text-gray-400 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{producto.marca?.nombre ?? '—'}</td>
-                      <td className="hidden md:table-cell px-4 py-3">
-                        <span className="text-xs text-gray-300 italic">Sin código</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-semibold text-gray-800">—</span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">0</span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Link href={`/inventario/${producto.id}`}>
+                const variantesFiltradas = filtroTalle !== 'todos' ? variantes.filter(v => v.talle === filtroTalle) : variantes
+                const stockTotal = variantesFiltradas.reduce((s, v) => s + v.stock, 0)
+                const precioMin = variantesFiltradas.length ? Math.min(...variantesFiltradas.map(v => v.precio_venta)) : 0
+                const precioMax = variantesFiltradas.length ? Math.max(...variantesFiltradas.map(v => v.precio_venta)) : 0
+                const hayAlerta = variantesFiltradas.some(v => v.stock === 0 || v.stock <= v.stock_minimo)
+                const expandido = expandidos.has(producto.id)
+                return [
+                  // Fila padre (producto)
+                  <tr
+                    key={producto.id}
+                    onClick={() => toggleExpand(producto.id)}
+                    className="hover:bg-teal-50/40 transition-colors cursor-pointer group"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {hayAlerta && <AlertTriangle size={13} className="text-orange-400 shrink-0" />}
+                        <span className="font-semibold text-gray-800">{producto.nombre_base}</span>
+                        <span className="text-xs text-gray-400">({variantesFiltradas.length} {variantesFiltradas.length === 1 ? 'talle' : 'talles'})</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {producto.categoria ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: producto.categoria.color }}>
+                          {producto.categoria.nombre}
+                        </span>
+                      ) : <span className="text-gray-400 text-xs">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">{producto.marca?.nombre ?? '—'}</td>
+                    <td className="hidden md:table-cell px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {variantesFiltradas.slice(0, 6).map(v => (
+                          <span key={v.id} className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">T{v.talle}</span>
+                        ))}
+                        {variantesFiltradas.length > 6 && <span className="text-xs text-gray-400">+{variantesFiltradas.length - 6}</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <span className="font-semibold text-gray-800">
+                        {precioMin === precioMax ? formatPrecio(precioMin) : `${formatPrecio(precioMin)} – ${formatPrecio(precioMax)}`}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={cn(
+                        'inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold',
+                        stockTotal === 0 ? 'bg-red-100 text-red-600' : hayAlerta ? 'bg-orange-100 text-orange-600' : 'bg-teal-50 text-teal-700'
+                      )}>{stockTotal}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link href={`/inventario/${producto.id}`} onClick={e => e.stopPropagation()}>
                           <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">Editar</Button>
                         </Link>
-                      </td>
-                    </tr>
-                  )]
-                }
-                const variantesFiltradas = filtroTalle !== 'todos'
-                  ? variantes.filter(v => v.talle === filtroTalle)
-                  : variantes
-                return variantesFiltradas.map((v, vi) => {
-                  const precioVenta = v.precio_venta
-                  const precioCosto = v.precio_costo
-                  const precioInvalido = precioVenta === 0 || precioVenta < precioCosto
-                  const esFirst = vi === 0
-                  return (
-                    <tr
-                      key={v.id}
-                      className={cn(
-                        'hover:bg-gray-50 transition-colors group',
-                        !esFirst && 'border-t-0 border-dashed'
-                      )}
-                    >
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          {v.stock === 0 && <AlertTriangle size={13} className="text-red-400 shrink-0" />}
-                          {v.stock > 0 && v.stock <= v.stock_minimo && <AlertTriangle size={13} className="text-orange-400 shrink-0" />}
-                          <span className={cn('text-gray-800', esFirst ? 'font-medium' : 'text-gray-600')}>
-                            {formatNombreConTalle(producto.nombre_base, v.talle)}
+                        <span className="text-gray-300 text-xs">{expandido ? '▲' : '▼'}</span>
+                      </div>
+                    </td>
+                  </tr>,
+                  // Filas variante (visibles solo si expandido)
+                  ...(expandido ? variantesFiltradas.map(v => {
+                    const precioInvalido = v.precio_venta === 0 || v.precio_venta < v.precio_costo
+                    return (
+                      <tr key={v.id} className="bg-gray-50/70 border-t-0">
+                        <td className="pl-10 pr-4 py-2">
+                          <span className="text-sm text-gray-700 font-mono">T{v.talle}</span>
+                        </td>
+                        <td className="px-4 py-2 text-gray-400 text-xs">—</td>
+                        <td className="px-4 py-2 text-gray-400 text-xs">—</td>
+                        <td className="hidden md:table-cell px-4 py-2">
+                          {editandoCodigo?.varianteId === v.id ? (
+                            <input
+                              autoFocus
+                              className="font-mono text-xs border border-teal-400 rounded px-2 py-1 w-36 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                              value={editandoCodigo.valor}
+                              onChange={e => setEditandoCodigo({ varianteId: v.id, valor: e.target.value })}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') guardarCodigo(v.id, editandoCodigo.valor)
+                                if (e.key === 'Escape') setEditandoCodigo(null)
+                              }}
+                              onBlur={() => guardarCodigo(v.id, editandoCodigo.valor)}
+                            />
+                          ) : v.codigo_barras ? (
+                            <div className="flex items-center gap-1 group/cod">
+                              <button onClick={() => { navigator.clipboard.writeText(v.codigo_barras!); toast.success('Código copiado') }}
+                                className="font-mono text-xs text-teal-600 hover:text-teal-800 flex items-center gap-1">
+                                {v.codigo_barras}<Copy size={10} className="opacity-40" />
+                              </button>
+                              <button onClick={() => setEditandoCodigo({ varianteId: v.id, valor: v.codigo_barras! })}
+                                className="opacity-0 group-hover/cod:opacity-100 text-gray-400 hover:text-gray-600">✏️</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setEditandoCodigo({ varianteId: v.id, valor: '' })}
+                              className="text-xs text-gray-300 italic hover:text-teal-500">+ agregar</button>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <span className={cn('text-sm font-medium', precioInvalido ? 'text-red-500' : 'text-gray-700')}>
+                            {formatPrecio(v.precio_venta)}
                           </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {producto.categoria ? (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: producto.categoria.color }}>
-                            {producto.categoria.nombre}
-                          </span>
-                        ) : <span className="text-gray-400 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-gray-600 text-xs">
-                        {producto.marca?.nombre ?? '—'}
-                      </td>
-                      <td className="hidden md:table-cell px-4 py-2.5">
-                        {editandoCodigo?.varianteId === v.id ? (
-                          <input
-                            autoFocus
-                            className="font-mono text-xs border border-teal-400 rounded px-2 py-1 w-36 focus:outline-none focus:ring-1 focus:ring-teal-400"
-                            value={editandoCodigo.valor}
-                            onChange={e => setEditandoCodigo({ varianteId: v.id, valor: e.target.value })}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') guardarCodigo(v.id, editandoCodigo.valor)
-                              if (e.key === 'Escape') setEditandoCodigo(null)
-                            }}
-                            onBlur={() => guardarCodigo(v.id, editandoCodigo.valor)}
-                          />
-                        ) : v.codigo_barras ? (
-                          <div className="flex items-center gap-1 group">
-                            <button
-                              onClick={() => { navigator.clipboard.writeText(v.codigo_barras!); toast.success('Código copiado') }}
-                              className="font-mono text-xs text-teal-600 hover:text-teal-800 transition-colors flex items-center gap-1"
-                              title="Click para copiar">
-                              {v.codigo_barras}
-                              <Copy size={10} className="opacity-40" />
-                            </button>
-                            <button
-                              onClick={() => setEditandoCodigo({ varianteId: v.id, valor: v.codigo_barras! })}
-                              className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 transition-all"
-                              title="Editar código">
-                              ✏️
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setEditandoCodigo({ varianteId: v.id, valor: '' })}
-                            className="text-xs text-gray-300 italic hover:text-teal-500 transition-colors"
-                            title="Agregar código">
-                            + agregar
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <span className={cn('font-semibold', precioInvalido ? 'text-red-500' : 'text-gray-800')}>
-                          {formatPrecio(precioVenta)}
-                        </span>
-                        {precioInvalido && precioVenta > 0 && (
-                          <p className="text-xs text-red-400">costo: {formatPrecio(precioCosto)}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <span className={cn(
-                          'inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-semibold',
-                          v.stock === 0 ? 'bg-red-100 text-red-600'
-                            : v.stock <= v.stock_minimo ? 'bg-orange-100 text-orange-600'
-                            : 'bg-teal-50 text-teal-700'
-                        )}>
-                          {v.stock}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        {esFirst && (
-                          <Link href={`/inventario/${producto.id}`}>
-                            <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">Editar</Button>
-                          </Link>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })
+                          {precioInvalido && v.precio_venta > 0 && (
+                            <p className="text-xs text-red-400">costo: {formatPrecio(v.precio_costo)}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={cn(
+                            'inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold',
+                            v.stock === 0 ? 'bg-red-100 text-red-600' : v.stock <= v.stock_minimo ? 'bg-orange-100 text-orange-600' : 'bg-teal-50 text-teal-700'
+                          )}>{v.stock}</span>
+                        </td>
+                        <td className="px-4 py-2" />
+                      </tr>
+                    )
+                  }) : [])
+                ]
               })}
             </tbody>
           </table>
