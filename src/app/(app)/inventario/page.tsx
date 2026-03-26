@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useState, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -64,6 +64,10 @@ function InventarioContent() {
   const [editandoPrecio, setEditandoPrecio] = useState<{ varianteId: string; precioCosto: string; precioVenta: string } | null>(null)
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
   const toggleExpand = (id: string) => setExpandidos(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  const [panelCodigos, setPanelCodigos] = useState(false)
+  const [tabCodigos, setTabCodigos] = useState<'faltantes' | 'colisiones'>('faltantes')
+  const [aplicandoCodigos, setAplicandoCodigos] = useState(false)
+  const [sugerenciasEditadas, setSugerenciasEditadas] = useState<Record<string, string>>({})
 
   async function guardarCodigo(varianteId: string, nuevo: string) {
     const valor = nuevo.trim() || null
@@ -113,6 +117,34 @@ function InventarioContent() {
     nombre_repetido: productos.filter(p => nombresRepetidos.has(p.nombre_base.trim().toLowerCase())).length,
     precio_invalido: productos.filter(p => p.variantes?.some(v => v.precio_venta === 0 || v.precio_venta < v.precio_costo)).length,
   }
+
+  const todosCodigosUsados = useMemo(() =>
+    new Set(productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter((c): c is string => !!c) ?? [])),
+  [productos])
+
+  const colisionesDetalle = useMemo(() => {
+    const mapa = new Map<string, Array<{ producto: Producto; varianteId: string; talle: string }>>()
+    productos.forEach(p =>
+      p.variantes?.forEach(v => {
+        if (v.codigo_barras && codigosDuplicados.has(v.codigo_barras)) {
+          const arr = mapa.get(v.codigo_barras) ?? []
+          arr.push({ producto: p, varianteId: v.id, talle: v.talle })
+          mapa.set(v.codigo_barras, arr)
+        }
+      })
+    )
+    return Array.from(mapa.entries())
+  }, [productos, codigosDuplicados])
+
+  const productosSinCodigo = useMemo(() =>
+    productos
+      .filter(p => p.variantes?.some(v => !v.codigo_barras))
+      .map(p => ({
+        producto: p,
+        sinCodigo: (p.variantes ?? []).filter(v => !v.codigo_barras),
+        conCodigo: (p.variantes ?? []).filter(v => !!v.codigo_barras),
+      })),
+  [productos])
 
   const productosFiltrados = productos.filter(p => {
     const matchBusqueda = busqueda === '' ||
@@ -185,6 +217,46 @@ function InventarioContent() {
     setOrden('nombre_asc')
     setFiltroAnomalia(null)
     setFiltroTalle('todos')
+  }
+
+  // ── Helpers barcode ────────────────────────────────────────────
+  function normTalle(t: string) { return t.replace(/[^a-z0-9]/gi, '').toUpperCase() }
+
+  function extraerPrefijo(barcode: string, talle: string): string | null {
+    const t = normTalle(talle)
+    if (!t || !barcode.endsWith(t)) return null
+    const prefix = barcode.slice(0, barcode.length - t.length)
+    return prefix.length > 0 ? prefix : null
+  }
+
+  function inferirPrefijo(producto: Producto): string | null {
+    const conCod = producto.variantes?.filter(v => v.codigo_barras) ?? []
+    if (!conCod.length) return null
+    const prefijos = conCod
+      .map(v => extraerPrefijo(v.codigo_barras!, v.talle))
+      .filter((p): p is string => p !== null)
+    const unicos = [...new Set(prefijos)]
+    return unicos.length === 1 ? unicos[0] : null
+  }
+
+  function sugerirCodigo(v: { talle: string; id: string }, producto: Producto, usados: Set<string>): string | null {
+    const t = normTalle(v.talle)
+    if (!t) return null
+    const p = inferirPrefijo(producto)
+    if (!p) return null
+    const candidato = p + t
+    return usados.has(candidato) ? null : candidato
+  }
+
+  async function aplicarSugerencias(items: { id: string; codigo: string }[]) {
+    setAplicandoCodigos(true)
+    await Promise.all(items.map(i =>
+      supabase.from('variantes').update({ codigo_barras: i.codigo }).eq('id', i.id)
+    ))
+    setSugerenciasEditadas({})
+    await cargarDatos()
+    setAplicandoCodigos(false)
+    toast.success(`${items.length} código${items.length > 1 ? 's' : ''} aplicado${items.length > 1 ? 's' : ''}`)
   }
 
   return (
@@ -399,6 +471,153 @@ function InventarioContent() {
             <button onClick={() => setFiltroAnomalia(null)} className="text-xs text-amber-600 hover:text-amber-800 ml-auto font-medium">
               × Limpiar filtro
             </button>
+          )}
+          {(conteoAnomalias.sin_codigo > 0 || conteoAnomalias.cod_duplicado > 0) && (
+            <button
+              onClick={() => setPanelCodigos(p => !p)}
+              className="text-xs text-amber-700 underline hover:no-underline ml-2 font-medium shrink-0"
+            >
+              {panelCodigos ? 'Cerrar panel' : '🔧 Reparar códigos'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Panel de reparación de códigos */}
+      {panelCodigos && (
+        <div className="border border-amber-200 rounded-xl bg-white overflow-hidden shadow-sm">
+          {/* Tabs */}
+          <div className="flex border-b border-gray-100">
+            {(['faltantes', 'colisiones'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setTabCodigos(tab)}
+                className={cn(
+                  'px-4 py-2.5 text-xs font-semibold transition-colors',
+                  tabCodigos === tab
+                    ? 'border-b-2 border-teal-500 text-teal-700 bg-teal-50/50'
+                    : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                {tab === 'faltantes'
+                  ? `Sin código (${conteoAnomalias.sin_codigo} productos)`
+                  : `Colisiones (${colisionesDetalle.length})`}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab: Faltantes */}
+          {tabCodigos === 'faltantes' && (
+            <div className="p-4 space-y-3">
+              {/* Header con "Aplicar todas" */}
+              {(() => {
+                const todasSugerencias = productosSinCodigo.flatMap(({ producto, sinCodigo }) =>
+                  sinCodigo.map(v => {
+                    const editado = sugerenciasEditadas[v.id]
+                    const sugerido = editado !== undefined ? editado : sugerirCodigo(v, producto, todosCodigosUsados)
+                    return sugerido && !todosCodigosUsados.has(sugerido) ? { id: v.id, codigo: sugerido } : null
+                  }).filter((x): x is { id: string; codigo: string } => x !== null)
+                )
+                return todasSugerencias.length > 0 ? (
+                  <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                    <p className="text-xs text-gray-500">
+                      Sugerencias calculadas en base al prefijo de las otras variantes del mismo producto.
+                    </p>
+                    <button
+                      onClick={() => aplicarSugerencias(todasSugerencias)}
+                      disabled={aplicandoCodigos}
+                      className="shrink-0 ml-4 px-3 py-1.5 text-xs font-bold text-white rounded-lg disabled:opacity-50 transition-opacity"
+                      style={{ background: 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' }}
+                    >
+                      {aplicandoCodigos ? 'Aplicando...' : `Aplicar ${todasSugerencias.length} sugerencia${todasSugerencias.length > 1 ? 's' : ''}`}
+                    </button>
+                  </div>
+                ) : null
+              })()}
+
+              {productosSinCodigo.map(({ producto, sinCodigo, conCodigo }) => (
+                <div key={producto.id} className="border border-gray-100 rounded-lg p-3">
+                  <p className="font-semibold text-sm text-gray-800 mb-2">{producto.nombre_base}</p>
+
+                  {/* Variantes con código — referencia */}
+                  {conCodigo.length > 0 && (
+                    <div className="flex gap-1.5 mb-2 flex-wrap">
+                      {conCodigo.map(v => (
+                        <span key={v.id} className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded font-mono border border-green-100">
+                          {/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}: {v.codigo_barras}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Variantes sin código con input editable */}
+                  <div className="space-y-1.5">
+                    {sinCodigo.map(v => {
+                      const sugerido = sugerirCodigo(v, producto, todosCodigosUsados)
+                      const editado = sugerenciasEditadas[v.id]
+                      const valor = editado !== undefined ? editado : (sugerido ?? '')
+                      const colisiona = !!valor && todosCodigosUsados.has(valor)
+                      return (
+                        <div key={v.id} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500 w-8 shrink-0 font-mono">
+                            {/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}
+                          </span>
+                          <input
+                            value={valor}
+                            onChange={e => setSugerenciasEditadas(prev => ({ ...prev, [v.id]: e.target.value }))}
+                            className={cn(
+                              'font-mono text-xs border rounded px-2 py-1 flex-1 focus:outline-none focus:ring-1 min-w-0',
+                              colisiona ? 'border-red-300 focus:ring-red-300' : 'border-gray-200 focus:ring-teal-400'
+                            )}
+                            placeholder={
+                              inferirPrefijo(producto)
+                                ? `${inferirPrefijo(producto)}${normTalle(v.talle)}`
+                                : 'Sin referencia — ingresá manualmente'
+                            }
+                          />
+                          {colisiona && <span className="text-xs text-red-500 shrink-0">ya existe</span>}
+                          <button
+                            disabled={!valor || colisiona}
+                            onClick={() => {
+                              guardarCodigo(v.id, valor)
+                              setSugerenciasEditadas(prev => { const n = { ...prev }; delete n[v.id]; return n })
+                            }}
+                            className="shrink-0 px-2.5 py-1 text-xs font-medium border border-gray-200 rounded hover:bg-teal-50 hover:border-teal-300 hover:text-teal-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Guardar
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Tab: Colisiones */}
+          {tabCodigos === 'colisiones' && (
+            <div className="p-4 space-y-3">
+              {colisionesDetalle.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">No hay colisiones detectadas ✓</p>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-500">
+                    Estos códigos aparecen en más de una variante. Editá cada uno desde la tabla de inventario.
+                  </p>
+                  {colisionesDetalle.map(([codigo, entries]) => (
+                    <div key={codigo} className="border border-red-200 rounded-lg p-3 bg-red-50">
+                      <p className="font-mono text-sm font-bold text-red-700 mb-1.5">{codigo}</p>
+                      {entries.map(({ producto, varianteId, talle }) => (
+                        <div key={varianteId} className="text-xs text-gray-700">
+                          • {producto.nombre_base} — talle {talle}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -18,28 +18,33 @@ Diseñado para escalar a múltiples rubros (canchas de pádel, perfumerías, otr
 
 ### ✅ Completado
 - Estructura base Next.js 16 + React 19 + TypeScript
-- Login con Supabase Auth (SSR)
+- Login con Supabase Auth (SSR) + glassmorphism
 - Sidebar + layout protegido
-- Módulo Inventario (productos + variantes/talles + stock)
+- Módulo Inventario completo:
+  - Listado productos (1 fila/variante, con marca+categoría en cada fila)
+  - Wizard de carga batch (acumula lote en memoria, confirma todo junto)
+  - Selectores dinámicos Tipo de Prenda + Colegio (DB, modales "Agregar nuevo")
+  - Regla nombre: `[Tipo] [Detalle] [Marca] [Colegio si Colegial]`
+  - Barcode: `[TIPO.abrev][CAT][MARCA][COLEGIO if colegial][talle]`
+- Módulo POS (punto de venta completo)
 - Módulo Clientes (deuda + historial fiado + cobro inline)
+- Módulo Caja (apertura/cierre + retiros + cobro de deuda)
+- Módulo Proveedores (deuda + ingreso de mercadería)
 - Módulo Importar (CSV/xlsx desde Contagram)
 - PWA configurada (manifest + service worker)
-- Migración 001 aplicada (decrementar_stock, RLS, índices)
+- Migraciones 001–016
 
 ### 🔄 En progreso
-- Módulo POS (punto de venta)
+- Migración 016 (`tipos_prenda` + `colegios`) — **aplicar en Supabase SQL Editor**
 
 ### ⏳ Pendiente
 - Dashboard (KPIs, ventas, top productos, deudores)
-- Módulo Proveedores (deuda + ingreso mercadería)
-- Módulo Caja (apertura/cierre + retiros)
 - Módulo Reportes (ventas por período + CSV export)
 - Módulo Etiquetas (generación e impresión)
 - Módulo WhatsApp (mensajes a deudores + campañas)
-- Rediseño pantalla de login (glassmorphism + logo de fondo)
 - Objeto de tema central (colores centralizados)
 - Tests de lógica crítica (ventas, stock, caja, deuda)
-- Deploy en Vercel
+- Deploy definitivo en Vercel (dominio propio)
 
 ---
 
@@ -246,7 +251,9 @@ src/
 
 ## Migraciones Supabase
 - `supabase/migrations/001_mejoras_produccion.sql` — función `decrementar_stock` (RPC), triggers `updated_at`, índices de rendimiento, RLS admin vs vendedor
-- **CRÍTICO**: aplicar la migración antes de usar el POS (la función `decrementar_stock` es requerida por `src/lib/services/ventas.ts`)
+- `supabase/migrations/016_tipos_prenda_colegios.sql` — tablas `tipos_prenda` y `colegios` con campo `abreviatura` (usado en barcodes)
+- **CRÍTICO**: aplicar migración 001 antes de usar el POS (`decrementar_stock` es requerida por `src/lib/services/ventas.ts`)
+- **PENDIENTE**: aplicar migración 016 en Supabase SQL Editor para habilitar selectores dinámicos en wizard de inventario
 
 ## Decisiones tomadas
 - `src/proxy.ts` en vez de `middleware.ts` (fix para Next.js 16)
@@ -314,3 +321,5 @@ Al arrancar cada sesión nueva en Claude Code, ejecutar siempre:
   - CDN scripts (html2canvas, jsPDF, JsBarcode) se cargan sin SRI (Subresource Integrity). **Regla**: en producción, agregar `integrity="sha384-..."` a scripts de terceros.
   - Dashboard hace 9 queries en `Promise.all` sin verificar errores individuales. **Regla**: todo `Promise.all` con queries debe verificar `error` de cada resultado. Si falla una, mostrar partial data o retry, no fallar silenciosamente.
 - [2026-03-19] El wizard de carga de stock guardaba cada producto individualmente en Supabase y mostraba una pantalla "¡Guardado!" que interrumpía el flujo. Para cargas masivas (ej: caja del proveedor) era muy lento. **Regla**: todo flujo de carga masiva debe acumular en memoria y confirmar en batch al final. No interrumpir el flujo del usuario con confirmaciones individuales — usar panel lateral/barra para feedback visual sin bloquear.
+- [2026-03-25] PostgREST schema cache queda stale tras renombrar tablas/columnas. Queries con `.order('nombre_renombrado')` y joins embedded `tabla_nueva:tabla_vieja(*)` retornaban 400/404 a pesar de que la DB tenía los datos. **Regla**: después de rename en Supabase, si PostgREST sigue fallando, mover las referencias JS-side: quitar `.order()` con col renombrada, fetchear tabla relacionada por separado y hacer join manual con Map.
+- [2026-03-25] El inventario mostraba 1 fila por variante (flatMap) y solo la primera fila de cada producto mostraba marca y categoría. El usuario veía "el 2do producto sin marca ni categoría". **Regla**: en una tabla que aplana variantes, cada fila debe ser autocontenida — mostrar marca/categoría en todas las filas, no solo en `esFirst`.
