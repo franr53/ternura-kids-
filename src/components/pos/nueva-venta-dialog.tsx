@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, Producto, Proveedor, Variante, MetodoPago } from '@/types'
@@ -17,6 +17,7 @@ import {
   X, Search, Plus, Minus, User, Smartphone,
   Banknote, CreditCard, HandCoins, ArrowLeftRight,
   CheckCircle, ShoppingCart, AlertTriangle, Pencil, ArrowRight, MessageCircle, FileDown, Loader2,
+  ChevronDown, ChevronUp,
 } from 'lucide-react'
 
 type VarianteConProducto = Variante & {
@@ -53,7 +54,21 @@ function fuzzyMatch(texto: string, query: string): boolean {
 function matchVariante(v: VarianteConProducto, query: string): boolean {
   const q = query.trim()
   if (v.codigo_barras && v.codigo_barras.includes(q)) return true
-  return fuzzyMatch(v.producto.nombre_base, q)
+  return fuzzyMatch(`${v.producto.nombre_base} ${v.talle}`, q)
+}
+
+function sortVariantes(variantes: VarianteConProducto[]): VarianteConProducto[] {
+  return [...variantes].sort((a, b) => {
+    const na = Number(a.talle); const nb = Number(b.talle)
+    const aNum = !isNaN(na); const bNum = !isNaN(nb)
+    if (aNum && bNum) return na - nb
+    if (aNum) return -1; if (bNum) return 1
+    return a.talle.localeCompare(b.talle)
+  })
+}
+
+function formatTalle(talle: string): string {
+  return /^\d+$/.test(talle) ? `T${talle}` : talle
 }
 
 export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props) {
@@ -115,6 +130,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   // Search state
   const [busProducto, setBusProducto] = useState('')
   const [filtroTalle, setFiltroTalle] = useState('')
+  const [productoExpandido, setProductoExpandido] = useState<string | null>(null)
   const [busCliente, setBusCliente] = useState('')
   const [mostrarDropCliente, setMostrarDropCliente] = useState(false)
 
@@ -149,12 +165,27 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   const [enviandoPDF, setEnviandoPDF] = useState(false)
 
   // Derived
-  const resultadosProducto = busProducto.trim()
-    ? todasVariantes
-        .filter(v => matchVariante(v, busProducto))
-        .filter(v => !filtroTalle.trim() || v.talle.toLowerCase().includes(filtroTalle.trim().toLowerCase()))
-        .slice(0, 30)
-    : []
+  const resultadosFlat = useMemo(() => {
+    if (!busProducto.trim()) return []
+    return todasVariantes
+      .filter(v => matchVariante(v, busProducto))
+      .filter(v => !filtroTalle.trim() || v.talle.toLowerCase().includes(filtroTalle.trim().toLowerCase()))
+  }, [busProducto, filtroTalle, todasVariantes])
+
+  const productosResultados = useMemo(() => {
+    const map = new Map<string, VarianteConProducto[]>()
+    resultadosFlat.forEach(v => {
+      if (!map.has(v.producto_id)) map.set(v.producto_id, [])
+      map.get(v.producto_id)!.push(v)
+    })
+    return Array.from(map.entries()).map(([id, variantes]) => ({
+      producto_id: id,
+      variantes: sortVariantes(variantes),
+    }))
+  }, [resultadosFlat])
+
+  // Reset expanded product on new search
+  useEffect(() => { setProductoExpandido(null) }, [busProducto])
 
   const resultadosCliente = busCliente.trim()
     ? todosClientes.filter(c => fuzzyMatch(c.nombre, busCliente)).slice(0, 8)
@@ -422,7 +453,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                       if (e.key === 'Enter') {
                         const exacto = todasVariantes.find(v => v.codigo_barras === busProducto.trim())
                         if (exacto) { agregarAlCarrito(exacto); return }
-                        if (resultadosProducto.length === 1) agregarAlCarrito(resultadosProducto[0])
+                        if (productosResultados.length === 1 && productosResultados[0].variantes.length === 1) agregarAlCarrito(productosResultados[0].variantes[0])
                       }
                     }}
                     className="pl-9 text-sm"
@@ -441,42 +472,77 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               {/* Resultados de búsqueda */}
               {busProducto.trim() && (
                 <div className="border border-gray-200 rounded-lg max-h-52 overflow-y-auto">
-                  {resultadosProducto.length === 0 ? (
+                  {productosResultados.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-4">
                       Sin resultados para &ldquo;{busProducto}&rdquo;
                     </p>
                   ) : (
-                    resultadosProducto.map(v => (
-                      <button
-                        key={v.id}
-                        onClick={() => agregarAlCarrito(v)}
-                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-50 text-left border-b border-gray-50 last:border-0 transition-colors"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate">{formatNombreConTalle(v.producto.nombre_base, v.talle)}</p>
-                          <div className="flex items-center gap-2">
-                            {v.stock <= 0
-                              ? <span className="text-xs text-orange-500 font-medium">⚠ Sin stock</span>
-                              : <span className="text-xs text-gray-400">Stock: {v.stock}</span>
-                            }
-                            {v.producto.categoria && (
-                              <span
-                                className="text-xs px-1 py-0.5 rounded text-white"
-                                style={{ backgroundColor: v.producto.categoria.color }}
-                              >
-                                {v.producto.categoria.nombre}
-                              </span>
+                    <div className="divide-y divide-gray-50">
+                      {productosResultados.map(grupo => {
+                        const { producto_id, variantes } = grupo
+                        const primera = variantes[0]
+                        const producto = primera.producto
+                        const esUnico = variantes.length === 1 || variantes[0].talle.toLowerCase() === 'único'
+                        const expandido = productoExpandido === producto_id
+                        const stockTotal = variantes.reduce((acc, v) => acc + v.stock, 0)
+                        const precios = variantes.map(v => v.precio_venta)
+                        const precioMin = Math.min(...precios)
+                        const precioMax = Math.max(...precios)
+                        return (
+                          <div key={producto_id}>
+                            <button
+                              onClick={() => {
+                                if (esUnico) { agregarAlCarrito(primera); return }
+                                setProductoExpandido(prev => prev === producto_id ? null : producto_id)
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2 hover:bg-teal-50 text-left transition-colors"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-gray-800 truncate">{producto.nombre_base}</p>
+                                <div className="flex items-center gap-2">
+                                  {stockTotal <= 0
+                                    ? <span className="text-xs text-orange-500 font-medium">⚠ Sin stock</span>
+                                    : <span className="text-xs text-gray-400">Stock: {stockTotal}</span>
+                                  }
+                                  {producto.categoria && (
+                                    <span className="text-xs px-1 py-0.5 rounded text-white" style={{ backgroundColor: producto.categoria.color }}>
+                                      {producto.categoria.nombre}
+                                    </span>
+                                  )}
+                                  {!esUnico && <span className="text-xs text-gray-400">{variantes.length} talles</span>}
+                                </div>
+                              </div>
+                              <div className="shrink-0 ml-3 flex items-center gap-2">
+                                <span className="text-sm font-semibold text-gray-800">
+                                  {precioMin === precioMax ? formatPrecio(precioMin) : `${formatPrecio(precioMin)} – ${formatPrecio(precioMax)}`}
+                                </span>
+                                {esUnico
+                                  ? <Plus size={14} className="text-teal-400" />
+                                  : (expandido ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />)
+                                }
+                              </div>
+                            </button>
+                            {!esUnico && expandido && (
+                              <div className="px-3 pb-2 flex flex-wrap gap-1.5 bg-gray-50">
+                                {variantes.map(v => (
+                                  <button
+                                    key={v.id}
+                                    onClick={() => agregarAlCarrito(v)}
+                                    className="bg-white hover:bg-teal-50 border border-gray-200 rounded px-2.5 py-1.5 text-sm flex flex-col items-center transition-colors"
+                                  >
+                                    <span className="font-medium text-gray-800">{formatTalle(v.talle)}</span>
+                                    {v.stock <= 0
+                                      ? <span className="text-xs text-orange-500">⚠ sin stock</span>
+                                      : <span className="text-xs text-gray-400">x{v.stock}</span>
+                                    }
+                                  </button>
+                                ))}
+                              </div>
                             )}
                           </div>
-                        </div>
-                        <div className="shrink-0 ml-3 flex items-center gap-2">
-                          <span className="text-sm font-semibold text-gray-800">
-                            {formatPrecio(v.precio_venta)}
-                          </span>
-                          <Plus size={14} className="text-teal-400" />
-                        </div>
-                      </button>
-                    ))
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
               )}
