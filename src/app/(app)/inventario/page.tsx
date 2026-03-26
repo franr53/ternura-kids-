@@ -511,13 +511,22 @@ function InventarioContent() {
             <div className="p-4 space-y-3">
               {/* Header con "Aplicar todas" */}
               {(() => {
-                const todasSugerencias = productosSinCodigo.flatMap(({ producto, sinCodigo }) =>
-                  sinCodigo.map(v => {
+                const todasSugerencias = productosSinCodigo.flatMap(({ producto, sinCodigo }) => {
+                  const codigosDeOtros = new Set(
+                    productos.filter(p2 => p2.id !== producto.id)
+                      .flatMap(p2 => p2.variantes?.map(v => v.codigo_barras).filter((c): c is string => !!c) ?? [])
+                  )
+                  const yaAsignados = new Set<string>()
+                  return sinCodigo.map(v => {
                     const editado = sugerenciasEditadas[v.id]
-                    const sugerido = editado !== undefined ? editado : sugerirCodigo(v, producto, todosCodigosUsados)
-                    return sugerido && !todosCodigosUsados.has(sugerido) ? { id: v.id, codigo: sugerido } : null
+                    const sugerido = editado !== undefined ? editado : sugerirCodigo(v, producto, codigosDeOtros)
+                    if (sugerido && !codigosDeOtros.has(sugerido) && !yaAsignados.has(sugerido)) {
+                      yaAsignados.add(sugerido)
+                      return { id: v.id, codigo: sugerido }
+                    }
+                    return null
                   }).filter((x): x is { id: string; codigo: string } => x !== null)
-                )
+                })
                 return todasSugerencias.length > 0 ? (
                   <div className="flex justify-between items-center pb-2 border-b border-gray-100">
                     <p className="text-xs text-gray-500">
@@ -535,7 +544,15 @@ function InventarioContent() {
                 ) : null
               })()}
 
-              {productosSinCodigo.map(({ producto, sinCodigo, conCodigo }) => (
+              {productosSinCodigo.map(({ producto, sinCodigo, conCodigo }) => {
+                // Códigos de otros productos (no de este) para detectar colisiones reales
+                const codigosDeOtros = new Set(
+                  productos.filter(p2 => p2.id !== producto.id)
+                    .flatMap(p2 => p2.variantes?.map(v => v.codigo_barras).filter((c): c is string => !!c) ?? [])
+                )
+                // Rastrear sugerencias ya asignadas a hermanas en este batch (evitar duplicados intra-producto)
+                const yaAsignados = new Set<string>()
+                return (
                 <div key={producto.id} className="border border-gray-100 rounded-lg p-3">
                   <p className="font-semibold text-sm text-gray-800 mb-2">{producto.nombre_base}</p>
 
@@ -553,10 +570,13 @@ function InventarioContent() {
                   {/* Variantes sin código con input editable */}
                   <div className="space-y-1.5">
                     {sinCodigo.map(v => {
-                      const sugerido = sugerirCodigo(v, producto, todosCodigosUsados)
+                      const sugerido = sugerirCodigo(v, producto, codigosDeOtros)
+                      // Si ya se asignó este código a una hermana en este batch → no sugerir de nuevo
+                      const sugeridoDisponible = sugerido && !yaAsignados.has(sugerido) ? sugerido : null
+                      if (sugeridoDisponible) yaAsignados.add(sugeridoDisponible)
                       const editado = sugerenciasEditadas[v.id]
-                      const valor = editado !== undefined ? editado : (sugerido ?? '')
-                      const colisiona = !!valor && todosCodigosUsados.has(valor)
+                      const valor = editado !== undefined ? editado : (sugeridoDisponible ?? '')
+                      const colisiona = !!valor && codigosDeOtros.has(valor)
                       return (
                         <div key={v.id} className="flex items-center gap-2">
                           <span className="text-xs text-gray-500 w-8 shrink-0 font-mono">
@@ -591,7 +611,8 @@ function InventarioContent() {
                     })}
                   </div>
                 </div>
-              ))}
+              )
+              })}
             </div>
           )}
 
@@ -656,6 +677,12 @@ function InventarioContent() {
                 const precioMax = variantesFiltradas.length ? Math.max(...variantesFiltradas.map(v => v.precio_venta)) : 0
                 const hayAlerta = variantesFiltradas.some(v => v.stock === 0 || v.stock <= v.stock_minimo)
                 const expandido = expandidos.has(producto.id)
+                // Detectar talles duplicados en este producto
+                const tallesContados = variantesFiltradas.reduce<Record<string, number>>((acc, v) => {
+                  acc[v.talle] = (acc[v.talle] || 0) + 1; return acc
+                }, {})
+                const tallesDuplicados = new Set(Object.entries(tallesContados).filter(([, c]) => c > 1).map(([t]) => t))
+                const hayTallesDuplicados = tallesDuplicados.size > 0
                 return [
                   // Fila padre (producto)
                   <tr
@@ -664,10 +691,15 @@ function InventarioContent() {
                     className="hover:bg-teal-50/40 transition-colors cursor-pointer group"
                   >
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {hayAlerta && <AlertTriangle size={13} className="text-orange-400 shrink-0" />}
                         <span className="font-semibold text-gray-800">{producto.nombre_base}</span>
                         <span className="text-xs text-gray-400">({variantesFiltradas.length} {variantesFiltradas.length === 1 ? 'talle' : 'talles'})</span>
+                        {hayTallesDuplicados && (
+                          <span className="text-xs bg-yellow-100 text-yellow-800 border border-yellow-300 px-1.5 py-0.5 rounded-full font-medium">
+                            ⚠ talles repetidos — contá en el local
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -706,10 +738,14 @@ function InventarioContent() {
                   ...(expandido ? variantesFiltradas.flatMap(v => {
                     const precioInvalido = v.precio_venta === 0 || v.precio_venta < v.precio_costo
                     const editandoEstaVariante = editandoPrecio?.varianteId === v.id
+                    const esDuplicado = tallesDuplicados.has(v.talle)
                     const rows = [
-                      <tr key={v.id} className="bg-gray-50/70 border-t-0 hover:bg-teal-50/30 transition-colors">
+                      <tr key={v.id} className={cn('border-t-0 hover:bg-teal-50/30 transition-colors', esDuplicado ? 'bg-yellow-50/60' : 'bg-gray-50/70')}>
                         <td className="pl-10 pr-4 py-2">
-                          <span className="text-sm text-gray-700 font-mono">{/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-gray-700 font-mono">{/^\d+$/.test(v.talle) ? `T${v.talle}` : v.talle}</span>
+                            {esDuplicado && <span className="text-xs text-yellow-700 bg-yellow-100 px-1 py-0.5 rounded font-medium">×{tallesContados[v.talle]}</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-2 text-gray-400 text-xs">—</td>
                         <td className="px-4 py-2 text-gray-400 text-xs">—</td>
