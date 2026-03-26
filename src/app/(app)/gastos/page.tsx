@@ -129,6 +129,21 @@ export default function GastosPage() {
   }
 
   const gruposRaiz = useMemo(() => categorias.filter(c => !c.padre_id), [categorias])
+
+  // Mostrar selector de proveedor solo cuando la categoría (o su grupo padre) es "Insumos"
+  const mostrarSelectorProveedor = useMemo(() => {
+    if (!categoriaId) return false
+    const cat = categorias.find(c => c.id === categoriaId)
+    if (!cat) return false
+    const nombre = cat.nombre.toLowerCase()
+    if (nombre.includes('insumo')) return true
+    if (cat.padre_id) {
+      const padre = categorias.find(c => c.id === cat.padre_id)
+      return (padre?.nombre.toLowerCase().includes('insumo')) ?? false
+    }
+    return false
+  }, [categoriaId, categorias])
+
   const subcategorias = useMemo(() => {
     const map = new Map<string, CategoriaGasto[]>()
     for (const c of categorias) {
@@ -235,13 +250,11 @@ export default function GastosPage() {
         notas: concepto.trim(),
       })
 
-      // Reducir deuda solo si el proveedor tiene deuda > 0
-      const marca = marcas.find(m => m.id === proveedorGastoId)
-      if (marca && marca.deuda_total > 0) {
-        const nuevaDeuda = Math.max(0, marca.deuda_total - montoNum)
-        await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', proveedorGastoId)
-        setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda } : m))
-      }
+      // Reducir deuda — leer valor actual de DB para evitar estado stale
+      const { data: marcaActual } = await supabase.from('marcas').select('deuda_total').eq('id', proveedorGastoId).single()
+      const nuevaDeuda = Math.max(0, (marcaActual?.deuda_total || 0) - montoNum)
+      await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', proveedorGastoId)
+      setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda } : m))
     }
 
     setGastos(prev => [data as unknown as Gasto, ...prev])
@@ -444,7 +457,7 @@ export default function GastosPage() {
                 <Label className="text-xs text-gray-500">Categoría</Label>
                 <select
                   value={categoriaId}
-                  onChange={e => setCategoriaId(e.target.value)}
+                  onChange={e => { setCategoriaId(e.target.value); setProveedorGastoId('') }}
                   className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
                 >
                   <option value="">Sin categoría</option>
@@ -520,28 +533,27 @@ export default function GastosPage() {
                 </div>
               )}
 
-              {/* Proveedor vinculado (opcional) */}
-              <div className="col-span-2">
-                <Label className="text-xs text-gray-500">Proveedor (opcional)</Label>
-                <select
-                  value={proveedorGastoId}
-                  onChange={e => setProveedorGastoId(e.target.value)}
-                  className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
-                >
-                  <option value="">Sin proveedor</option>
-                  {marcas.map(m => (
-                    <option key={m.id} value={m.id}>{m.nombre}</option>
-                  ))}
-                </select>
-                {proveedorGastoId && (
-                  <p className="text-[10px] text-teal-600 mt-1">
-                    El pago quedará registrado en el historial de este proveedor
-                    {marcas.find(m => m.id === proveedorGastoId)?.deuda_total ?? 0 > 0
-                      ? ' y reducirá su deuda.'
-                      : '.'}
-                  </p>
-                )}
-              </div>
+              {/* Proveedor vinculado — solo visible cuando categoría es Insumos */}
+              {mostrarSelectorProveedor && (
+                <div className="col-span-2">
+                  <Label className="text-xs text-gray-500">Proveedor</Label>
+                  <select
+                    value={proveedorGastoId}
+                    onChange={e => setProveedorGastoId(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-teal-400"
+                  >
+                    <option value="">Sin proveedor</option>
+                    {marcas.map(m => (
+                      <option key={m.id} value={m.id}>{m.nombre}</option>
+                    ))}
+                  </select>
+                  {proveedorGastoId && (
+                    <p className="text-[10px] text-teal-600 mt-1">
+                      El pago quedará registrado en el historial de este proveedor y reducirá su deuda.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="col-span-2">
                 <Label className="text-xs text-gray-500">Notas (opcional)</Label>
