@@ -193,7 +193,7 @@ async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
   iframe.style.left = '-9999px'
   iframe.style.top = '-9999px'
   iframe.style.width = '210mm'
-  iframe.style.height = '297mm'
+  iframe.style.height = '10000px'
   document.body.appendChild(iframe)
 
   iframe.srcdoc = html
