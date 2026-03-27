@@ -153,6 +153,15 @@ function guardarDetalleNuevo(tipoPrendaId: string, detalle: string): void {
   } catch { /* ignore */ }
 }
 
+function borrarDetalleGuardado(tipoPrendaId: string, detalle: string): string[] {
+  try {
+    const actuales = cargarDetallesGuardados(tipoPrendaId)
+    const nuevos = actuales.filter(d => d !== detalle)
+    localStorage.setItem(`inv:detalles:${tipoPrendaId}`, JSON.stringify(nuevos))
+    return nuevos
+  } catch { return [] }
+}
+
 // ── Componente principal ───────────────────────────────────────
 export default function NuevoProductoPage() {
   const router = useRouter()
@@ -1306,18 +1315,34 @@ export default function NuevoProductoPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {detallesDisponibles.map(d => (
-                      <button
+                      <div
                         key={d}
-                        onClick={() => setDetalleLibre(detalleLibre === d ? '' : d)}
-                        className="py-1.5 px-3 rounded-2xl text-sm font-semibold border transition-all active:scale-95"
+                        className="flex items-center rounded-2xl border transition-all"
                         style={{
                           background: detalleLibre === d ? 'rgba(78,195,189,0.12)' : 'white',
                           borderColor: detalleLibre === d ? '#4EC3BD' : '#e5e7eb',
-                          color: detalleLibre === d ? '#0d9488' : '#6b7280',
                         }}
                       >
-                        {d}
-                      </button>
+                        <button
+                          onClick={() => setDetalleLibre(detalleLibre === d ? '' : d)}
+                          className="py-1.5 pl-3 pr-1 text-sm font-semibold"
+                          style={{ color: detalleLibre === d ? '#0d9488' : '#6b7280' }}
+                        >
+                          {d}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (tipoPrendaObj) {
+                              const nuevos = borrarDetalleGuardado(tipoPrendaObj.id, d)
+                              setDetallesDisponibles(nuevos)
+                              if (detalleLibre === d) setDetalleLibre('')
+                            }
+                          }}
+                          className="pr-2 pl-0.5 py-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
                     ))}
                     {!mostrarInputNuevoDetalle && (
                       <button
