@@ -66,7 +66,7 @@ interface TalleSeleccion {
   precioVenta: string
 }
 
-const MARGEN_SUGERIDO = 2.5
+const MARGEN_SUGERIDO = 2.2
 
 interface ProductoExistente {
   id: string
@@ -433,10 +433,12 @@ export default function NuevoProductoPage() {
       const todos = [...iniciales]
       guardados.forEach(d => { if (!todos.includes(d)) todos.push(d) })
       setDetallesDisponibles(todos)
+    } else if (modoLibre) {
+      setDetallesDisponibles(cargarDetallesGuardados('__libre__'))
     } else {
       setDetallesDisponibles([])
     }
-  }, [tipoPrendaObj])
+  }, [tipoPrendaObj, modoLibre])
 
   // ── Generación de barcode ──────────────────────────────────────
   function calcularPrefijoCodigo(): string {
@@ -798,6 +800,10 @@ export default function NuevoProductoPage() {
       setLoteActual([])
       if (cargados.length > 0) toast.success(`${cargados.length} artículo${cargados.length > 1 ? 's' : ''} guardados correctamente`)
     }
+    // Invalidar caches para que inventario, POS y etiquetas muestren los nuevos productos
+    ;['inv:datos:v4', 'pos:variantes:v2', 'pos:dialog', 'prov:ingreso', 'etiq:prods'].forEach(k => {
+      try { localStorage.removeItem('cache:' + k) } catch { /* ignore */ }
+    })
     await cargarTodo()
     setLoadingConfirmar(false)
     setConfirmProgress(null)
@@ -1306,7 +1312,7 @@ export default function NuevoProductoPage() {
               )}
 
               {/* Detalle (chips con historial) */}
-              {!modoLibre && builderTipoOk && (
+              {(builderTipoOk || modoLibre) && (
                 <div className="tk-slide-forward space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="h-px flex-1 bg-gray-100" />
@@ -1332,11 +1338,9 @@ export default function NuevoProductoPage() {
                         </button>
                         <button
                           onClick={() => {
-                            if (tipoPrendaObj) {
-                              const nuevos = borrarDetalleGuardado(tipoPrendaObj.id, d)
-                              setDetallesDisponibles(nuevos)
-                              if (detalleLibre === d) setDetalleLibre('')
-                            }
+                            const nuevos = borrarDetalleGuardado(tipoPrendaObj?.id || '__libre__', d)
+                            setDetallesDisponibles(nuevos)
+                            if (detalleLibre === d) setDetalleLibre('')
                           }}
                           className="pr-2 pl-0.5 py-1.5 text-gray-300 hover:text-red-400 transition-colors"
                         >
@@ -1362,7 +1366,7 @@ export default function NuevoProductoPage() {
                         onKeyDown={e => {
                           if (e.key === 'Enter' && inputNuevoDetalle.trim()) {
                             const cap = inputNuevoDetalle.trim().replace(/\b\w/g, c => c.toUpperCase())
-                            if (tipoPrendaObj) guardarDetalleNuevo(tipoPrendaObj.id, cap)
+                            guardarDetalleNuevo(tipoPrendaObj?.id || '__libre__', cap)
                             setDetallesDisponibles(prev => prev.includes(cap) ? prev : [...prev, cap])
                             setDetalleLibre(cap)
                             setInputNuevoDetalle('')
@@ -1378,7 +1382,7 @@ export default function NuevoProductoPage() {
                         onClick={() => {
                           if (!inputNuevoDetalle.trim()) { setMostrarInputNuevoDetalle(false); return }
                           const cap = inputNuevoDetalle.trim().replace(/\b\w/g, c => c.toUpperCase())
-                          if (tipoPrendaObj) guardarDetalleNuevo(tipoPrendaObj.id, cap)
+                          guardarDetalleNuevo(tipoPrendaObj?.id || '__libre__', cap)
                           setDetallesDisponibles(prev => prev.includes(cap) ? prev : [...prev, cap])
                           setDetalleLibre(cap)
                           setInputNuevoDetalle('')
