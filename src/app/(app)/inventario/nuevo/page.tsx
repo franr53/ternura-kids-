@@ -195,10 +195,12 @@ export default function NuevoProductoPage() {
   const [nuevoTipoAbrev, setNuevoTipoAbrev] = useState('')
   const [nuevoTipoAbrevManual, setNuevoTipoAbrevManual] = useState(false)
   const [loadingNuevoTipo, setLoadingNuevoTipo] = useState(false)
+  const [borrandoTipoId, setBorrandoTipoId] = useState<string | null>(null)
   const [modalColegioAbierto, setModalColegioAbierto] = useState(false)
   const [nuevoColegioNombre, setNuevoColegioNombre] = useState('')
   const [nuevoColegioAbrev, setNuevoColegioAbrev] = useState('')
   const [loadingNuevoColegio, setLoadingNuevoColegio] = useState(false)
+  const [borrandoColegioId, setBorrandoColegioId] = useState<string | null>(null)
   // estados legacy (mantenidos para compatibilidad con partes no modificadas)
   const [generoSeleccionado, setGeneroSeleccionado] = useState<GeneroSeleccionado>(null)
   const [tipoPrenda, setTipoPrenda] = useState('')
@@ -432,8 +434,11 @@ export default function NuevoProductoPage() {
     const tipoAbrev = tipoPrendaObj?.abreviatura || generarPrefijo(tipoPrendaObj?.nombre || '')
     const catAbrev  = tipo ? subcatParaCategoria(tipo.nombre) : 'XX'
     const marcaAbrev = marca ? abreviaturaMarca(marca.nombre) : 'XX'
+    const detalleAbrev = detalleLibre.trim()
+      ? detalleLibre.trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/g, '').slice(0, 3)
+      : ''
     const colegioAbrev = esColegial && colegioObj ? colegioObj.abreviatura : ''
-    return `${tipoAbrev}${catAbrev}${marcaAbrev}${colegioAbrev}`
+    return `${tipoAbrev}${catAbrev}${marcaAbrev}${detalleAbrev}${colegioAbrev}`
   }
 
   async function calcularBarcodeParaTalle(talle: string): Promise<string> {
@@ -632,6 +637,34 @@ export default function NuevoProductoPage() {
     setColegioObj(data as Colegio)
     setModalColegioAbierto(false)
     setNuevoColegioNombre(''); setNuevoColegioAbrev('')
+  }
+
+  // ── Eliminar Tipo de Prenda ────────────────────────────────────
+  async function eliminarTipoPrenda(id: string) {
+    setBorrandoTipoId(id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('tipo_prenda_id', id)
+    if (error) { toast.error(`Error: ${error.message}`); setBorrandoTipoId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} lo usan`); setBorrandoTipoId(null); return }
+    const { error: err2 } = await supabase.from('tipos_prenda').update({ activo: false }).eq('id', id)
+    if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoTipoId(null); return }
+    if (tipoPrendaObj?.id === id) setTipoPrendaObj(null)
+    await cargarTodo()
+    setBorrandoTipoId(null)
+    toast.success('Tipo eliminado')
+  }
+
+  // ── Eliminar Colegio ───────────────────────────────────────────
+  async function eliminarColegio(id: string) {
+    setBorrandoColegioId(id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('colegio_id', id)
+    if (error) { toast.error(`Error: ${error.message}`); setBorrandoColegioId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} lo usan`); setBorrandoColegioId(null); return }
+    const { error: err2 } = await supabase.from('colegios').update({ activo: false }).eq('id', id)
+    if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoColegioId(null); return }
+    if (colegioObj?.id === id) setColegioObj(null)
+    await cargarTodo()
+    setBorrandoColegioId(null)
+    toast.success('Colegio eliminado')
   }
 
   // ── Builder: confirmar nombre ──────────────────────────────────
@@ -2227,14 +2260,33 @@ export default function NuevoProductoPage() {
         >
           <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl tk-slide-forward">
             <div className="px-5 pt-5 pb-3 flex items-center justify-between">
-              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Nuevo tipo de prenda</h3>
+              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Tipos de prenda</h3>
               <button onClick={() => setModalTipoAbierto(false)} className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors">
                 <X size={14} className="text-gray-500" />
               </button>
             </div>
-            <div className="px-5 pb-5 space-y-3">
+            {/* Lista existente */}
+            {tiposPrenda.length > 0 && (
+              <div className="px-5 pb-3 max-h-40 overflow-y-auto space-y-1">
+                {tiposPrenda.map(t => (
+                  <div key={t.id} className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-gray-50">
+                    <span className="text-sm text-gray-700">{t.nombre} <span className="font-mono text-xs text-gray-400">{t.abreviatura}</span></span>
+                    <button
+                      onClick={() => eliminarTipoPrenda(t.id)}
+                      disabled={borrandoTipoId === t.id}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                    >
+                      {borrandoTipoId === t.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="px-5 pb-1"><div className="h-px bg-gray-100" /></div>
+            <div className="px-5 pb-5 pt-3 space-y-3">
+              <p className="text-xs font-semibold text-gray-500">Agregar nuevo</p>
               <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Nombre</p>
+                <p className="text-xs text-gray-400 mb-1.5">Nombre</p>
                 <Input
                   value={nuevoTipoNombre}
                   onChange={e => {
@@ -2247,11 +2299,10 @@ export default function NuevoProductoPage() {
                   }}
                   placeholder="Ej: Remera Sin Manga"
                   className="h-10 rounded-xl border-gray-200 text-sm"
-                  autoFocus
                 />
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Abreviatura (3-4 letras)</p>
+                <p className="text-xs text-gray-400 mb-1.5">Abreviatura (3-4 letras)</p>
                 <Input
                   value={nuevoTipoAbrev}
                   onChange={e => {
@@ -2298,24 +2349,42 @@ export default function NuevoProductoPage() {
         >
           <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl tk-slide-forward">
             <div className="px-5 pt-5 pb-3 flex items-center justify-between">
-              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Nuevo colegio</h3>
+              <h3 className="text-lg font-black text-gray-900" style={{ fontFamily: 'var(--font-display)' }}>Colegios</h3>
               <button onClick={() => setModalColegioAbierto(false)} className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors">
                 <X size={14} className="text-gray-500" />
               </button>
             </div>
-            <div className="px-5 pb-5 space-y-3">
+            {/* Lista existente */}
+            {colegios.length > 0 && (
+              <div className="px-5 pb-3 max-h-40 overflow-y-auto space-y-1">
+                {colegios.map(c => (
+                  <div key={c.id} className="flex items-center justify-between py-1.5 px-3 rounded-xl bg-gray-50">
+                    <span className="text-sm text-gray-700">{c.nombre} <span className="font-mono text-xs text-gray-400">{c.abreviatura}</span></span>
+                    <button
+                      onClick={() => eliminarColegio(c.id)}
+                      disabled={borrandoColegioId === c.id}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                    >
+                      {borrandoColegioId === c.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="px-5 pb-1"><div className="h-px bg-gray-100" /></div>
+            <div className="px-5 pb-5 pt-3 space-y-3">
+              <p className="text-xs font-semibold text-gray-500">Agregar nuevo</p>
               <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Nombre</p>
+                <p className="text-xs text-gray-400 mb-1.5">Nombre</p>
                 <Input
                   value={nuevoColegioNombre}
                   onChange={e => setNuevoColegioNombre(e.target.value)}
                   placeholder="Ej: San José"
                   className="h-10 rounded-xl border-gray-200 text-sm"
-                  autoFocus
                 />
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1.5">Abreviatura (3-4 letras)</p>
+                <p className="text-xs text-gray-400 mb-1.5">Abreviatura (3-4 letras)</p>
                 <Input
                   value={nuevoColegioAbrev}
                   onChange={e => setNuevoColegioAbrev(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
