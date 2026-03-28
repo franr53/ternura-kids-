@@ -253,30 +253,38 @@ async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
     const margin = 5
 
     const contentW = pageW - margin * 2
-    const imgH = (canvas.height * contentW) / canvas.width
-    const contentH = pageH - margin * 2
+    const imgH = (canvas.height * contentW) / canvas.width  // total height in mm
+    const contentH = pageH - margin * 2                      // usable height per page (mm)
 
-    // 3. Multi-page: slice canvas into pages
-    let yOffset = 0
+    // 3. Snap cuts to row boundaries so labels are never split across pages
+    const numRows = Math.ceil(items.length / 3)
+    const rowHeightMm = numRows > 0 ? imgH / numRows : contentH
+    const rowsPerPage = Math.max(1, Math.floor(contentH / rowHeightMm))
+    const pageHeightMm = rowsPerPage * rowHeightMm
+
+    let yOffsetMm = 0
     let pageNum = 0
 
-    while (yOffset < imgH) {
+    while (yOffsetMm < imgH - 0.5) {
       if (pageNum > 0) pdf.addPage()
 
-      const sourceY = (yOffset / imgH) * canvas.height
-      const sliceH = Math.min((contentH / imgH) * canvas.height, canvas.height - sourceY)
+      const sliceMm = Math.min(pageHeightMm, imgH - yOffsetMm)
+      const sourceY = Math.round((yOffsetMm / imgH) * canvas.height)
+      const sliceH = Math.round((sliceMm / imgH) * canvas.height)
 
       const pageCanvas = iframeDoc.createElement('canvas')
       pageCanvas.width = canvas.width
       pageCanvas.height = sliceH
       const ctx = pageCanvas.getContext('2d')!
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, sliceH)
       ctx.drawImage(canvas, 0, sourceY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
 
       const pageImg = pageCanvas.toDataURL('image/jpeg', 0.95)
       const drawH = (sliceH * contentW) / canvas.width
       pdf.addImage(pageImg, 'JPEG', margin, margin, contentW, drawH)
 
-      yOffset += contentH
+      yOffsetMm += pageHeightMm
       pageNum++
     }
 
