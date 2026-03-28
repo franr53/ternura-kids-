@@ -15,6 +15,30 @@ import { Wallet, Plus, Lock, Unlock, History, ChevronDown, ChevronRight, X, Rece
 import { formatPrecio, cn } from '@/lib/utils'
 import Link from 'next/link'
 
+interface VentaDetalle {
+  id: string
+  creado_en: string
+  cliente_nombre: string | null
+  pagos: { metodo: string; monto: number }[]
+  items: string
+  total: number
+}
+
+interface AbonoDetalle {
+  id: string
+  creado_en: string
+  cliente_nombre: string
+  monto: number
+  metodo_pago: string
+}
+
+interface CajaDetalle {
+  ventas: VentaDetalle[]
+  abonos: AbonoDetalle[]
+  gastos: { concepto: string; monto: number; metodo_pago: string; fuente_pago?: string }[]
+  loading: boolean
+}
+
 interface GastoDia {
   id: string
   concepto: string
@@ -145,6 +169,7 @@ export default function CajaPage() {
   const [loadingAnteriores, setLoadingAnteriores] = useState(false)
   const [cajaExpandida, setCajaExpandida] = useState<string | null>(null)
   const [periodoAnteriores, setPeriodoAnteriores] = useState(7)
+  const [cajaDetalle, setCajaDetalle] = useState<Record<string, CajaDetalle>>({})
 
   async function abrirCaja() {
     const monto = parseFloat(montoInicial) || 0
@@ -243,6 +268,67 @@ export default function CajaPage() {
     toast.success('Retiro registrado')
   }
 
+
+  async function cargarDetalleCaja(cajaId: string, fecha: string) {
+    if (cajaDetalle[cajaId] && !cajaDetalle[cajaId].loading) return
+    setCajaDetalle(prev => ({ ...prev, [cajaId]: { ventas: [], abonos: [], gastos: [], loading: true } }))
+
+    const nextDay = new Date(fecha + 'T00:00:00')
+    nextDay.setDate(nextDay.getDate() + 1)
+    const nextDayStr = nextDay.toISOString().split('T')[0]
+
+    const [{ data: ventasData }, { data: abonosData }, { data: gastosData }] = await Promise.all([
+      supabase
+        .from('ventas')
+        .select('id, creado_en, cliente:clientes(nombre), venta_pagos(metodo, monto), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base)))')
+        .gte('creado_en', `${fecha}T00:00:00`)
+        .lt('creado_en', `${nextDayStr}T00:00:00`)
+        .neq('estado', 'anulada')
+        .order('creado_en'),
+      supabase
+        .from('fiado_movimientos')
+        .select('id, creado_en, monto, metodo_pago, cliente:clientes(nombre)')
+        .eq('tipo', 'abono')
+        .gte('creado_en', `${fecha}T00:00:00`)
+        .lt('creado_en', `${nextDayStr}T00:00:00`)
+        .order('creado_en'),
+      supabase
+        .from('gastos')
+        .select('concepto, monto, metodo_pago, fuente_pago')
+        .eq('fecha', fecha),
+    ])
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ventas: VentaDetalle[] = (ventasData || []).map((v: any) => ({
+      id: v.id,
+      creado_en: v.creado_en,
+      cliente_nombre: v.cliente?.nombre || null,
+      pagos: (v.venta_pagos || []).map((p: { metodo: string; monto: number }) => ({ metodo: p.metodo, monto: p.monto })),
+      items: (v.venta_items || []).map((i: { cantidad: number; variante?: { talle?: string; producto?: { nombre_base?: string } } }) =>
+        `${i.variante?.producto?.nombre_base || '?'} ${i.variante?.talle || ''} x${i.cantidad}`
+      ).join(', ') || '—',
+      total: (v.venta_pagos || []).reduce((s: number, p: { monto: number }) => s + p.monto, 0),
+    }))
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const abonos: AbonoDetalle[] = (abonosData || []).map((a: any) => ({
+      id: a.id,
+      creado_en: a.creado_en,
+      cliente_nombre: a.cliente?.nombre || '—',
+      monto: a.monto,
+      metodo_pago: a.metodo_pago || 'efectivo',
+    }))
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gastos = (gastosData || []).map((g: any) => ({
+      concepto: g.concepto,
+      monto: g.monto,
+      metodo_pago: g.metodo_pago,
+      fuente_pago: g.fuente_pago,
+    }))
+
+    setCajaDetalle(prev => ({ ...prev, [cajaId]: { ventas, abonos, gastos, loading: false } }))
+  }
 
   async function verAnteriores(dias?: number) {
     setMostrarAnteriores(true)
@@ -584,7 +670,11 @@ export default function CajaPage() {
                 return (
                   <div key={c.id} className={cn('rounded-2xl border overflow-hidden transition-all', abierta ? 'border-teal-200' : 'border-gray-100')}>
                     <button
-                      onClick={() => setCajaExpandida(abierta ? null : c.id)}
+                      onClick={() => {
+                        const nueva = abierta ? null : c.id
+                        setCajaExpandida(nueva)
+                        if (nueva) cargarDetalleCaja(c.id, c.fecha)
+                      }}
                       className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left"
                     >
                       <div className="flex-1">
@@ -606,42 +696,140 @@ export default function CajaPage() {
                       {abierta ? <ChevronDown size={14} className="text-gray-300 shrink-0" /> : <ChevronRight size={14} className="text-gray-300 shrink-0" />}
                     </button>
 
-                    {abierta && (
-                      <div className="px-4 pb-4 pt-1 border-t border-gray-50 bg-teal-50/30 space-y-1.5">
-                        {[
-                          { label: 'Fondo inicial', value: c.monto_inicial },
-                          { label: 'Efectivo',      value: c.total_efectivo },
-                          { label: 'Transferencia', value: c.total_transferencia },
-                          { label: 'Débito',        value: c.total_debito },
-                          { label: 'Crédito',       value: c.total_credito },
-                          { label: 'Fiado',         value: c.total_fiado },
-                          { label: 'Retiros',       value: -(c.total_retiros || 0) },
-                        ].map(({ label, value }) => (
-                          <div key={label} className="flex justify-between text-sm">
-                            <span className="text-gray-500">{label}</span>
-                            <span className={cn('font-medium', (value || 0) < 0 ? 'text-red-500' : 'text-gray-800')}>
-                              {(value || 0) < 0 ? `− ${formatPrecio(Math.abs(value || 0))}` : formatPrecio(value || 0)}
-                            </span>
+                    {abierta && (() => {
+                      const det = cajaDetalle[c.id]
+                      const METODO_COLOR: Record<string, string> = {
+                        efectivo: 'bg-green-100 text-green-700',
+                        transferencia: 'bg-blue-100 text-blue-700',
+                        debito: 'bg-purple-100 text-purple-700',
+                        credito: 'bg-orange-100 text-orange-700',
+                        fiado: 'bg-red-100 text-red-600',
+                      }
+                      const METODO_LABEL: Record<string, string> = {
+                        efectivo: 'Efectivo', transferencia: 'Transf.', debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
+                      }
+                      return (
+                        <div className="border-t border-gray-100">
+                          {/* Totales resumen */}
+                          <div className="px-4 py-3 bg-gray-50 space-y-1.5">
+                            {[
+                              { label: 'Fondo inicial', value: c.monto_inicial, color: '' },
+                              { label: 'Efectivo', value: c.total_efectivo, color: 'text-green-700' },
+                              { label: 'Transferencia', value: c.total_transferencia, color: 'text-blue-700' },
+                              { label: 'Débito', value: c.total_debito, color: 'text-purple-700' },
+                              { label: 'Crédito', value: c.total_credito, color: 'text-orange-600' },
+                              { label: 'Fiado', value: c.total_fiado, color: 'text-red-500' },
+                              ...(c.total_cobros > 0 ? [{ label: 'Cobros deuda', value: c.total_cobros, color: 'text-teal-600' }] : []),
+                              { label: 'Retiros', value: -(c.total_retiros || 0), color: 'text-red-500' },
+                            ].filter(r => (r.value || 0) !== 0).map(({ label, value, color }) => (
+                              <div key={label} className="flex justify-between text-xs">
+                                <span className="text-gray-500">{label}</span>
+                                <span className={cn('font-semibold', color || 'text-gray-800')}>
+                                  {(value || 0) < 0 ? `− ${formatPrecio(Math.abs(value || 0))}` : formatPrecio(value || 0)}
+                                </span>
+                              </div>
+                            ))}
+                            <Separator className="my-1" />
+                            <div className="flex justify-between text-xs font-bold">
+                              <span>Efectivo en caja</span>
+                              <span className="text-green-700">{formatPrecio((c.monto_inicial || 0) + (c.total_efectivo || 0) - (c.total_retiros || 0))}</span>
+                            </div>
+                            {c.notas_cierre && (
+                              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                                <span className="font-semibold">Notas:</span> {c.notas_cierre}
+                              </p>
+                            )}
                           </div>
-                        ))}
-                        <Separator className="my-1" />
-                        <div className="flex justify-between text-sm font-bold">
-                          <span>Total ventas</span>
-                          <span className="text-teal-700">{formatPrecio(tot)}</span>
+
+                          {/* Transacciones */}
+                          {det?.loading && (
+                            <p className="text-center text-xs text-gray-400 py-4">Cargando transacciones...</p>
+                          )}
+                          {det && !det.loading && (
+                            <div className="px-4 pb-4 pt-3 space-y-4">
+                              {/* Ventas */}
+                              {det.ventas.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Ventas ({det.ventas.length})</p>
+                                  <div className="space-y-1.5">
+                                    {det.ventas.map(v => (
+                                      <div key={v.id} className="rounded-xl border border-gray-100 px-3 py-2 bg-white">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-semibold text-gray-700 truncate">
+                                              {v.cliente_nombre || 'Sin cliente'}
+                                              <span className="text-gray-400 font-normal ml-1.5">
+                                                {new Date(v.creado_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                              </span>
+                                            </p>
+                                            <p className="text-[10px] text-gray-400 truncate mt-0.5">{v.items}</p>
+                                          </div>
+                                          <div className="text-right shrink-0">
+                                            <p className="text-xs font-bold text-gray-800">{formatPrecio(v.total)}</p>
+                                            <div className="flex gap-1 mt-0.5 justify-end flex-wrap">
+                                              {v.pagos.map((p, i) => (
+                                                <span key={i} className={cn('text-[9px] font-semibold px-1.5 py-0.5 rounded-full', METODO_COLOR[p.metodo] || 'bg-gray-100 text-gray-600')}>
+                                                  {METODO_LABEL[p.metodo] || p.metodo}
+                                                  {v.pagos.length > 1 && ` ${formatPrecio(p.monto)}`}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Cobros de deuda */}
+                              {det.abonos.length > 0 && (
+                                <div>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Cobros de deuda ({det.abonos.length})</p>
+                                  <div className="space-y-1.5">
+                                    {det.abonos.map(a => (
+                                      <div key={a.id} className="rounded-xl border border-teal-100 px-3 py-2 bg-teal-50/40 flex items-center justify-between">
+                                        <div>
+                                          <p className="text-xs font-semibold text-gray-700">{a.cliente_nombre}</p>
+                                          <p className="text-[10px] text-gray-400">
+                                            {new Date(a.creado_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+                                          </p>
+                                        </div>
+                                        <div className="text-right">
+                                          <p className="text-xs font-bold text-teal-700">{formatPrecio(a.monto)}</p>
+                                          <span className={cn('text-[9px] font-semibold px-1.5 py-0.5 rounded-full', METODO_COLOR[a.metodo_pago] || 'bg-gray-100 text-gray-600')}>
+                                            {METODO_LABEL[a.metodo_pago] || a.metodo_pago}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Gastos */}
+                              {det.gastos.filter(g => g.fuente_pago !== 'retiro_anterior').length > 0 && (
+                                <div>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Gastos del día</p>
+                                  <div className="space-y-1.5">
+                                    {det.gastos.filter(g => g.fuente_pago !== 'retiro_anterior').map((g, i) => (
+                                      <div key={i} className="rounded-xl border border-red-100 px-3 py-2 bg-red-50/30 flex items-center justify-between">
+                                        <p className="text-xs text-gray-600">{g.concepto}</p>
+                                        <p className="text-xs font-bold text-red-600">− {formatPrecio(g.monto)}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {det.ventas.length === 0 && det.abonos.length === 0 && det.gastos.length === 0 && (
+                                <p className="text-center text-xs text-gray-400 py-2">Sin transacciones registradas</p>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex justify-between text-sm font-bold">
-                          <span>Efectivo en caja</span>
-                          <span className="text-green-600">
-                            {formatPrecio((c.monto_inicial || 0) + (c.total_efectivo || 0) - (c.total_retiros || 0))}
-                          </span>
-                        </div>
-                        {c.notas_cierre && (
-                          <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
-                            <p className="text-xs text-amber-700"><span className="font-semibold">Notas:</span> {c.notas_cierre}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      )
+                    })()}
                   </div>
                 )
               })}
