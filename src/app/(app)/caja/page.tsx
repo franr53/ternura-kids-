@@ -130,6 +130,8 @@ export default function CajaPage() {
   }, [])
 
   const [montoInicial, setMontoInicial] = useState('')
+  const [editandoMontoInicial, setEditandoMontoInicial] = useState(false)
+  const [montoInicialEdit, setMontoInicialEdit] = useState('')
   const [abriendo, setAbriendo] = useState(false)
   const [cerrando, setCerrando] = useState(false)
   const [montoRetiro, setMontoRetiro] = useState('')
@@ -189,6 +191,16 @@ export default function CajaPage() {
     toast.success('Caja reabierta')
     setCaja(prev => prev ? { ...prev, estado: 'abierta', cerrada_en: undefined } : null)
     setAbriendo(false)
+  }
+
+  async function guardarMontoInicial() {
+    if (!caja) return
+    const monto = Math.round(parseFloat(montoInicialEdit) || 0)
+    const { error } = await supabase.from('cajas').update({ monto_inicial: monto }).eq('id', caja.id)
+    if (error) { toast.error('Error al guardar: ' + error.message); return }
+    setCaja(prev => prev ? { ...prev, monto_inicial: monto } : null)
+    setEditandoMontoInicial(false)
+    toast.success('Fondo inicial actualizado')
   }
 
   async function cerrarCaja() {
@@ -326,7 +338,30 @@ export default function CajaPage() {
             <Card>
               <CardContent className="pt-4 pb-4">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Fondo inicial</p>
-                <p className="text-3xl font-bold text-gray-800 mt-1">{formatPrecio(caja.monto_inicial)}</p>
+                {editandoMontoInicial ? (
+                  <div className="flex gap-2 mt-1 items-center">
+                    <Input
+                      type="number"
+                      value={montoInicialEdit}
+                      onChange={e => setMontoInicialEdit(e.target.value)}
+                      className="text-xl font-bold h-9"
+                      autoFocus
+                      onKeyDown={async e => {
+                        if (e.key === 'Enter') await guardarMontoInicial()
+                        if (e.key === 'Escape') setEditandoMontoInicial(false)
+                      }}
+                    />
+                    <Button size="sm" className="bg-teal-500 hover:bg-teal-600 shrink-0" onClick={guardarMontoInicial}>Ok</Button>
+                  </div>
+                ) : (
+                  <p
+                    className="text-3xl font-bold text-gray-800 mt-1 cursor-pointer hover:text-teal-600 transition-colors"
+                    title="Clic para editar"
+                    onClick={() => { setMontoInicialEdit(String(caja.monto_inicial || 0)); setEditandoMontoInicial(true) }}
+                  >
+                    {formatPrecio(caja.monto_inicial)}
+                  </p>
+                )}
               </CardContent>
             </Card>
           </div>
