@@ -183,28 +183,80 @@ function injectScript(doc: Document, src: string): Promise<void> {
   })
 }
 
-async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
-  const html = generarHTMLEtiquetas(items)
+// Cuántas filas de 3 etiquetas caben por página A4 (~30mm por fila, margin 5mm)
+const ROWS_PER_PAGE = 8  // 8 filas × 3 col = 24 etiquetas por página
+const ITEMS_PER_PAGE = ROWS_PER_PAGE * 3
 
-  // Render in hidden iframe so JsBarcode runs and Tailwind CSS 4 oklch() colors
-  // don't interfere with html2canvas
+async function renderPageToCanvas(
+  items: EtiquetaData[],
+  iframeDoc: Document,
+  iframeWin: Window,
+): Promise<HTMLCanvasElement> {
+  // Reemplazar contenido del contenedor con las etiquetas de esta página
+  const contenedor = iframeDoc.querySelector('.contenedor') as HTMLElement
+  contenedor.innerHTML = ''
+
+  let barcodeIndex = 0
+  items.forEach(item => {
+    const bcId = `bc-${barcodeIndex++}`
+    const nombre = (item.nombre || '').toUpperCase()
+    const marca = (item.marca || '').toUpperCase()
+    const div = iframeDoc.createElement('div')
+    div.className = 'etiqueta'
+    div.innerHTML = `
+      <div class="acento"></div>
+      <div class="cuerpo">
+        <div class="nombre">${nombre}</div>
+        <div class="sub">${marca ? `<span class="marca">${marca}</span>` : ''}<span class="talle-badge">T${item.talle}</span></div>
+        ${item.codigoBarras ? `<div class="barcode-wrap"><svg id="${bcId}" data-barcode="${item.codigoBarras}"></svg></div>` : '<div class="barcode-placeholder"></div>'}
+        <div class="precios">
+          <div class="precio-efec">${formatPrecio(item.precioEfectivo)}<span class="efec-label">efec</span></div>
+          <div class="precio-lista">L: ${formatPrecio(item.precioLista)}</div>
+        </div>
+      </div>`
+    contenedor.appendChild(div)
+  })
+
+  // Renderizar barcodes con JsBarcode
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const JsBarcode = (iframeWin as any).JsBarcode
+  if (JsBarcode) {
+    iframeDoc.querySelectorAll('[data-barcode]').forEach(el => {
+      try {
+        JsBarcode(el, el.getAttribute('data-barcode'), {
+          format: 'CODE128', width: 1.5, height: 38, displayValue: true,
+          fontSize: 8, margin: 1, lineColor: '#000', background: '#fff',
+        })
+      } catch (e) { console.error('Barcode error:', e) }
+    })
+  }
+  await new Promise(r => setTimeout(r, 200))
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const canvas = await (iframeWin as any).html2canvas(contenedor, {
+    scale: 2, useCORS: true, logging: false,
+  })
+  return canvas
+}
+
+async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
+  // Usamos una plantilla vacía para el iframe base (sin etiquetas aún)
+  const htmlBase = generarHTMLEtiquetas([])
+
   const iframe = document.createElement('iframe')
   iframe.style.position = 'fixed'
   iframe.style.left = '-9999px'
   iframe.style.top = '-9999px'
   iframe.style.width = '210mm'
-  iframe.style.height = '10000px'
+  iframe.style.height = '297mm'
   document.body.appendChild(iframe)
 
-  iframe.srcdoc = html
+  iframe.srcdoc = htmlBase
 
   await new Promise<void>((resolve) => {
     iframe.onload = () => resolve()
     setTimeout(resolve, 3000)
   })
-
-  // Extra delay for barcode rendering
-  await new Promise(r => setTimeout(r, 800))
 
   const iframeWin = iframe.contentWindow
   const iframeDoc = iframe.contentDocument || iframeWin?.document
@@ -213,13 +265,6 @@ async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
     throw new Error('No se pudo crear el iframe para el PDF')
   }
 
-  const contenedor = iframeDoc.querySelector('.contenedor') as HTMLElement | null
-  if (!contenedor) {
-    document.body.removeChild(iframe)
-    throw new Error('No se encontró el contenedor de etiquetas')
-  }
-
-  // Inject html2canvas + jsPDF into the iframe (isolated from parent page)
   try {
     await injectScript(iframeDoc, HTML2CANVAS_CDN)
     await injectScript(iframeDoc, JSPDF_CDN)
@@ -230,62 +275,31 @@ async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const win = iframeWin as any
-  const html2canvas = win.html2canvas
-  const jsPDF = win.jspdf?.jsPDF
-
-  if (!html2canvas || !jsPDF) {
+  if (!win.html2canvas || !win.jspdf?.jsPDF) {
     document.body.removeChild(iframe)
     throw new Error('html2canvas o jsPDF no disponibles')
   }
 
-  try {
-    // 1. Render to canvas
-    const canvas = await html2canvas(contenedor, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-    })
+  const jsPDF = win.jspdf.jsPDF
 
-    // 2. Create PDF (A4: 210x297mm)
+  try {
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
     const pageW = 210
-    const pageH = 297
     const margin = 5
-
     const contentW = pageW - margin * 2
-    const imgH = (canvas.height * contentW) / canvas.width  // total height in mm
-    const contentH = pageH - margin * 2                      // usable height per page (mm)
 
-    // 3. Snap cuts to row boundaries so labels are never split across pages
-    const numRows = Math.ceil(items.length / 3)
-    const rowHeightMm = numRows > 0 ? imgH / numRows : contentH
-    const rowsPerPage = Math.max(1, Math.floor(contentH / rowHeightMm))
-    const pageHeightMm = rowsPerPage * rowHeightMm
+    // Renderizar página por página para evitar canvas gigante
+    const pages: EtiquetaData[][] = []
+    for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) {
+      pages.push(items.slice(i, i + ITEMS_PER_PAGE))
+    }
 
-    let yOffsetMm = 0
-    let pageNum = 0
-
-    while (yOffsetMm < imgH - 0.5) {
-      if (pageNum > 0) pdf.addPage()
-
-      const sliceMm = Math.min(pageHeightMm, imgH - yOffsetMm)
-      const sourceY = Math.round((yOffsetMm / imgH) * canvas.height)
-      const sliceH = Math.round((sliceMm / imgH) * canvas.height)
-
-      const pageCanvas = iframeDoc.createElement('canvas')
-      pageCanvas.width = canvas.width
-      pageCanvas.height = sliceH
-      const ctx = pageCanvas.getContext('2d')!
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, sliceH)
-      ctx.drawImage(canvas, 0, sourceY, canvas.width, sliceH, 0, 0, canvas.width, sliceH)
-
-      const pageImg = pageCanvas.toDataURL('image/jpeg', 0.95)
-      const drawH = (sliceH * contentW) / canvas.width
-      pdf.addImage(pageImg, 'JPEG', margin, margin, contentW, drawH)
-
-      yOffsetMm += pageHeightMm
-      pageNum++
+    for (let p = 0; p < pages.length; p++) {
+      if (p > 0) pdf.addPage()
+      const canvas = await renderPageToCanvas(pages[p], iframeDoc, iframeWin)
+      const drawH = (canvas.height * contentW) / canvas.width
+      const imgData = canvas.toDataURL('image/jpeg', 0.92)
+      pdf.addImage(imgData, 'JPEG', margin, margin, contentW, drawH)
     }
 
     return pdf.output('blob') as Blob
