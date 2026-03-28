@@ -229,6 +229,8 @@ export default function NuevoProductoPage() {
   const [modoCrearMarcaEnModal, setModoCrearMarcaEnModal] = useState(false)
   const [nuevaMarcaNombre, setNuevaMarcaNombre] = useState('')
   const [loadingCrearMarca, setLoadingCrearMarca] = useState(false)
+  const [borrandoMarcaId, setBorrandoMarcaId] = useState<string | null>(null)
+  const [borrandoCategoriaId, setBorrandoCategoriaId] = useState<string | null>(null)
 
   // Inline creation (tipo y talle)
   const [modoCrear, setModoCrear] = useState<'tipo' | 'talle' | null>(null)
@@ -650,6 +652,34 @@ export default function NuevoProductoPage() {
     setNuevoColegioNombre(''); setNuevoColegioAbrev('')
   }
 
+  // ── Eliminar Marca ─────────────────────────────────────────────
+  async function eliminarMarca(id: string) {
+    setBorrandoMarcaId(id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('marca_id', id)
+    if (error) { toast.error(`Error: ${error.message}`); setBorrandoMarcaId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} la usan`); setBorrandoMarcaId(null); return }
+    const { error: err2 } = await supabase.from('marcas').update({ activo: false }).eq('id', id)
+    if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoMarcaId(null); return }
+    if (marca?.id === id) setMarca(null)
+    await cargarTodo()
+    setBorrandoMarcaId(null)
+    toast.success('Marca eliminada')
+  }
+
+  // ── Eliminar Categoría ─────────────────────────────────────────
+  async function eliminarCategoria(id: string) {
+    setBorrandoCategoriaId(id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('categoria_id', id)
+    if (error) { toast.error(`Error: ${error.message}`); setBorrandoCategoriaId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} la usan`); setBorrandoCategoriaId(null); return }
+    const { error: err2 } = await supabase.from('categorias').update({ activa: false }).eq('id', id)
+    if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoCategoriaId(null); return }
+    if (tipo?.id === id) setTipo(null)
+    await cargarTodo()
+    setBorrandoCategoriaId(null)
+    toast.success('Categoría eliminada')
+  }
+
   // ── Eliminar Tipo de Prenda ────────────────────────────────────
   async function eliminarTipoPrenda(id: string) {
     setBorrandoTipoId(id)
@@ -842,21 +872,32 @@ export default function NuevoProductoPage() {
   // ── UI helpers ─────────────────────────────────────────────────
   const animClass = dir === 'forward' ? 'tk-slide-forward' : 'tk-slide-backward'
 
-  function Chip({ label, sub, activo, onClick }: { label: string; sub?: string; activo?: boolean; onClick: () => void }) {
+  function Chip({ label, sub, activo, onClick, onDelete, deleting }: { label: string; sub?: string; activo?: boolean; onClick: () => void; onDelete?: () => void; deleting?: boolean }) {
     return (
-      <button
-        onClick={onClick}
-        className="flex flex-col items-center justify-center rounded-2xl border py-3 px-3 text-sm font-bold transition-all active:scale-95 hover:scale-[1.02]"
-        style={{
-          background: activo ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
-          borderColor: activo ? '#4EC3BD' : '#e5e7eb',
-          color: activo ? 'white' : '#374151',
-          boxShadow: activo ? '0 4px 12px rgba(78,195,189,0.35)' : '0 1px 3px rgba(0,0,0,0.05)',
-        }}
-      >
-        <span>{label}</span>
-        {sub && <span className="text-[10px] font-normal mt-0.5" style={{ opacity: activo ? 0.85 : 0.6 }}>{sub}</span>}
-      </button>
+      <div className="relative">
+        <button
+          onClick={onClick}
+          className="w-full flex flex-col items-center justify-center rounded-2xl border py-3 px-3 text-sm font-bold transition-all active:scale-95 hover:scale-[1.02]"
+          style={{
+            background: activo ? 'linear-gradient(135deg, #4EC3BD 0%, #0d9488 100%)' : 'white',
+            borderColor: activo ? '#4EC3BD' : '#e5e7eb',
+            color: activo ? 'white' : '#374151',
+            boxShadow: activo ? '0 4px 12px rgba(78,195,189,0.35)' : '0 1px 3px rgba(0,0,0,0.05)',
+          }}
+        >
+          <span>{label}</span>
+          {sub && <span className="text-[10px] font-normal mt-0.5" style={{ opacity: activo ? 0.85 : 0.6 }}>{sub}</span>}
+        </button>
+        {onDelete && (
+          <button
+            onClick={e => { e.stopPropagation(); onDelete() }}
+            disabled={deleting}
+            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-300 hover:text-red-400 hover:border-red-300 transition-colors shadow-sm disabled:opacity-40"
+          >
+            {deleting ? <Loader2 size={9} className="animate-spin" /> : <X size={9} />}
+          </button>
+        )}
+      </div>
     )
   }
 
@@ -1166,7 +1207,7 @@ export default function NuevoProductoPage() {
                     <div>
                       <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-2">Categorías de {marca?.nombre}</p>
                       <div className="grid grid-cols-2 gap-2">
-                        {tiposDeEstaMarca.map(c => <Chip key={c.id} label={c.nombre} onClick={() => seleccionarCategoria(c)} />)}
+                        {tiposDeEstaMarca.map(c => <Chip key={c.id} label={c.nombre} onClick={() => seleccionarCategoria(c)} onDelete={() => eliminarCategoria(c.id)} deleting={borrandoCategoriaId === c.id} />)}
                       </div>
                     </div>
                   )}
@@ -1174,7 +1215,7 @@ export default function NuevoProductoPage() {
                     <details>
                       <summary className="text-xs text-gray-400 font-semibold cursor-pointer hover:text-gray-600">Otras categorías ({otrosTipos.length})</summary>
                       <div className="grid grid-cols-2 gap-2 mt-2">
-                        {otrosTipos.map(c => <Chip key={c.id} label={c.nombre} onClick={() => seleccionarCategoria(c)} />)}
+                        {otrosTipos.map(c => <Chip key={c.id} label={c.nombre} onClick={() => seleccionarCategoria(c)} onDelete={() => eliminarCategoria(c.id)} deleting={borrandoCategoriaId === c.id} />)}
                       </div>
                     </details>
                   )}
@@ -2259,11 +2300,20 @@ export default function NuevoProductoPage() {
                     <p className="text-sm text-gray-400 text-center py-6">Sin resultados</p>
                   )}
                   {marcasFiltradas.map(p => (
-                    <button key={p.id} onClick={() => seleccionarMarca(p)}
-                      className="w-full text-left px-5 py-3.5 hover:bg-teal-50 border-b border-gray-50 last:border-0 transition-colors flex items-center justify-between">
-                      <span className="font-semibold text-sm text-gray-800">{p.nombre}</span>
-                      <ChevronRight size={14} className="text-gray-300" />
-                    </button>
+                    <div key={p.id} className="flex items-center border-b border-gray-50 last:border-0">
+                      <button onClick={() => seleccionarMarca(p)}
+                        className="flex-1 text-left px-5 py-3.5 hover:bg-teal-50 transition-colors flex items-center justify-between">
+                        <span className="font-semibold text-sm text-gray-800">{p.nombre}</span>
+                        <ChevronRight size={14} className="text-gray-300" />
+                      </button>
+                      <button
+                        onClick={() => eliminarMarca(p.id)}
+                        disabled={borrandoMarcaId === p.id}
+                        className="px-3 py-3.5 text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40"
+                      >
+                        {borrandoMarcaId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      </button>
+                    </div>
                   ))}
                 </div>
                 <div className="p-4 border-t border-gray-100">
