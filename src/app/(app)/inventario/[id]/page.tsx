@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Plus, ChevronDown, ChevronUp } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 
@@ -25,6 +25,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
   const [guardando, setGuardando] = useState(false)
   const [variantes, setVariantes] = useState<Variante[]>([])
   const [nuevoTalle, setNuevoTalle] = useState('')
+  const [varianteAbierta, setVarianteAbierta] = useState<string | null>(null)
 
   // Campos editables producto
   const [nombre, setNombre] = useState('')
@@ -217,98 +218,126 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
         <CardHeader>
           <CardTitle className="text-base">Talles y precios</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-2">
           {variantes.length === 0 && (
             <p className="text-sm text-gray-400 text-center py-4">No hay talles cargados</p>
           )}
 
           {variantes.map(v => {
+            const abierta = varianteAbierta === v.id
             const costo = v.precio_costo
             const venta = v.precio_venta
             const margenV = costo > 0 && venta > 0 ? Math.round(((venta - costo) / costo) * 100) : null
-            const efectivo = venta > 0 ? Math.round(venta * 0.8) : 0
+            const sugerido = costo > 0 ? Math.round(costo * 2.2) : 0
 
             return (
-              <div key={v.id} className="rounded-xl border border-gray-200 p-3 space-y-2">
-                {/* Fila 1: Talle + Stock + Código */}
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-black text-gray-800 min-w-[3rem]">{v.talle}</span>
-                  <div className="flex items-center gap-2 flex-1">
-                    <span className="text-xs text-gray-400">Stock:</span>
-                    <Input
-                      type="number"
-                      value={v.stock}
-                      onChange={e => actualizarVariante(v.id, 'stock', parseInt(e.target.value) || 0)}
-                      className="h-8 w-20 text-xs text-center"
-                      min={0}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">Código:</span>
-                    <Input
-                      value={v.codigo_barras || ''}
-                      onChange={e => actualizarVariante(v.id, 'codigo_barras', e.target.value || null)}
-                      placeholder="—"
-                      className="h-8 w-32 text-xs font-mono"
-                    />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0"
-                    onClick={() => eliminarVariante(v.id)}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-                {/* Fila 2: Precios */}
-                <div className="flex items-center gap-3 pl-[3rem]">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-400">Costo:</span>
-                    <Input
-                      type="number"
-                      value={v.precio_costo}
-                      onChange={e => actualizarVariante(v.id, 'precio_costo', parseFloat(e.target.value) || 0)}
-                      placeholder="0"
-                      className="h-8 w-24 text-xs"
-                      min={0}
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-400">Venta:</span>
-                    <Input
-                      type="number"
-                      value={v.precio_venta}
-                      onChange={e => actualizarVariante(v.id, 'precio_venta', parseFloat(e.target.value) || 0)}
-                      placeholder="0"
-                      className="h-8 w-24 text-xs"
-                      min={0}
-                    />
-                  </div>
-                  {margenV !== null && (
-                    <span className="text-xs font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
-                      {margenV}%
+              <div key={v.id} className="rounded-xl border border-gray-200 overflow-hidden">
+                {/* Fila colapsada — click para abrir */}
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                  onClick={() => setVarianteAbierta(abierta ? null : v.id)}
+                >
+                  <span className="text-sm font-black text-gray-800 w-12 shrink-0">{v.talle}</span>
+                  <span className="text-xs text-gray-400">Stock: <span className="font-semibold text-gray-700">{v.stock}</span></span>
+                  {venta > 0 && (
+                    <span className="text-xs text-gray-400 ml-auto mr-2">
+                      {formatPrecio(venta)}
+                      {margenV !== null && (
+                        <span className="ml-1.5 font-bold" style={{ color: margenV >= 30 ? '#0d9488' : margenV >= 15 ? '#d97706' : '#ef4444' }}>
+                          {margenV}%
+                        </span>
+                      )}
                     </span>
                   )}
-                  {efectivo > 0 && (
-                    <span className="text-xs text-gray-400 ml-auto">
-                      Etiq: {formatPrecio(venta)} · Efec: <span className="text-teal-600 font-semibold">{formatPrecio(efectivo)}</span>
-                    </span>
-                  )}
-                </div>
+                  {abierta ? <ChevronUp size={14} className="text-gray-400 shrink-0" /> : <ChevronDown size={14} className="text-gray-400 shrink-0" />}
+                </button>
+
+                {/* Panel expandido */}
+                {abierta && (
+                  <div className="px-4 pb-4 pt-1 border-t border-gray-100 space-y-3 bg-gray-50">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 mb-1 block">Stock</label>
+                        <Input
+                          type="number"
+                          value={v.stock}
+                          onChange={e => actualizarVariante(v.id, 'stock', parseInt(e.target.value) || 0)}
+                          className="h-9 text-sm"
+                          min={0}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 mb-1 block">Código de barras</label>
+                        <Input
+                          value={v.codigo_barras || ''}
+                          onChange={e => actualizarVariante(v.id, 'codigo_barras', e.target.value || null)}
+                          placeholder="—"
+                          className="h-9 text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 mb-1 block">Precio costo</label>
+                        <Input
+                          type="number"
+                          value={v.precio_costo || ''}
+                          onChange={e => actualizarVariante(v.id, 'precio_costo', parseFloat(e.target.value) || 0)}
+                          placeholder="0"
+                          className="h-9 text-sm"
+                          min={0}
+                        />
+                        {sugerido > 0 && (
+                          <button
+                            onClick={() => actualizarVariante(v.id, 'precio_venta', sugerido)}
+                            className="mt-1 text-xs text-teal-600 hover:text-teal-700 font-semibold"
+                          >
+                            → x2.2 = {formatPrecio(sugerido)}
+                          </button>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 mb-1 block">Precio venta</label>
+                        <Input
+                          type="number"
+                          value={v.precio_venta || ''}
+                          onChange={e => actualizarVariante(v.id, 'precio_venta', parseFloat(e.target.value) || 0)}
+                          placeholder="0"
+                          className="h-9 text-sm"
+                          min={0}
+                        />
+                        {venta > 0 && (
+                          <p className="mt-1 text-xs text-gray-400">
+                            Efec: <span className="text-teal-600 font-semibold">{formatPrecio(Math.round(venta * 0.8))}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400 hover:text-red-600 hover:bg-red-50 text-xs gap-1.5"
+                        onClick={() => eliminarVariante(v.id)}
+                      >
+                        <Trash2 size={13} /> Eliminar talle
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}
 
           <div className="flex gap-2 pt-2 border-t border-gray-100">
             <Input
-              placeholder="Nuevo talle..."
+              placeholder="Nuevo talle (ej: XL, 6, 3-6m)..."
               value={nuevoTalle}
               onChange={e => setNuevoTalle(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && agregarVariante()}
               className="flex-1"
             />
-            <Button variant="outline" onClick={agregarVariante} className="gap-1">
+            <Button variant="outline" onClick={agregarVariante} className="gap-1 shrink-0">
               <Plus size={16} /> Agregar
             </Button>
           </div>
