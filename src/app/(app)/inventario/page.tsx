@@ -817,7 +817,11 @@ function InventarioContent() {
                                 <input
                                   type="number"
                                   value={editandoPrecio.precioCosto}
-                                  onChange={e => setEditandoPrecio(prev => prev ? { ...prev, precioCosto: e.target.value } : null)}
+                                  onChange={e => {
+                                    const costo = e.target.value
+                                    const sugerido = parseFloat(costo) > 0 ? String(Math.round(parseFloat(costo) * 2.2)) : ''
+                                    setEditandoPrecio(prev => prev ? { ...prev, precioCosto: costo, precioVenta: sugerido || prev.precioVenta } : null)
+                                  }}
                                   onKeyDown={e => { if (e.key === 'Escape') setEditandoPrecio(null) }}
                                   className="w-28 h-8 border border-gray-200 rounded-lg px-2 text-sm focus:ring-1 focus:ring-teal-400 focus:outline-none"
                                   placeholder="0"
