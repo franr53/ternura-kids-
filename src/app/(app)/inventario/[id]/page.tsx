@@ -72,12 +72,12 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
     setGuardando(false)
   }
 
-  async function actualizarVariante(varianteId: string, campo: string, valor: string | number | null) {
-    const { error } = await supabase.from('variantes').update({ [campo]: valor }).eq('id', varianteId)
+  async function actualizarVariante(varianteId: string, campos: Record<string, string | number | null>) {
+    const { error } = await supabase.from('variantes').update(campos).eq('id', varianteId)
     if (error) {
       toast.error(`Error: ${error.message}`)
     } else {
-      setVariantes(prev => prev.map(v => v.id === varianteId ? { ...v, [campo]: valor } : v))
+      setVariantes(prev => prev.map(v => v.id === varianteId ? { ...v, ...campos } : v))
     }
   }
 
@@ -261,7 +261,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                         <Input
                           type="number"
                           value={v.stock}
-                          onChange={e => actualizarVariante(v.id, 'stock', parseInt(e.target.value) || 0)}
+                          onChange={e => actualizarVariante(v.id, { stock: parseInt(e.target.value) || 0 })}
                           className="h-9 text-sm"
                           min={0}
                         />
@@ -270,7 +270,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                         <label className="text-xs font-semibold text-gray-500 mb-1 block">Código de barras</label>
                         <Input
                           value={v.codigo_barras || ''}
-                          onChange={e => actualizarVariante(v.id, 'codigo_barras', e.target.value || null)}
+                          onChange={e => actualizarVariante(v.id, { codigo_barras: e.target.value || null })}
                           placeholder="—"
                           className="h-9 text-sm font-mono"
                         />
@@ -284,8 +284,9 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                           value={v.precio_costo || ''}
                           onChange={e => {
                             const nuevoCosto = parseFloat(e.target.value) || 0
-                            actualizarVariante(v.id, 'precio_costo', nuevoCosto)
-                            if (nuevoCosto > 0) actualizarVariante(v.id, 'precio_venta', Math.round(nuevoCosto * 2.2))
+                            const campos: Record<string, number> = { precio_costo: nuevoCosto }
+                            if (nuevoCosto > 0) campos.precio_venta = Math.round(nuevoCosto * 2.2)
+                            actualizarVariante(v.id, campos)
                           }}
                           placeholder="0"
                           className="h-9 text-sm"
@@ -298,7 +299,7 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                         <Input
                           type="number"
                           value={v.precio_venta || ''}
-                          onChange={e => actualizarVariante(v.id, 'precio_venta', parseFloat(e.target.value) || 0)}
+                          onChange={e => actualizarVariante(v.id, { precio_venta: parseFloat(e.target.value) || 0 })}
                           placeholder="0"
                           className="h-9 text-sm"
                           min={0}
