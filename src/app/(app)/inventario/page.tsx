@@ -147,8 +147,9 @@ function InventarioContent() {
   [productos])
 
   const productosFiltrados = productos.filter(p => {
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     const matchBusqueda = busqueda === '' ||
-      p.nombre_base.toLowerCase().includes(busqueda.toLowerCase()) ||
+      norm(p.nombre_base).includes(norm(busqueda)) ||
       p.variantes?.some(v => v.codigo_barras?.includes(busqueda))
     const matchCategoria = filtroCategoria === 'todas' || p.categoria_id === filtroCategoria
     const matchProveedor = filtroProveedor === 'todos' || p.marca_id === filtroProveedor
