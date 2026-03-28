@@ -655,9 +655,9 @@ export default function NuevoProductoPage() {
   // ── Eliminar Marca ─────────────────────────────────────────────
   async function eliminarMarca(id: string) {
     setBorrandoMarcaId(id)
-    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('marca_id', id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('marca_id', id).eq('activo', true)
     if (error) { toast.error(`Error: ${error.message}`); setBorrandoMarcaId(null); return }
-    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} la usan`); setBorrandoMarcaId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} activo${count === 1 ? '' : 's'} la usan`); setBorrandoMarcaId(null); return }
     const { error: err2 } = await supabase.from('marcas').update({ activo: false }).eq('id', id)
     if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoMarcaId(null); return }
     if (marca?.id === id) setMarca(null)
@@ -669,9 +669,9 @@ export default function NuevoProductoPage() {
   // ── Eliminar Categoría ─────────────────────────────────────────
   async function eliminarCategoria(id: string) {
     setBorrandoCategoriaId(id)
-    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('categoria_id', id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('categoria_id', id).eq('activo', true)
     if (error) { toast.error(`Error: ${error.message}`); setBorrandoCategoriaId(null); return }
-    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} la usan`); setBorrandoCategoriaId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} activo${count === 1 ? '' : 's'} la usan`); setBorrandoCategoriaId(null); return }
     const { error: err2 } = await supabase.from('categorias').update({ activa: false }).eq('id', id)
     if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoCategoriaId(null); return }
     if (tipo?.id === id) setTipo(null)
@@ -683,9 +683,9 @@ export default function NuevoProductoPage() {
   // ── Eliminar Tipo de Prenda ────────────────────────────────────
   async function eliminarTipoPrenda(id: string) {
     setBorrandoTipoId(id)
-    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('tipo_prenda_id', id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('tipo_prenda_id', id).eq('activo', true)
     if (error) { toast.error(`Error: ${error.message}`); setBorrandoTipoId(null); return }
-    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} lo usan`); setBorrandoTipoId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} activo${count === 1 ? '' : 's'} lo usan`); setBorrandoTipoId(null); return }
     const { error: err2 } = await supabase.from('tipos_prenda').update({ activo: false }).eq('id', id)
     if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoTipoId(null); return }
     if (tipoPrendaObj?.id === id) setTipoPrendaObj(null)
@@ -697,9 +697,9 @@ export default function NuevoProductoPage() {
   // ── Eliminar Colegio ───────────────────────────────────────────
   async function eliminarColegio(id: string) {
     setBorrandoColegioId(id)
-    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('colegio_id', id)
+    const { count, error } = await supabase.from('productos').select('*', { count: 'exact', head: true }).eq('colegio_id', id).eq('activo', true)
     if (error) { toast.error(`Error: ${error.message}`); setBorrandoColegioId(null); return }
-    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} lo usan`); setBorrandoColegioId(null); return }
+    if ((count ?? 0) > 0) { toast.error(`No se puede borrar: ${count} producto${count === 1 ? '' : 's'} activo${count === 1 ? '' : 's'} lo usan`); setBorrandoColegioId(null); return }
     const { error: err2 } = await supabase.from('colegios').update({ activo: false }).eq('id', id)
     if (err2) { toast.error(`Error: ${err2.message}`); setBorrandoColegioId(null); return }
     if (colegioObj?.id === id) setColegioObj(null)
