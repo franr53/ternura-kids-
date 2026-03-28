@@ -282,19 +282,16 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
                         <Input
                           type="number"
                           value={v.precio_costo || ''}
-                          onChange={e => actualizarVariante(v.id, 'precio_costo', parseFloat(e.target.value) || 0)}
+                          onChange={e => {
+                            const nuevoCosto = parseFloat(e.target.value) || 0
+                            actualizarVariante(v.id, 'precio_costo', nuevoCosto)
+                            if (nuevoCosto > 0) actualizarVariante(v.id, 'precio_venta', Math.round(nuevoCosto * 2.2))
+                          }}
                           placeholder="0"
                           className="h-9 text-sm"
                           min={0}
                         />
-                        {sugerido > 0 && (
-                          <button
-                            onClick={() => actualizarVariante(v.id, 'precio_venta', sugerido)}
-                            className="mt-1 text-xs text-teal-600 hover:text-teal-700 font-semibold"
-                          >
-                            → x2.2 = {formatPrecio(sugerido)}
-                          </button>
-                        )}
+                        {sugerido > 0 && <p className="mt-1 text-xs text-gray-400">Venta auto: {formatPrecio(sugerido)}</p>}
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-gray-500 mb-1 block">Precio venta</label>
