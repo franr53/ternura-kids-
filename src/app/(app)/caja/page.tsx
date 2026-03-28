@@ -81,27 +81,51 @@ export default function CajaPage() {
     }
   }, [cajaCache])
 
-  // Auto-cerrar cajas abiertas de días anteriores al cargar la página
+  // Auto-cerrar cajas de días anteriores y auto-abrir la de hoy si no existe
   useEffect(() => {
-    async function cerrarCajasAnteriores() {
+    async function inicializarCaja() {
       const hoy = new Date().toISOString().split('T')[0]
-      const { data } = await supabase
+
+      // Cerrar cajas abiertas de días anteriores
+      const { data: anteriores } = await supabase
         .from('cajas')
         .select('id, fecha')
         .eq('estado', 'abierta')
         .lt('fecha', hoy)
-      if (!data || data.length === 0) return
+      if (anteriores && anteriores.length > 0) {
+        await Promise.all(anteriores.map(c =>
+          supabase.from('cajas').update({
+            estado: 'cerrada',
+            cerrada_en: new Date().toISOString(),
+            notas_cierre: 'Cierre automático a la medianoche',
+          }).eq('id', c.id)
+        ))
+        toast.info('Se cerró automáticamente la caja del día anterior')
+      }
 
-      await Promise.all(data.map(c =>
-        supabase.from('cajas').update({
-          estado: 'cerrada',
-          cerrada_en: new Date().toISOString(),
-          notas: 'Cierre automático al inicio del día siguiente',
-        }).eq('id', c.id)
-      ))
-      toast.info(`Se cerró automáticamente la caja del día anterior`)
+      // Auto-abrir caja de hoy si no existe
+      const { data: cajaHoy } = await supabase
+        .from('cajas')
+        .select('id')
+        .eq('fecha', hoy)
+        .limit(1)
+        .maybeSingle()
+      if (!cajaHoy) {
+        await supabase.from('cajas').insert({
+          fecha: hoy,
+          monto_inicial: 0,
+          total_efectivo: 0,
+          total_transferencia: 0,
+          total_debito: 0,
+          total_credito: 0,
+          total_fiado: 0,
+          total_retiros: 0,
+          estado: 'abierta',
+        })
+        cargarCaja()
+      }
     }
-    cerrarCajasAnteriores()
+    inicializarCaja()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -133,7 +157,7 @@ export default function CajaPage() {
       .eq('fecha', hoy)
       .limit(1)
       .maybeSingle()
-    if (existente) { toast.error('Ya existe una caja abierta hoy'); setAbriendo(false); return }
+    if (existente) { await cargarCaja(); setAbriendo(false); return }
 
     const { data, error } = await supabase.from('cajas').insert({
       fecha: hoy,
