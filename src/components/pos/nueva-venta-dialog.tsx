@@ -192,7 +192,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     : todosClientes.slice(0, 6)
 
   const subtotal = carrito.reduce((s, i) => s + i.precio * (1 - i.descuentoItem / 100) * i.cantidad, 0)
-  const descEfectivo = (!esMixto && metodoPrincipal === 'efectivo') ? 20 : 0
+  const descEfectivo = (!esMixto && (metodoPrincipal === 'efectivo' || metodoPrincipal === 'transferencia')) ? 20 : 0
   const descTotal = descEfectivo + descuentoAdicional
   const montoDesc = subtotal * (descTotal / 100)
   const total = subtotal - montoDesc
@@ -255,7 +255,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     return {
       items: carrito.map(i => ({ nombre: i.productoNombre, talle: i.talle, cantidad: i.cantidad, precio: i.precio })),
       subtotal, descuento: montoDesc, total,
-      descuentoPorcentaje: descTotal > 0 ? (descEfectivo > 0 && descuentoAdicional > 0 ? `${descTotal}% (${descEfectivo}% efec. + ${descuentoAdicional}% adic.)` : `${descTotal}%`) : undefined,
+      descuentoPorcentaje: descTotal > 0 ? (descEfectivo > 0 && descuentoAdicional > 0 ? `${descTotal}% (${descEfectivo}% efec./transf. + ${descuentoAdicional}% adic.)` : `${descTotal}%`) : undefined,
       metodoPago: metodoPagoLabel,
       clienteNombre: cliente?.nombre,
       fiado: pagoFiado ? { monto: pagoFiado.monto, deudaAnterior: cliente?.deuda_total || 0, deudaActual: (cliente?.deuda_total || 0) + pagoFiado.monto } : undefined,
@@ -704,10 +704,10 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
             {/* Descuento */}
             <div>
-              {!esMixto && metodoPrincipal === 'efectivo' && (
+              {!esMixto && (metodoPrincipal === 'efectivo' || metodoPrincipal === 'transferencia') && (
                 <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-green-50 border border-green-200 rounded-lg">
                   <Banknote size={13} className="text-green-600 shrink-0" />
-                  <span className="text-xs text-green-700 font-medium">20% descuento efectivo aplicado</span>
+                  <span className="text-xs text-green-700 font-medium">20% descuento {metodoPrincipal === 'transferencia' ? 'transferencia' : 'efectivo'} aplicado</span>
                 </div>
               )}
               <p className="text-xs font-medium text-gray-500 mb-1.5">Descuento adicional</p>
@@ -741,7 +741,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               </div>
               {descTotal > 0 && (
                 <div className="flex justify-between text-green-600 text-xs">
-                  <span>Descuento {descTotal}%{descEfectivo > 0 && descuentoAdicional > 0 ? ` (${descEfectivo}% efec. + ${descuentoAdicional}% adic.)` : descEfectivo > 0 ? ' (efectivo)' : ''}</span>
+                  <span>Descuento {descTotal}%{descEfectivo > 0 && descuentoAdicional > 0 ? ` (${descEfectivo}% efec./transf. + ${descuentoAdicional}% adic.)` : descEfectivo > 0 ? ` (${metodoPrincipal === 'transferencia' ? 'transferencia' : 'efectivo'})` : ''}</span>
                   <span>− {formatPrecio(montoDesc)}</span>
                 </div>
               )}
