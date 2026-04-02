@@ -81,19 +81,44 @@ export default function ProductoDetallePage({ params }: { params: Promise<{ id: 
     }
   }
 
+  function generarBarcode(talle: string): string {
+    const normalize = (t: string) => t.replace(/[^a-z0-9]/gi, '').toUpperCase()
+    const talleCode = normalize(talle)
+    for (const v of variantes) {
+      if (!v.codigo_barras || !v.talle) continue
+      const existingCode = normalize(v.talle)
+      if (!existingCode) continue
+      const bc = v.codigo_barras.toUpperCase().replace(/[^A-Z0-9]/g, '')
+      const bcBase = bc.replace(/\d+$/, '')
+      const suffix = bcBase.endsWith(existingCode) ? bcBase.slice(0, bcBase.length - existingCode.length)
+                    : bc.endsWith(existingCode) ? bc.slice(0, bc.length - existingCode.length)
+                    : null
+      if (suffix) return `${suffix}${talleCode}`
+    }
+    // Fallback: iniciales del nombre del producto
+    const prefijo = nombre.toUpperCase().split(/\s+/).map(w => w[0]).filter(Boolean).join('').slice(0, 4)
+    return `${prefijo}${talleCode}`
+  }
+
   async function agregarVariante() {
     if (!nuevoTalle.trim()) return
+    const talle = nuevoTalle.trim()
+    const codigoBarras = generarBarcode(talle)
     const { data, error } = await supabase.from('variantes').insert({
       producto_id: id,
-      talle: nuevoTalle.trim(),
+      talle,
       stock: 0,
       stock_minimo: 0,
       precio_costo: 0,
       precio_venta: 0,
+      codigo_barras: codigoBarras || null,
     }).select().single()
     if (!error && data) {
       setVariantes(prev => [...prev, data])
       setNuevoTalle('')
+      toast.success(`Talle ${talle} agregado — código: ${codigoBarras}`)
+    } else if (error) {
+      toast.error(`Error: ${error.message}`)
     }
   }
 
