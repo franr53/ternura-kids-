@@ -178,6 +178,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           <div>
             <h1 className="text-xl font-bold text-gray-800">{cliente.nombre}</h1>
             {cliente.deuda_total > 0 && <Badge variant="destructive" className="mt-1">Debe {mask(formatPrecio(cliente.deuda_total))}</Badge>}
+            {cliente.saldo_favor > 0 && <Badge className="mt-1 bg-green-500 hover:bg-green-500 text-white">Crédito a favor: {mask(formatPrecio(cliente.saldo_favor))}</Badge>}
           </div>
         </div>
         <div className="flex gap-2">
@@ -220,6 +221,11 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                 {mask(formatPrecio(cliente.deuda_total))}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">deuda actual</p>
+              {cliente.saldo_favor > 0 && (
+                <p className="text-sm font-semibold text-green-600 mt-1">
+                  + {mask(formatPrecio(cliente.saldo_favor))} crédito a favor
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">

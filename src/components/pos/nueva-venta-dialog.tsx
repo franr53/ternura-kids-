@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
 import { confirmarVenta, ResultadoVenta } from '@/lib/services/ventas'
@@ -110,6 +111,21 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   })
   const [descuentoAdicional, setDescuentoAdicional] = useState(0)
   const [pagos, setPagos] = useState<Pago[]>([{ metodo: 'efectivo', monto: 0 }])
+  const [confirmandoCancelacion, setConfirmandoCancelacion] = useState(false)
+
+  function handleIntentoCerrar() {
+    if (carrito.length === 0 && !cliente) { onCerrar(); return }
+    setConfirmandoCancelacion(true)
+  }
+
+  function limpiarYCerrar() {
+    setCarrito([])
+    setCliente(null)
+    setPagos([{ metodo: 'efectivo', monto: 0 }])
+    setDescuentoAdicional(0)
+    try { sessionStorage.removeItem('pos:carrito'); sessionStorage.removeItem('pos:cliente') } catch {}
+    onCerrar()
+  }
   const esMixto = pagos.length > 1
   const metodoPrincipal = pagos[0]?.metodo ?? 'efectivo'
 
@@ -430,7 +446,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
               <Badge className="bg-teal-500">{carrito.length} {carrito.length === 1 ? 'item' : 'items'}</Badge>
             )}
           </div>
-          <button onClick={onCerrar} className="text-gray-400 hover:text-gray-600 p-1">
+          <button onClick={handleIntentoCerrar} className="text-gray-400 hover:text-gray-600 p-1">
             <X size={22} />
           </button>
         </div>
@@ -669,7 +685,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
                     <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-44 overflow-y-auto">
                       {/* Opción cliente ocasional siempre visible */}
                       <button
-                        onPointerDown={e => { e.preventDefault(); setCliente({ id: '__ocasional__', nombre: 'Cliente ocasional', deuda_total: 0, activo: true, creado_en: '' }); setBusCliente(''); setMostrarDropCliente(false) }}
+                        onPointerDown={e => { e.preventDefault(); setCliente({ id: '__ocasional__', nombre: 'Cliente ocasional', deuda_total: 0, saldo_favor: 0, activo: true, creado_en: '' }); setBusCliente(''); setMostrarDropCliente(false) }}
                         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left border-b border-gray-200"
                       >
                         <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-medium">Sin cuenta</span>
@@ -1061,7 +1077,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
         {/* Footer */}
         <div className="p-4 border-t border-gray-100 flex gap-3">
-          <Button variant="outline" onClick={onCerrar} className="flex-1">
+          <Button variant="outline" onClick={handleIntentoCerrar} className="flex-1">
             Cancelar
           </Button>
           <Button
@@ -1074,6 +1090,20 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
           </Button>
         </div>
       </div>
+
+      <Dialog open={confirmandoCancelacion} onOpenChange={setConfirmandoCancelacion}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>¿Querés salir?</DialogTitle>
+            <DialogDescription>Los datos cargados se van a eliminar.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmandoCancelacion(false)}>No, volver</Button>
+            <Button variant="outline" onClick={onCerrar}>Salir sin borrar</Button>
+            <Button className="bg-red-500 hover:bg-red-600 text-white" onClick={limpiarYCerrar}>Salir y borrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

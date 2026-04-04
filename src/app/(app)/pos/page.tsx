@@ -5,11 +5,12 @@ import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, MetodoPago, Variante, Producto } from '@/types'
 import { Input } from '@/components/ui/input'
-import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar } from 'lucide-react'
+import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar, RotateCcw } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
 import CobroDeudaDialog from '@/components/pos/cobro-deuda-dialog'
+import DevolucionDialog from '@/components/pos/devolucion-dialog'
 import Link from 'next/link'
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
@@ -67,6 +68,7 @@ export default function PosPage() {
     try { if (v) sessionStorage.setItem('pos:dialog', '1'); else sessionStorage.removeItem('pos:dialog') } catch {}
   }
   const [mostrarCobroDeuda, setMostrarCobroDeuda] = useState(false)
+  const [mostrarDevolucion, setMostrarDevolucion] = useState(false)
   const [expandida, setExpandida] = useState<string | null>(null)
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
@@ -127,6 +129,14 @@ export default function PosPage() {
           <p className="text-xs text-gray-400 capitalize mt-0.5">{fechaHoy}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMostrarDevolucion(true)}
+            className="flex items-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95 border-2 border-gray-300 text-gray-600 bg-white hover:bg-gray-50"
+            style={{ fontFamily: 'var(--font-sans)' }}
+          >
+            <RotateCcw size={16} />
+            Devolución
+          </button>
           <button
             onClick={() => setMostrarCobroDeuda(true)}
             className="flex items-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all hover:scale-105 active:scale-95 border-2 border-teal-400 text-teal-600 bg-white hover:bg-teal-50"
@@ -243,7 +253,9 @@ export default function PosPage() {
             const abierta = expandida === venta.id
             const items = venta.venta_items || []
             const pagos = venta.venta_pagos || []
-            const hora = new Date(venta.creado_en).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+            const fechaVenta = new Date(venta.creado_en)
+            const hora = fechaVenta.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+            const fechaCorta = fechaVenta.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
             const resumen = items
               .slice(0, 2)
               .map(it => it.variante?.producto?.nombre_base || '—')
@@ -261,9 +273,14 @@ export default function PosPage() {
                   className="w-full flex items-center gap-4 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
                   onClick={() => setExpandida(abierta ? null : venta.id)}
                 >
-                  <div className="flex items-center gap-1.5 text-gray-400 shrink-0 w-14">
-                    <Clock size={12} />
-                    <span className="text-xs font-mono">{hora}</span>
+                  <div className="flex flex-col items-center shrink-0 w-14 text-gray-400">
+                    <div className="flex items-center gap-1">
+                      <Clock size={11} />
+                      <span className="text-xs font-mono">{hora}</span>
+                    </div>
+                    {periodo !== 'hoy' && (
+                      <span className="text-[10px] text-gray-400 font-medium">{fechaCorta}</span>
+                    )}
                   </div>
 
                   <div className="flex-1 min-w-0">
@@ -391,6 +408,9 @@ export default function PosPage() {
           onCerrar={() => setMostrarCobroDeuda(false)}
           onCobroCompletado={() => cargarVentas()}
         />
+      )}
+      {mostrarDevolucion && (
+        <DevolucionDialog onCerrar={() => setMostrarDevolucion(false)} />
       )}
     </div>
   )
