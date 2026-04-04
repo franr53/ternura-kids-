@@ -178,6 +178,7 @@ function InventarioContent() {
     const stockA = a.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     const stockB = b.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
     switch (orden) {
+
       case 'nombre_desc': return b.nombre_base.localeCompare(a.nombre_base)
       case 'precio_asc': return (a.variantes?.[0]?.precio_venta ?? 0) - (b.variantes?.[0]?.precio_venta ?? 0)
       case 'precio_desc': return (b.variantes?.[0]?.precio_venta ?? 0) - (a.variantes?.[0]?.precio_venta ?? 0)
@@ -187,6 +188,16 @@ function InventarioContent() {
       default: return a.nombre_base.localeCompare(b.nombre_base)
     }
   })
+
+  // Resumen financiero del stock (sobre productos filtrados)
+  const todasLasVariantes = productosFiltrados.flatMap(p => p.variantes ?? [])
+  const costoStock = todasLasVariantes
+    .filter(v => v.stock > 0 && (v.precio_costo ?? 0) > 0)
+    .reduce((s, v) => s + v.precio_costo! * v.stock, 0)
+  const ventaStock = todasLasVariantes
+    .filter(v => v.stock > 0)
+    .reduce((s, v) => s + v.precio_venta * v.stock, 0)
+  const gananciaStock = ventaStock - costoStock
 
   // Stats
   const totalProductos = productos.length
@@ -878,6 +889,30 @@ function InventarioContent() {
           </table>
         )}
       </div>
+
+      {/* Resumen financiero del stock */}
+      {ventaStock > 0 && (
+        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+          <div className="flex flex-wrap gap-6 justify-end">
+            {costoStock > 0 && (
+              <div className="text-right">
+                <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold">Costo del stock</p>
+                <p className="text-base font-bold text-gray-600">{formatPrecio(costoStock)}</p>
+              </div>
+            )}
+            <div className="text-right">
+              <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold">Valor de venta</p>
+              <p className="text-base font-bold text-gray-700">{formatPrecio(ventaStock)}</p>
+            </div>
+            {costoStock > 0 && (
+              <div className="text-right">
+                <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold">Ganancia potencial</p>
+                <p className="text-base font-bold text-teal-600">{formatPrecio(gananciaStock)}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

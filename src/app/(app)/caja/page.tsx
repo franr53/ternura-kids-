@@ -95,6 +95,7 @@ export default function CajaPage() {
   const [caja, setCaja] = useState<Caja | null>(null)
   const [retiros, setRetiros] = useState<Retiro[]>([])
   const [gastosDia, setGastosDia] = useState<GastoDia[]>([])
+  const [costoVentas, setCostoVentas] = useState(0)
 
   // Sync cache to local state (allows local mutations after initial load)
   useEffect(() => {
@@ -104,6 +105,23 @@ export default function CajaPage() {
       setGastosDia(cajaCache.gastosDia)
     }
   }, [cajaCache])
+
+  // Costo de ventas del día (para ganancia real)
+  useEffect(() => {
+    if (!caja) return
+    supabase
+      .from('ventas')
+      .select('venta_items(cantidad, variante:variantes(precio_costo))')
+      .eq('caja_id', caja.id)
+      .neq('estado', 'anulada')
+      .then(({ data }) => {
+        if (!data) return
+        const total = (data as any[])
+          .flatMap((v: any) => v.venta_items || [])
+          .reduce((s: number, i: any) => s + i.cantidad * (i.variante?.precio_costo ?? 0), 0)
+        setCostoVentas(total)
+      })
+  }, [caja?.id])
 
   // Auto-cerrar cajas de días anteriores y auto-abrir la de hoy si no existe
   useEffect(() => {
@@ -473,6 +491,18 @@ export default function CajaPage() {
                 <span>Total ventas</span>
                 <span className="text-gray-800">{formatPrecio(totalVentas)}</span>
               </div>
+              {costoVentas > 0 && (
+                <>
+                  <div className="flex justify-between items-center text-sm text-gray-500">
+                    <span>Costo de ventas</span>
+                    <span>− {formatPrecio(costoVentas)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-semibold text-teal-700">
+                    <span>Ganancia real</span>
+                    <span>{formatPrecio(totalVentas - costoVentas)}</span>
+                  </div>
+                </>
+              )}
               {(caja.total_retiros || 0) > 0 && (
                 <div className="flex justify-between items-center text-red-500">
                   <span>Retiros</span>
