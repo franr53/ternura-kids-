@@ -188,6 +188,7 @@ export default function CajaPage() {
   const [cajaExpandida, setCajaExpandida] = useState<string | null>(null)
   const [periodoAnteriores, setPeriodoAnteriores] = useState(7)
   const [cajaDetalle, setCajaDetalle] = useState<Record<string, CajaDetalle>>({})
+  const [costoPeriodo, setCostoPeriodo] = useState<number | null>(null)
 
   async function abrirCaja() {
     const monto = parseFloat(montoInicial) || 0
@@ -351,6 +352,7 @@ export default function CajaPage() {
   async function verAnteriores(dias?: number) {
     setMostrarAnteriores(true)
     setLoadingAnteriores(true)
+    setCostoPeriodo(null)
     const d = dias ?? periodoAnteriores
     const hoy = new Date().toISOString().split('T')[0]
     const desde = new Date()
@@ -362,8 +364,23 @@ export default function CajaPage() {
       .lt('fecha', hoy)
       .gte('fecha', desdeStr)
       .order('fecha', { ascending: false })
-    setCajasAnteriores((data as Caja[]) || [])
+    const cajas = (data as Caja[]) || []
+    setCajasAnteriores(cajas)
     setLoadingAnteriores(false)
+
+    // Fetch costo de ventas del período
+    if (cajas.length > 0) {
+      const ids = cajas.map(c => c.id)
+      const { data: ventasData } = await supabase
+        .from('ventas')
+        .select('venta_items(cantidad, variante:variantes(precio_costo))')
+        .in('caja_id', ids)
+        .neq('estado', 'anulada')
+      const costo = (ventasData as any[] || [])
+        .flatMap((v: any) => v.venta_items || [])
+        .reduce((s: number, i: any) => s + i.cantidad * (i.variante?.precio_costo ?? 0), 0)
+      setCostoPeriodo(costo)
+    }
   }
 
   function cambiarPeriodo(dias: number) {
@@ -688,6 +705,36 @@ export default function CajaPage() {
                 ))}
               </div>
             </div>
+
+            {/* Resumen del período */}
+            {!loadingAnteriores && cajasAnteriores.length > 0 && (() => {
+              const totalPeriodo = cajasAnteriores.reduce((s, c) =>
+                s + (c.total_efectivo || 0) + (c.total_transferencia || 0) + (c.total_debito || 0) + (c.total_credito || 0) + (c.total_fiado || 0), 0)
+              const ganancia = costoPeriodo !== null ? totalPeriodo - costoPeriodo : null
+              return (
+                <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap gap-4 justify-between">
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Total ventas</p>
+                    <p className="text-sm font-bold text-gray-700">{formatPrecio(totalPeriodo)}</p>
+                  </div>
+                  {costoPeriodo !== null && costoPeriodo > 0 && (
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Costo de ventas</p>
+                      <p className="text-sm font-bold text-gray-500">− {formatPrecio(costoPeriodo)}</p>
+                    </div>
+                  )}
+                  {ganancia !== null && costoPeriodo! > 0 && (
+                    <div>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Ganancia real</p>
+                      <p className="text-sm font-bold text-teal-600">{formatPrecio(ganancia)}</p>
+                    </div>
+                  )}
+                  {costoPeriodo === null && (
+                    <p className="text-xs text-gray-400 self-center">Calculando costo...</p>
+                  )}
+                </div>
+              )
+            })()}
 
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
               {loadingAnteriores ? (
