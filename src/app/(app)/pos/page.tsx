@@ -215,7 +215,7 @@ export default function PosPage() {
           <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide" style={{ fontFamily: 'var(--font-sans)' }}>
             {periodo === 'hoy' ? 'Total del día' : periodo === 'semana' ? 'Total semana' : periodo === 'mes' ? 'Total mes' : 'Total'}
           </p>
-          <p className="text-2xl font-black text-teal-600 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
+          <p className="text-2xl font-black text-teal-600 leading-none">
             {mask(formatPrecio(totalDia))}
           </p>
         </div>
@@ -223,7 +223,7 @@ export default function PosPage() {
           <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide" style={{ fontFamily: 'var(--font-sans)' }}>
             Ventas
           </p>
-          <p className="text-2xl font-black text-gray-800 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
+          <p className="text-2xl font-black text-gray-800 leading-none">
             {cantVentas}
           </p>
         </div>
@@ -231,7 +231,7 @@ export default function PosPage() {
           <p className="text-xs font-semibold text-gray-400 mb-1 uppercase tracking-wide" style={{ fontFamily: 'var(--font-sans)' }}>
             Promedio
           </p>
-          <p className="text-2xl font-black text-gray-800 leading-none" style={{ fontFamily: 'var(--font-display)' }}>
+          <p className="text-2xl font-black text-gray-800 leading-none">
             {mask(formatPrecio(promedio))}
           </p>
         </div>
@@ -334,7 +334,7 @@ export default function PosPage() {
                   </div>
 
                   <div className="text-right shrink-0 min-w-[80px]">
-                    <p className="font-bold text-gray-800 text-sm" style={{ fontFamily: 'var(--font-display)' }}>
+                    <p className="font-bold text-gray-800 text-sm">
                       {mask(formatPrecio(venta.total))}
                     </p>
                     {venta.descuento > 0 && (
@@ -401,7 +401,7 @@ export default function PosPage() {
                     )}
                     <div className="mt-2 pt-2 border-t border-teal-100 flex justify-between">
                       <span className="text-xs text-gray-400">{items.length} artículo{items.length !== 1 ? 's' : ''}</span>
-                      <span className="text-sm font-bold text-teal-700" style={{ fontFamily: 'var(--font-display)' }}>
+                      <span className="text-sm font-bold text-teal-700">
                         {mask(formatPrecio(venta.total))}
                       </span>
                     </div>

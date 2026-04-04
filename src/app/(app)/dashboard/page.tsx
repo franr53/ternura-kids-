@@ -299,7 +299,7 @@ export default function DashboardPage() {
                 <Skeleton className="h-8 w-32" />
               ) : (
                 <div>
-                  <p className="text-2xl font-bold text-gray-900 font-mono">
+                  <p className="text-2xl font-bold text-gray-900">
                     {kpi.value}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1">
@@ -428,7 +428,7 @@ export default function DashboardPage() {
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
                         <span className="text-xs text-gray-600 font-medium">{metodo}</span>
                       </div>
-                      <span className="text-xs font-bold text-gray-700 font-mono">{mask(formatPrecio(total))}</span>
+                      <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(total))}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                       <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
@@ -439,7 +439,7 @@ export default function DashboardPage() {
               <div className="pt-2 border-t border-gray-50">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-400">Total</span>
-                  <span className="text-sm font-bold text-gray-700 font-mono">{mask(formatPrecio(totalMetodos))}</span>
+                  <span className="text-sm font-bold text-gray-700">{mask(formatPrecio(totalMetodos))}</span>
                 </div>
               </div>
             </div>
@@ -523,7 +523,7 @@ export default function DashboardPage() {
                   <div key={i}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs text-gray-600 truncate">{prod.nombre}</span>
-                      <span className="text-xs font-bold text-gray-700 font-mono ml-2">{prod.cantidad}</span>
+                      <span className="text-xs font-bold text-gray-700 ml-2">{prod.cantidad}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                       <div
@@ -575,7 +575,7 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition-colors">
                     <InitialsAvatar name={c.nombre} />
                     <span className="flex-1 text-sm text-gray-700 truncate">{c.nombre}</span>
-                    <span className="text-xs font-bold bg-red-50 text-red-500 px-2.5 py-1 rounded-full shrink-0 font-mono">
+                    <span className="text-xs font-bold bg-red-50 text-red-500 px-2.5 py-1 rounded-full shrink-0">
                       {mask(formatPrecio(c.deuda_total))}
                     </span>
                   </div>
