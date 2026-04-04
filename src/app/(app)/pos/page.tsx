@@ -70,6 +70,9 @@ export default function PosPage() {
   const [mostrarCobroDeuda, setMostrarCobroDeuda] = useState(false)
   const [mostrarDevolucion, setMostrarDevolucion] = useState(false)
   const [expandida, setExpandida] = useState<string | null>(null)
+
+  type CambioSimple = { id: string; creado_en: string; diferencia: number; resolucion_diferencia?: string; total_devuelto: number; total_nuevo: number }
+  const [cambiosPorVenta, setCambiosPorVenta] = useState<Record<string, CambioSimple>>({})
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
 
@@ -107,6 +110,21 @@ export default function PosPage() {
     return (data as unknown as VentaHoy[]) || []
   })
   const ventas = _ventas ?? []
+
+  useEffect(() => {
+    if (ventas.length === 0) return
+    const ids = ventas.map(v => v.id)
+    supabase
+      .from('cambios')
+      .select('id, venta_original_id, creado_en, diferencia, resolucion_diferencia, total_devuelto, total_nuevo')
+      .in('venta_original_id', ids)
+      .then(({ data }) => {
+        if (!data) return
+        const map: Record<string, CambioSimple> = {}
+        ;(data as (CambioSimple & { venta_original_id: string })[]).forEach(c => { map[c.venta_original_id] = c })
+        setCambiosPorVenta(map)
+      })
+  }, [ventas])
 
   const totalDia = ventas.reduce((s, v) => s + v.total, 0)
   const cantVentas = ventas.length
@@ -387,6 +405,27 @@ export default function PosPage() {
                         {mask(formatPrecio(venta.total))}
                       </span>
                     </div>
+                    {cambiosPorVenta[venta.id] && (() => {
+                      const c = cambiosPorVenta[venta.id]
+                      const resLabel: Record<string, string> = {
+                        saldo_favor: 'saldo a favor', efectivo: 'efectivo',
+                        transferencia: 'transferencia', fiado: 'fiado', ninguna: 'sin diferencia',
+                      }
+                      return (
+                        <div className="mt-2 pt-2 border-t border-teal-100 flex items-center gap-1.5 text-xs text-violet-600">
+                          <RotateCcw size={11} />
+                          <span className="font-medium">Cambio registrado</span>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-gray-400">{new Date(c.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>
+                          {c.diferencia !== 0 && (
+                            <>
+                              <span className="text-gray-300">·</span>
+                              <span className="text-gray-400">dif. {mask(formatPrecio(Math.abs(c.diferencia)))} en {resLabel[c.resolucion_diferencia || ''] || c.resolucion_diferencia}</span>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
               </div>

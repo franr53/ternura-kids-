@@ -28,6 +28,17 @@ type VentaConItems = Venta & {
   venta_pagos?: { metodo: string; monto: number }[]
 }
 
+type CambioLocal = {
+  id: string
+  creado_en: string
+  items_devueltos: { variante_id: string; cantidad: number; precio_unitario: number }[]
+  items_nuevos: { variante_id: string; cantidad: number; precio_unitario: number }[]
+  total_devuelto: number
+  total_nuevo: number
+  diferencia: number
+  resolucion_diferencia?: string
+}
+
 export default function ClienteDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const supabase = createClient()
@@ -36,6 +47,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [movimientos, setMovimientos] = useState<FiadoMovimiento[]>([])
   const [ventas, setVentas] = useState<VentaConItems[]>([])
   const [ventaExpandida, setVentaExpandida] = useState<string | null>(null)
+  const [cambios, setCambios] = useState<CambioLocal[]>([])
   const [loading, setLoading] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [nombre, setNombre] = useState('')
@@ -52,16 +64,18 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     async function cargar() {
-      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }] = await Promise.all([
+      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(30),
         supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
         supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
+        supabase.from('cambios').select('id, creado_en, items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(20),
       ])
       if (c) { setCliente(c); setNombre(c.nombre); setTelefono(c.telefono || ''); setDireccion(c.direccion || '') }
       setMovimientos(movs || [])
       setVentas(vs || [])
       setProveedores((provs || []) as Proveedor[])
+      setCambios((cams || []) as CambioLocal[])
       setLoading(false)
     }
     cargar()
@@ -343,15 +357,22 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       </div>
 
       {/* Historial unificado */}
-      {(movimientos.length > 0 || ventas.length > 0) && (() => {
+      {(movimientos.length > 0 || ventas.length > 0 || cambios.length > 0) && (() => {
         // Combinar y ordenar por fecha descendente
         type Evento =
           | { tipo: 'venta'; fecha: string; data: VentaConItems }
           | { tipo: 'mov'; fecha: string; data: FiadoMovimiento }
+          | { tipo: 'cambio'; fecha: string; data: CambioLocal }
+
+        const RESOLUCION_LABEL: Record<string, string> = {
+          saldo_favor: 'Saldo a favor', efectivo: 'Efectivo',
+          transferencia: 'Transferencia', fiado: 'Fiado', ninguna: 'Sin diferencia',
+        }
 
         const eventos: Evento[] = [
           ...ventas.map(v => ({ tipo: 'venta' as const, fecha: v.creado_en, data: v })),
           ...movimientos.map(m => ({ tipo: 'mov' as const, fecha: m.creado_en, data: m })),
+          ...cambios.map(c => ({ tipo: 'cambio' as const, fecha: c.creado_en, data: c })),
         ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
 
         return (
@@ -409,6 +430,37 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                           </div>
                         </div>
                       )}
+                    </div>
+                  )
+                }
+
+                // Cambio de prenda
+                if (ev.tipo === 'cambio') {
+                  const c = ev.data
+                  const nDev = c.items_devueltos.reduce((s, i) => s + i.cantidad, 0)
+                  const nNuev = c.items_nuevos.reduce((s, i) => s + i.cantidad, 0)
+                  return (
+                    <div key={`c-${c.id}`} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
+                      <div className="shrink-0 pt-0.5">
+                        <span className="text-xs bg-violet-100 text-violet-700 font-medium px-2 py-0.5 rounded-full">Cambio</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-700">
+                          {nDev} prenda{nDev !== 1 ? 's' : ''} devuelta{nDev !== 1 ? 's' : ''}
+                          {nNuev > 0 && ` → ${nNuev} nueva${nNuev !== 1 ? 's' : ''}`}
+                        </p>
+                        {c.diferencia !== 0 && (
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            Dif. {mask(formatPrecio(Math.abs(c.diferencia)))} · {RESOLUCION_LABEL[c.resolucion_diferencia || ''] || c.resolucion_diferencia}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {new Date(c.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0 text-xs text-gray-400">
+                        {mask(formatPrecio(c.total_devuelto))}
+                      </div>
                     </div>
                   )
                 }
