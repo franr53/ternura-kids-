@@ -100,6 +100,7 @@ export interface Cliente {
   telefono?: string
   direccion?: string
   deuda_total: number
+  saldo_favor: number
   activo: boolean
   creado_en: string
 }
@@ -216,6 +217,38 @@ export interface IngresoMercaderia {
   creado_en: string
   proveedor?: Proveedor
   items?: IngresoItem[]
+}
+
+export type ItemDevolucion = {
+  variante_id: string
+  cantidad: number
+  precio_unitario: number
+}
+
+export interface Cambio {
+  id: string
+  venta_original_id: string
+  cliente_id?: string
+  items_devueltos: ItemDevolucion[]
+  items_nuevos: ItemDevolucion[]
+  total_devuelto: number
+  total_nuevo: number
+  diferencia: number
+  resolucion_diferencia?: string
+  creado_en: string
+}
+
+export type ResultadoCambio = {
+  cambio_id: string
+  total_devuelto: number
+  total_nuevo: number
+  diferencia: number
+}
+
+export type ResultadoDevolucion = {
+  saldo_generado: number
+  deuda_revertida: number
+  items_procesados: number
 }
 
 export interface IngresoItem {

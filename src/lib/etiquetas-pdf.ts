@@ -834,6 +834,182 @@ export async function generarPDFRecibo(data: ReciboAbonoData): Promise<Blob> {
   }
 }
 
+// --- Comprobante de cambio/devolución PDF ---
+
+export interface CambioData {
+  fecha: string
+  clienteNombre?: string
+  clienteTelefono?: string
+  itemsDevueltos: { nombre: string; talle: string; cantidad: number; precio: number }[]
+  itemsNuevos: { nombre: string; talle: string; cantidad: number; precio: number }[]
+  totalDevuelto: number
+  totalNuevo: number
+  diferencia: number
+  resolucion: string // 'saldo_favor'|'efectivo'|'transferencia'|'fiado'|'ninguna'
+}
+
+function resolucionLabel(r: string, diferencia: number): string {
+  if (diferencia === 0) return 'Cambio exacto'
+  if (r === 'saldo_favor') return 'Saldo a favor del cliente'
+  if (r === 'efectivo') return diferencia > 0 ? 'Se devuelve efectivo al cliente' : 'Cliente abona en efectivo'
+  if (r === 'transferencia') return diferencia > 0 ? 'Se devuelve por transferencia' : 'Cliente abona por transferencia'
+  if (r === 'fiado') return 'Se agrega a cuenta corriente'
+  return 'Sin resolución'
+}
+
+export function generarHTMLCambio(data: CambioData): string {
+  const renderItems = (items: typeof data.itemsDevueltos) =>
+    items.map(i => {
+      const desc = i.cantidad > 1 ? `${i.cantidad}x ${i.nombre} T${i.talle}` : `${i.nombre} T${i.talle}`
+      return `<div class="item"><span class="item-desc">${desc}</span><span class="item-price">${formatPrecio(i.precio * i.cantidad)}</span></div>`
+    }).join('')
+
+  const difLabel = data.diferencia > 0
+    ? `<span class="dif-favor">Saldo a favor: ${formatPrecio(data.diferencia)}</span>`
+    : data.diferencia < 0
+      ? `<span class="dif-paga">A pagar: ${formatPrecio(Math.abs(data.diferencia))}</span>`
+      : `<span class="dif-exacto">Cambio exacto</span>`
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #1a1a1a; font-variant-numeric: tabular-nums; }
+    .comprobante { width: 80mm; padding: 5mm 4mm; }
+    .header { text-align: center; padding-bottom: 3mm; border-bottom: 1px dashed #ccc; }
+    .header img { width: 30mm; height: auto; margin-bottom: 2mm; }
+    .header .tipo { font-size: 10pt; font-weight: 700; color: #4EC3BD; text-transform: uppercase; letter-spacing: 1px; margin-top: 2mm; }
+    .header .store-info { font-size: 7pt; color: #888; }
+    .meta { padding: 3mm 0; border-bottom: 1px dashed #ccc; }
+    .meta-row { display: flex; justify-content: space-between; font-size: 8pt; color: #555; padding: 0.5mm 0; }
+    .meta-row .label { color: #999; }
+    .meta-row .value { font-weight: 600; color: #333; }
+    .section { padding: 2.5mm 0; border-bottom: 1px dashed #ccc; }
+    .section-title { font-size: 7.5pt; font-weight: 700; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 1.5mm; }
+    .item { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.2mm 0; font-size: 8.5pt; gap: 2mm; border-bottom: 1px solid #f0f0f0; }
+    .item:last-child { border-bottom: none; }
+    .item-desc { flex: 1; word-break: break-word; color: #333; }
+    .item-price { flex-shrink: 0; font-weight: 600; text-align: right; min-width: 15mm; }
+    .subtotal-row { display: flex; justify-content: space-between; font-size: 8.5pt; font-weight: 600; color: #555; padding-top: 1.5mm; margin-top: 0.5mm; border-top: 1px solid #eee; }
+    .diferencia-block { padding: 3mm 0; text-align: center; }
+    .dif-favor { font-size: 12pt; font-weight: 700; color: #16a34a; }
+    .dif-paga { font-size: 12pt; font-weight: 700; color: #dc2626; }
+    .dif-exacto { font-size: 11pt; font-weight: 600; color: #4EC3BD; }
+    .resolucion { font-size: 8pt; color: #888; margin-top: 1mm; }
+    .footer { text-align: center; padding-top: 3mm; margin-top: 3mm; border-top: 1px dashed #ccc; font-size: 8pt; color: #aaa; }
+    .footer .thanks { font-size: 9pt; color: #4EC3BD; font-weight: 600; margin-bottom: 1mm; }
+  </style>
+</head>
+<body>
+  <div class="comprobante">
+    <div class="header">
+      <img src="${LOGO_BASE64}" alt="Ternura Kids" />
+      <div class="tipo">Cambio / Devolución</div>
+      <div class="store-info">Indumentaria infantil</div>
+    </div>
+    <div class="meta">
+      <div class="meta-row"><span class="label">Fecha</span><span class="value">${data.fecha}</span></div>
+      ${data.clienteNombre ? `<div class="meta-row"><span class="label">Cliente</span><span class="value">${data.clienteNombre}</span></div>` : ''}
+    </div>
+    <div class="section">
+      <div class="section-title">Prendas devueltas</div>
+      ${renderItems(data.itemsDevueltos)}
+      <div class="subtotal-row"><span>Subtotal devuelto</span><span>${formatPrecio(data.totalDevuelto)}</span></div>
+    </div>
+    ${data.itemsNuevos.length > 0 ? `
+    <div class="section">
+      <div class="section-title">Prendas llevadas</div>
+      ${renderItems(data.itemsNuevos)}
+      <div class="subtotal-row"><span>Subtotal llevado</span><span>${formatPrecio(data.totalNuevo)}</span></div>
+    </div>` : ''}
+    <div class="diferencia-block">
+      ${difLabel}
+      <div class="resolucion">${resolucionLabel(data.resolucion, data.diferencia)}</div>
+    </div>
+    <div class="footer">
+      <div class="thanks">¡Gracias por tu compra!</div>
+      <div>Ternura Kids</div>
+    </div>
+  </div>
+</body>
+</html>`
+}
+
+export async function generarPDFCambio(data: CambioData): Promise<Blob> {
+  const html = generarHTMLCambio(data)
+
+  const iframe = document.createElement('iframe')
+  iframe.style.position = 'fixed'
+  iframe.style.left = '-9999px'
+  iframe.style.top = '-9999px'
+  iframe.style.width = '80mm'
+  iframe.style.height = '297mm'
+  document.body.appendChild(iframe)
+
+  iframe.srcdoc = html
+
+  await new Promise<void>((resolve) => {
+    iframe.onload = () => resolve()
+    setTimeout(resolve, 2000)
+  })
+
+  const iframeWin = iframe.contentWindow
+  const iframeDoc = iframe.contentDocument || iframeWin?.document
+  if (!iframeDoc || !iframeWin) {
+    document.body.removeChild(iframe)
+    throw new Error('No se pudo crear el iframe para el comprobante de cambio')
+  }
+
+  const comprobante = iframeDoc.querySelector('.comprobante') as HTMLElement | null
+  if (!comprobante) {
+    document.body.removeChild(iframe)
+    throw new Error('No se encontró el comprobante de cambio')
+  }
+
+  try {
+    await injectScript(iframeDoc, HTML2CANVAS_CDN)
+    await injectScript(iframeDoc, JSPDF_CDN)
+  } catch (e) {
+    document.body.removeChild(iframe)
+    throw e
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const win = iframeWin as any
+  const html2canvas = win.html2canvas
+  const jsPDF = win.jspdf?.jsPDF
+
+  if (!html2canvas || !jsPDF) {
+    document.body.removeChild(iframe)
+    throw new Error('html2canvas o jsPDF no disponibles')
+  }
+
+  try {
+    const canvas = await html2canvas(comprobante, { scale: 2, useCORS: true, logging: false })
+    const pdfW = 80
+    const margin = 3
+    const contentW = pdfW - margin * 2
+    const contentH = (canvas.height * contentW) / canvas.width
+    const pdfH = contentH + margin * 2
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [pdfW, pdfH] })
+    const imgData = canvas.toDataURL('image/jpeg', 0.95)
+    pdf.addImage(imgData, 'JPEG', margin, margin, contentW, contentH)
+    return pdf.output('blob') as Blob
+  } finally {
+    document.body.removeChild(iframe)
+  }
+}
+
+export async function compartirPDFCambioWhatsApp(data: CambioData): Promise<'shared' | 'downloaded'> {
+  const blob = await generarPDFCambio(data)
+  const fecha = data.fecha.replace(/\//g, '-')
+  const nombre = `cambio_${fecha}.pdf`
+  const tel = data.clienteTelefono || ''
+  return compartirPDFWhatsApp(blob, nombre, tel)
+}
+
 // --- WhatsApp tel persistence ---
 
 const WHATSAPP_TEL_KEY = 'etiquetas_whatsapp_tel'
