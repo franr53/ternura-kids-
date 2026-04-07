@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, useMemo } from 'react'
+import { Suspense, useState, useMemo, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -57,6 +57,11 @@ function InventarioContent() {
   }
 
   const [busqueda, setBusqueda] = useState('')
+  const [busquedaDebounced, setBusquedaDebounced] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setBusquedaDebounced(busqueda), 300)
+    return () => clearTimeout(t)
+  }, [busqueda])
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
   const [filtroProveedor, setFiltroProveedor] = useState('todos')
   const stockParam = searchParams.get('stock')
@@ -106,17 +111,20 @@ function InventarioContent() {
     cargarDatos()
   }
 
-  // Cálculo de anomalías (client-side)
-  const todosLosCodigos = productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter(Boolean) ?? [])
-  const codigosDuplicados = new Set(
-    todosLosCodigos.filter((c, i) => todosLosCodigos.indexOf(c) !== i)
-  )
-  const nombresContados = productos.reduce<Record<string, number>>((acc, p) => {
-    const n = p.nombre_base.trim().toLowerCase()
-    acc[n] = (acc[n] || 0) + 1
-    return acc
-  }, {})
-  const nombresRepetidos = new Set(Object.entries(nombresContados).filter(([, c]) => c > 1).map(([n]) => n))
+  // Cálculo de anomalías (memoizado — solo cambia cuando cambian productos)
+  const codigosDuplicados = useMemo(() => {
+    const todos = productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter(Boolean) ?? [])
+    return new Set(todos.filter((c, i) => todos.indexOf(c) !== i))
+  }, [productos])
+
+  const nombresRepetidos = useMemo(() => {
+    const contados = productos.reduce<Record<string, number>>((acc, p) => {
+      const n = p.nombre_base.trim().toLowerCase()
+      acc[n] = (acc[n] || 0) + 1
+      return acc
+    }, {})
+    return new Set(Object.entries(contados).filter(([, c]) => c > 1).map(([n]) => n))
+  }, [productos])
 
   const conteoAnomalias = {
     sin_codigo: productos.filter(p => p.variantes?.some(v => !v.codigo_barras)).length,
@@ -153,11 +161,11 @@ function InventarioContent() {
       })),
   [productos])
 
-  const productosFiltrados = productos.filter(p => {
+  const productosFiltrados = useMemo(() => productos.filter(p => {
     const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    const matchBusqueda = busqueda === '' ||
-      norm(busqueda).split(/\s+/).filter(Boolean).every(w => norm(p.nombre_base).includes(w)) ||
-      p.variantes?.some(v => v.codigo_barras?.includes(busqueda))
+    const matchBusqueda = busquedaDebounced === '' ||
+      norm(busquedaDebounced).split(/\s+/).filter(Boolean).every(w => norm(p.nombre_base).includes(w)) ||
+      p.variantes?.some(v => v.codigo_barras?.includes(busquedaDebounced))
     const matchCategoria = filtroCategoria === 'todas' || p.categoria_id === filtroCategoria
     const matchProveedor = filtroProveedor === 'todos' || p.marca_id === filtroProveedor
     const stockTotal = p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
@@ -194,7 +202,9 @@ function InventarioContent() {
       case 'recientes': return b.creado_en.localeCompare(a.creado_en)
       default: return a.nombre_base.localeCompare(b.nombre_base)
     }
-  })
+  }), [busquedaDebounced, filtroCategoria, filtroProveedor, filtroStock, filtroTemporada,
+       filtroPrecioMin, filtroPrecioMax, filtroAnomalia, filtroTalle, orden,
+       codigosDuplicados, nombresRepetidos, productos])
 
   // Resumen financiero del stock (memoizado para no recalcular en cada render)
   const { costoStock, ventaStock, gananciaStock } = useMemo(() => {
