@@ -9,7 +9,7 @@ import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy, Pencil, Eye, EyeOff } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 
@@ -49,19 +49,7 @@ function InventarioContent() {
   const categorias = cachedData?.categorias ?? []
   const marcas = cachedData?.marcas ?? []
 
-  const [verCostos, setVerCostos] = useState(() => {
-    try { return localStorage.getItem('inv:verCostos') !== 'false' } catch { return true }
-  })
-  function toggleVerCostos() {
-    setVerCostos(v => { try { localStorage.setItem('inv:verCostos', String(!v)) } catch {} return !v })
-  }
-
   const [busqueda, setBusqueda] = useState('')
-  const [busquedaDebounced, setBusquedaDebounced] = useState('')
-  useEffect(() => {
-    const t = setTimeout(() => setBusquedaDebounced(busqueda), 300)
-    return () => clearTimeout(t)
-  }, [busqueda])
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
   const [filtroProveedor, setFiltroProveedor] = useState('todos')
   const stockParam = searchParams.get('stock')
@@ -166,9 +154,9 @@ function InventarioContent() {
 
   const productosFiltrados = useMemo(() => productos.filter(p => {
     const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    const matchBusqueda = busquedaDebounced === '' ||
-      norm(busquedaDebounced).split(/\s+/).filter(Boolean).every(w => norm(p.nombre_base).includes(w)) ||
-      p.variantes?.some(v => v.codigo_barras?.includes(busquedaDebounced))
+    const matchBusqueda = busqueda === '' ||
+      norm(busqueda).split(/\s+/).filter(Boolean).every(w => norm(p.nombre_base).includes(w)) ||
+      p.variantes?.some(v => v.codigo_barras?.includes(busqueda))
     const matchCategoria = filtroCategoria === 'todas' || p.categoria_id === filtroCategoria
     const matchProveedor = filtroProveedor === 'todos' || p.marca_id === filtroProveedor
     const stockTotal = p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0
@@ -205,21 +193,9 @@ function InventarioContent() {
       case 'recientes': return b.creado_en.localeCompare(a.creado_en)
       default: return a.nombre_base.localeCompare(b.nombre_base)
     }
-  }), [busquedaDebounced, filtroCategoria, filtroProveedor, filtroStock, filtroTemporada,
+  }), [busqueda, filtroCategoria, filtroProveedor, filtroStock, filtroTemporada,
        filtroPrecioMin, filtroPrecioMax, filtroAnomalia, filtroTalle, orden,
        codigosDuplicados, nombresRepetidos, productos])
-
-  // Resumen financiero del stock (memoizado para no recalcular en cada render)
-  const { costoStock, ventaStock, gananciaStock } = useMemo(() => {
-    const variantes = productosFiltrados.flatMap(p => p.variantes ?? [])
-    const costo = variantes
-      .filter(v => v.stock > 0 && (v.precio_costo ?? 0) > 0)
-      .reduce((s, v) => s + v.precio_costo! * v.stock, 0)
-    const venta = variantes
-      .filter(v => v.stock > 0)
-      .reduce((s, v) => s + v.precio_venta * v.stock, 0)
-    return { costoStock: costo, ventaStock: venta, gananciaStock: venta - costo }
-  }, [productosFiltrados])
 
   // Stats
   const totalProductos = productos.length
@@ -307,42 +283,6 @@ function InventarioContent() {
           </Button>
         </Link>
       </div>
-
-      {/* Resumen financiero del stock */}
-      {ventaStock > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <button
-            onClick={toggleVerCostos}
-            className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors text-left"
-          >
-            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Valor del stock</span>
-            <div className="flex items-center gap-1.5 text-gray-400">
-              {!verCostos && <span className="text-xs text-gray-400">Mostrar</span>}
-              {verCostos ? <EyeOff size={14} /> : <Eye size={14} />}
-            </div>
-          </button>
-          {verCostos && (
-            <div className="flex flex-wrap gap-6 px-5 pb-4 border-t border-gray-100 pt-3">
-              {costoStock > 0 && (
-                <div>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Costo del stock</p>
-                  <p className="text-base font-bold text-gray-600">{formatPrecio(costoStock)}</p>
-                </div>
-              )}
-              <div>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Valor de venta</p>
-                <p className="text-base font-bold text-gray-700">{formatPrecio(ventaStock)}</p>
-              </div>
-              {costoStock > 0 && (
-                <div>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Ganancia potencial</p>
-                  <p className="text-base font-bold text-teal-600">{formatPrecio(gananciaStock)}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
