@@ -9,7 +9,7 @@ import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy, Pencil } from 'lucide-react'
+import { Plus, Search, Package, AlertTriangle, Layers, X, ArrowUpDown, Copy, Pencil, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 
@@ -48,6 +48,13 @@ function InventarioContent() {
   const productos = cachedData?.productos ?? []
   const categorias = cachedData?.categorias ?? []
   const marcas = cachedData?.marcas ?? []
+
+  const [verCostos, setVerCostos] = useState(() => {
+    try { return localStorage.getItem('inv:verCostos') !== 'false' } catch { return true }
+  })
+  function toggleVerCostos() {
+    setVerCostos(v => { try { localStorage.setItem('inv:verCostos', String(!v)) } catch {} return !v })
+  }
 
   const [busqueda, setBusqueda] = useState('')
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
@@ -279,12 +286,43 @@ function InventarioContent() {
           <h1 className="text-2xl font-bold text-gray-800">Inventario</h1>
           <p className="text-gray-500 text-sm mt-0.5">{totalProductos} productos activos</p>
         </div>
-        <Link href="/inventario/nuevo">
-          <Button className="bg-teal-500 hover:bg-teal-600 gap-2">
-            <Plus size={16} /> Nuevo producto
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleVerCostos}
+            title={verCostos ? 'Ocultar costos' : 'Mostrar costos'}
+            className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            {verCostos ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+          <Link href="/inventario/nuevo">
+            <Button className="bg-teal-500 hover:bg-teal-600 gap-2">
+              <Plus size={16} /> Nuevo producto
+            </Button>
+          </Link>
+        </div>
       </div>
+
+      {/* Resumen financiero del stock */}
+      {verCostos && ventaStock > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl px-5 py-3 flex flex-wrap gap-6">
+          {costoStock > 0 && (
+            <div>
+              <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Costo del stock</p>
+              <p className="text-base font-bold text-gray-600">{formatPrecio(costoStock)}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Valor de venta</p>
+            <p className="text-base font-bold text-gray-700">{formatPrecio(ventaStock)}</p>
+          </div>
+          {costoStock > 0 && (
+            <div>
+              <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Ganancia potencial</p>
+              <p className="text-base font-bold text-teal-600">{formatPrecio(gananciaStock)}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
@@ -890,29 +928,6 @@ function InventarioContent() {
         )}
       </div>
 
-      {/* Resumen financiero del stock */}
-      {ventaStock > 0 && (
-        <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
-          <div className="flex flex-wrap gap-6 justify-end">
-            {costoStock > 0 && (
-              <div className="text-right">
-                <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold">Costo del stock</p>
-                <p className="text-base font-bold text-gray-600">{formatPrecio(costoStock)}</p>
-              </div>
-            )}
-            <div className="text-right">
-              <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold">Valor de venta</p>
-              <p className="text-base font-bold text-gray-700">{formatPrecio(ventaStock)}</p>
-            </div>
-            {costoStock > 0 && (
-              <div className="text-right">
-                <p className="text-xs text-gray-400 uppercase tracking-wide font-semibold">Ganancia potencial</p>
-                <p className="text-base font-bold text-teal-600">{formatPrecio(gananciaStock)}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
