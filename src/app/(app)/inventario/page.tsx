@@ -197,6 +197,13 @@ function InventarioContent() {
        filtroPrecioMin, filtroPrecioMax, filtroAnomalia, filtroTalle, orden,
        codigosDuplicados, nombresRepetidos, productos])
 
+  // Paginación: mostrar de a 50 para no trabar el browser con cientos de filas
+  const ITEMS_POR_PAGINA = 50
+  const [limite, setLimite] = useState(ITEMS_POR_PAGINA)
+  useEffect(() => { setLimite(ITEMS_POR_PAGINA) }, [productosFiltrados])
+  const productosMostrados = productosFiltrados.slice(0, limite)
+  const hayMas = productosFiltrados.length > limite
+
   // Stats
   const totalProductos = productos.length
   const sinStock = productos.filter(p => (p.variantes?.reduce((s, v) => s + v.stock, 0) ?? 0) === 0).length
@@ -679,7 +686,7 @@ function InventarioContent() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {productosFiltrados.map(producto => {
+              {productosMostrados.map(producto => {
                 const variantes = producto.variantes || []
                 const variantesFiltradas = filtroTalle !== 'todos' ? variantes.filter(v => v.talle === filtroTalle) : variantes
                 const stockTotal = variantesFiltradas.reduce((s, v) => s + v.stock, 0)
@@ -885,6 +892,16 @@ function InventarioContent() {
               })}
             </tbody>
           </table>
+        )}
+        {hayMas && (
+          <div className="border-t border-gray-100 px-5 py-3 text-center">
+            <button
+              onClick={() => setLimite(l => l + ITEMS_POR_PAGINA)}
+              className="text-sm text-teal-600 hover:text-teal-700 font-medium"
+            >
+              Mostrar más ({productosFiltrados.length - limite} restantes)
+            </button>
+          </div>
         )}
       </div>
 
