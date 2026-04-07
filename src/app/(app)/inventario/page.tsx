@@ -794,7 +794,7 @@ function InventarioContent() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-end gap-1">
-                        <Link href={`/inventario/${producto.id}`} onClick={e => e.stopPropagation()}>
+                        <Link href={`/inventario/${producto.id}`} prefetch={false} onClick={e => e.stopPropagation()}>
                           <Button variant="ghost" size="sm" className="text-teal-600 hover:text-teal-700 hover:bg-teal-50 opacity-0 group-hover:opacity-100 transition-opacity">Editar</Button>
                         </Link>
                         <span className="text-gray-300 text-xs">{expandido ? '▲' : '▼'}</span>
