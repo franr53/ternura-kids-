@@ -196,15 +196,17 @@ function InventarioContent() {
     }
   })
 
-  // Resumen financiero del stock (sobre productos filtrados)
-  const todasLasVariantes = productosFiltrados.flatMap(p => p.variantes ?? [])
-  const costoStock = todasLasVariantes
-    .filter(v => v.stock > 0 && (v.precio_costo ?? 0) > 0)
-    .reduce((s, v) => s + v.precio_costo! * v.stock, 0)
-  const ventaStock = todasLasVariantes
-    .filter(v => v.stock > 0)
-    .reduce((s, v) => s + v.precio_venta * v.stock, 0)
-  const gananciaStock = ventaStock - costoStock
+  // Resumen financiero del stock (memoizado para no recalcular en cada render)
+  const { costoStock, ventaStock, gananciaStock } = useMemo(() => {
+    const variantes = productosFiltrados.flatMap(p => p.variantes ?? [])
+    const costo = variantes
+      .filter(v => v.stock > 0 && (v.precio_costo ?? 0) > 0)
+      .reduce((s, v) => s + v.precio_costo! * v.stock, 0)
+    const venta = variantes
+      .filter(v => v.stock > 0)
+      .reduce((s, v) => s + v.precio_venta * v.stock, 0)
+    return { costoStock: costo, ventaStock: venta, gananciaStock: venta - costo }
+  }, [productosFiltrados])
 
   // Stats
   const totalProductos = productos.length
