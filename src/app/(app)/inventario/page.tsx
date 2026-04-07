@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState, useMemo, useEffect } from 'react'
+import { Suspense, useState, useMemo, useEffect, useTransition, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -75,7 +75,10 @@ function InventarioContent() {
   const [editandoCodigo, setEditandoCodigo] = useState<{ varianteId: string; valor: string } | null>(null)
   const [editandoPrecio, setEditandoPrecio] = useState<{ varianteId: string; precioCosto: string; precioVenta: string } | null>(null)
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
-  const toggleExpand = (id: string) => setExpandidos(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  const [, startTransition] = useTransition()
+  const toggleExpand = useCallback((id: string) => startTransition(() => {
+    setExpandidos(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }), [])
   const [panelCodigos, setPanelCodigos] = useState(false)
   const [tabCodigos, setTabCodigos] = useState<'faltantes' | 'colisiones'>('faltantes')
   const [aplicandoCodigos, setAplicandoCodigos] = useState(false)
@@ -126,12 +129,12 @@ function InventarioContent() {
     return new Set(Object.entries(contados).filter(([, c]) => c > 1).map(([n]) => n))
   }, [productos])
 
-  const conteoAnomalias = {
+  const conteoAnomalias = useMemo(() => ({
     sin_codigo: productos.filter(p => p.variantes?.some(v => !v.codigo_barras)).length,
     cod_duplicado: productos.filter(p => p.variantes?.some(v => v.codigo_barras && codigosDuplicados.has(v.codigo_barras))).length,
     nombre_repetido: productos.filter(p => nombresRepetidos.has(p.nombre_base.trim().toLowerCase())).length,
     precio_invalido: productos.filter(p => p.variantes?.some(v => v.precio_venta === 0 || v.precio_venta < v.precio_costo)).length,
-  }
+  }), [productos, codigosDuplicados, nombresRepetidos])
 
   const todosCodigosUsados = useMemo(() =>
     new Set(productos.flatMap(p => p.variantes?.map(v => v.codigo_barras).filter((c): c is string => !!c) ?? [])),
