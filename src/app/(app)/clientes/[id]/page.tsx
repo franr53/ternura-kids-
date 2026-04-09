@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag, Loader2, X } from 'lucide-react'
+import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag, Loader2, X, Receipt } from 'lucide-react'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import Link from 'next/link'
@@ -61,6 +61,8 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [enviandoRecibo, setEnviandoRecibo] = useState(false)
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
+  const [soloFacturar, setSoloFacturar] = useState(false)
+  const METODOS_FACTURAR_CLI = new Set(['transferencia', 'debito', 'credito'])
 
   useEffect(() => {
     async function cargar() {
@@ -369,16 +371,45 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           transferencia: 'Transferencia', fiado: 'Fiado', ninguna: 'Sin diferencia',
         }
 
-        const eventos: Evento[] = [
+        const todosEventos: Evento[] = [
           ...ventas.map(v => ({ tipo: 'venta' as const, fecha: v.creado_en, data: v })),
           ...movimientos.map(m => ({ tipo: 'mov' as const, fecha: m.creado_en, data: m })),
           ...cambios.map(c => ({ tipo: 'cambio' as const, fecha: c.creado_en, data: c })),
         ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
 
+        const eventos = soloFacturar
+          ? todosEventos.filter(ev => {
+              if (ev.tipo === 'venta') return (ev.data.venta_pagos || []).some(p => METODOS_FACTURAR_CLI.has(p.metodo))
+              if (ev.tipo === 'mov') return ev.data.tipo === 'abono' && METODOS_FACTURAR_CLI.has(ev.data.metodo_pago || '')
+              return false
+            })
+          : todosEventos
+
         return (
           <Card>
-            <CardHeader><CardTitle className="text-base flex items-center gap-2"><ShoppingBag size={16} className="text-teal-500" /> Historial</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2 justify-between">
+                <span className="flex items-center gap-2"><ShoppingBag size={16} className="text-teal-500" /> Historial</span>
+                <button
+                  onClick={() => setSoloFacturar(v => !v)}
+                  className={cn(
+                    'flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all',
+                    soloFacturar
+                      ? 'bg-violet-500 border-violet-500 text-white'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600'
+                  )}
+                >
+                  <Receipt size={11} />
+                  Para facturar
+                </button>
+              </CardTitle>
+            </CardHeader>
             <CardContent className="p-0">
+              {eventos.length === 0 && (
+                <div className="px-4 py-8 text-center text-sm text-gray-400">
+                  No hay transferencias ni tarjetas en el historial
+                </div>
+              )}
               {eventos.map((ev, i) => {
                 if (ev.tipo === 'venta') {
                   const venta = ev.data

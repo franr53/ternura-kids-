@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, MetodoPago, Variante, Producto } from '@/types'
 import { Input } from '@/components/ui/input'
-import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar, RotateCcw } from 'lucide-react'
+import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar, RotateCcw, Receipt } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
@@ -33,6 +33,7 @@ type VentaItem = {
 }
 
 type VentaHoy = {
+  _tipo: 'venta'
   id: string
   total: number
   descuento: number
@@ -41,6 +42,18 @@ type VentaHoy = {
   venta_items?: VentaItem[]
   venta_pagos?: { metodo: string; monto: number; notas?: string }[]
 }
+
+type CobroHoy = {
+  _tipo: 'cobro'
+  id: string
+  monto: number
+  metodo_pago: string
+  notas?: string | null
+  creado_en: string
+  cliente?: { id: string; nombre: string } | null
+}
+
+type RegistroHoy = VentaHoy | CobroHoy
 
 const METODO_ICON: Record<string, React.ReactNode> = {
   efectivo:      <Banknote size={12} />,
@@ -75,9 +88,12 @@ export default function PosPage() {
   const [cambiosPorVenta, setCambiosPorVenta] = useState<Record<string, CambioSimple>>({})
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
+  const [soloFacturar, setSoloFacturar] = useState(false)
 
-  const cacheKey = periodo === 'fecha' ? `pos:ventas:fecha:${fechaCustom}` : `pos:ventas:${periodo}`
-  const { data: _ventas, loading, refresh: cargarVentas } = useCache<VentaHoy[]>(cacheKey, async () => {
+  const METODOS_FACTURAR = new Set(['transferencia', 'debito', 'credito'])
+
+  const cacheKey = periodo === 'fecha' ? `pos:registros:fecha:${fechaCustom}` : `pos:registros:${periodo}`
+  const { data: _registros, loading, refresh: cargarVentas } = useCache<RegistroHoy[]>(cacheKey, async () => {
     const desde = new Date()
     if (periodo === 'hoy') {
       desde.setHours(0, 0, 0, 0)
@@ -93,23 +109,36 @@ export default function PosPage() {
       desde.setHours(0, 0, 0, 0)
     }
 
-    let query = supabase
+    let ventasQuery = supabase
       .from('ventas')
       .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto, notas)')
       .eq('estado', 'completada')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
 
+    let cobrosQuery = supabase
+      .from('fiado_movimientos')
+      .select('id, monto, metodo_pago, notas, creado_en, cliente:clientes(id, nombre)')
+      .eq('tipo', 'abono')
+      .gte('creado_en', desde.toISOString())
+      .order('creado_en', { ascending: false })
+
     if (periodo === 'fecha') {
       const hasta = new Date(desde)
       hasta.setHours(23, 59, 59, 999)
-      query = query.lte('creado_en', hasta.toISOString())
+      ventasQuery = ventasQuery.lte('creado_en', hasta.toISOString())
+      cobrosQuery = cobrosQuery.lte('creado_en', hasta.toISOString())
     }
 
-    const { data } = await query
-    return (data as unknown as VentaHoy[]) || []
+    const [{ data: ventasData }, { data: cobrosData }] = await Promise.all([ventasQuery, cobrosQuery])
+
+    const ventas: VentaHoy[] = ((ventasData as unknown as Omit<VentaHoy, '_tipo'>[]) || []).map(v => ({ ...v, _tipo: 'venta' as const }))
+    const cobros: CobroHoy[] = ((cobrosData as unknown as Omit<CobroHoy, '_tipo'>[]) || []).map(c => ({ ...c, _tipo: 'cobro' as const }))
+
+    return [...ventas, ...cobros].sort((a, b) => b.creado_en.localeCompare(a.creado_en))
   })
-  const ventas = _ventas ?? []
+  const registros = _registros ?? []
+  const ventas = registros.filter((r): r is VentaHoy => r._tipo === 'venta')
 
   useEffect(() => {
     if (ventas.length === 0) return
@@ -125,6 +154,13 @@ export default function PosPage() {
         setCambiosPorVenta(map)
       })
   }, [ventas])
+
+  const registrosFiltrados = soloFacturar
+    ? registros.filter(r => {
+        if (r._tipo === 'cobro') return METODOS_FACTURAR.has(r.metodo_pago)
+        return (r.venta_pagos || []).some(p => METODOS_FACTURAR.has(p.metodo))
+      })
+    : registros
 
   const totalDia = ventas.reduce((s, v) => s + v.total, 0)
   const cantVentas = ventas.length
@@ -207,6 +243,19 @@ export default function PosPage() {
             />
           </div>
         )}
+        <button
+          onClick={() => setSoloFacturar(v => !v)}
+          className={cn(
+            'flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-full border transition-all',
+            soloFacturar
+              ? 'bg-violet-500 border-violet-500 text-white shadow-sm shadow-violet-100'
+              : 'bg-white border-gray-200 text-gray-500 hover:border-violet-300 hover:text-violet-600'
+          )}
+          style={{ fontFamily: 'var(--font-sans)' }}
+        >
+          <Receipt size={11} />
+          Para facturar
+        </button>
       </div>
 
       {/* Stats */}
@@ -249,7 +298,7 @@ export default function PosPage() {
               />
             ))}
           </div>
-        ) : ventas.length === 0 ? (
+        ) : registrosFiltrados.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 select-none">
             <div className="w-16 h-16 rounded-2xl bg-teal-50 flex items-center justify-center mb-4">
               <ShoppingCart size={32} strokeWidth={1.5} className="text-teal-300" />
@@ -257,7 +306,7 @@ export default function PosPage() {
             <p className="text-base font-bold text-gray-500 mb-1" style={{ fontFamily: 'var(--font-display)' }}>
               Sin ventas todavía
             </p>
-            <p className="text-sm text-gray-400 mb-5">Tocá &ldquo;Nueva venta&rdquo; para empezar</p>
+            <p className="text-sm text-gray-400 mb-5">{soloFacturar ? 'No hay transferencias ni tarjetas en este período' : 'Tocá "Nueva venta" para empezar'}</p>
             <button
               onClick={() => setMostrarNuevaVenta(true)}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm bg-teal-500 text-white hover:bg-teal-600 transition-colors"
@@ -267,7 +316,61 @@ export default function PosPage() {
             </button>
           </div>
         ) : (
-          ventas.map((venta) => {
+          registrosFiltrados.map((registro) => {
+            if (registro._tipo === 'cobro') {
+              const cobro = registro
+              const fechaCobro = new Date(cobro.creado_en)
+              const hora = fechaCobro.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+              const fechaCorta = fechaCobro.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
+              return (
+                <div key={`cobro-${cobro.id}`} className="bg-white rounded-2xl border border-violet-100 shadow-sm overflow-hidden">
+                  <div className="flex items-center gap-4 px-4 py-3.5">
+                    <div className="flex flex-col items-center shrink-0 w-14 text-gray-400">
+                      <div className="flex items-center gap-1">
+                        <Clock size={11} />
+                        <span className="text-xs font-mono">{hora}</span>
+                      </div>
+                      {periodo !== 'hoy' && (
+                        <span className="text-[10px] text-gray-400 font-medium">{fechaCorta}</span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {cobro.cliente ? (
+                          <Link
+                            href={`/clientes/${cobro.cliente.id}`}
+                            className="flex items-center gap-1.5 min-w-0 hover:text-violet-600 transition-colors"
+                          >
+                            <User size={12} className="text-violet-400 shrink-0" />
+                            <span className="text-sm font-semibold text-gray-800 truncate hover:text-violet-600 underline-offset-2 hover:underline">{cobro.cliente.nombre}</span>
+                          </Link>
+                        ) : (
+                          <span className="text-sm text-gray-400">Sin cliente</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Receipt size={10} className="text-violet-400" />
+                        <p className="text-xs text-violet-500 font-medium">Pago de cuenta</p>
+                        {cobro.notas && <span className="text-xs text-gray-400">· {cobro.notas}</span>}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-1 shrink-0">
+                      <span className={cn('flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold', METODO_COLOR[cobro.metodo_pago] || 'bg-gray-100 text-gray-500')}>
+                        {METODO_ICON[cobro.metodo_pago]}
+                      </span>
+                    </div>
+
+                    <div className="text-right shrink-0 min-w-[80px]">
+                      <p className="font-bold text-violet-600 text-sm">{mask(formatPrecio(cobro.monto))}</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+
+            const venta = registro as VentaHoy
             const abierta = expandida === venta.id
             const items = venta.venta_items || []
             const pagos = venta.venta_pagos || []
