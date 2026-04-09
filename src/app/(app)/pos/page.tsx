@@ -50,6 +50,7 @@ type CobroHoy = {
   metodo_pago: string
   notas?: string | null
   creado_en: string
+  cliente_id: string
   cliente?: { id: string; nombre: string } | null
 }
 
@@ -118,7 +119,7 @@ export default function PosPage() {
 
     let cobrosQuery = supabase
       .from('fiado_movimientos')
-      .select('id, monto, metodo_pago, notas, creado_en, cliente:clientes(id, nombre)')
+      .select('id, monto, metodo_pago, notas, creado_en, cliente_id')
       .eq('tipo', 'abono')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
@@ -130,10 +131,22 @@ export default function PosPage() {
       cobrosQuery = cobrosQuery.lte('creado_en', hasta.toISOString())
     }
 
-    const [{ data: ventasData }, { data: cobrosData }] = await Promise.all([ventasQuery, cobrosQuery])
+    const [{ data: ventasData }, { data: cobrosData, error: cobrosError }] = await Promise.all([ventasQuery, cobrosQuery])
+
+    if (cobrosError) console.error('[POS] cobros query error:', cobrosError.message)
+
+    // Join clientes manualmente para cobros
+    type RawCobro = { id: string; monto: number; metodo_pago: string; notas?: string; creado_en: string; cliente_id: string }
+    const rawCobros: RawCobro[] = (cobrosData as unknown as RawCobro[]) || []
+    let clientesMap: Record<string, { id: string; nombre: string }> = {}
+    if (rawCobros.length > 0) {
+      const ids = [...new Set(rawCobros.map(c => c.cliente_id))]
+      const { data: clientesData } = await supabase.from('clientes').select('id, nombre').in('id', ids)
+      if (clientesData) clientesData.forEach((cl: { id: string; nombre: string }) => { clientesMap[cl.id] = cl })
+    }
 
     const ventas: VentaHoy[] = ((ventasData as unknown as Omit<VentaHoy, '_tipo'>[]) || []).map(v => ({ ...v, _tipo: 'venta' as const }))
-    const cobros: CobroHoy[] = ((cobrosData as unknown as Omit<CobroHoy, '_tipo'>[]) || []).map(c => ({ ...c, _tipo: 'cobro' as const }))
+    const cobros: CobroHoy[] = rawCobros.map(c => ({ ...c, _tipo: 'cobro' as const, cliente: clientesMap[c.cliente_id] || null }))
 
     return [...ventas, ...cobros].sort((a, b) => b.creado_en.localeCompare(a.creado_en))
   })
