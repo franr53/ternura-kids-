@@ -55,11 +55,12 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
   const [productoExpandido, setProductoExpandido] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes:v2', async () => {
+  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes:v3', async () => {
     const { data } = await supabase
       .from('variantes')
       .select('*, producto:productos(*, categoria:categorias(nombre, color))')
       .order('talle')
+      .limit(5000)
     return ((data || []).filter(v => v.producto?.activo === true) as VarianteConProducto[])
   })
   const todasVariantes = _variantes ?? []
