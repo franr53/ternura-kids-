@@ -61,7 +61,13 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
       .select('*, producto:productos(*, categoria:categorias(nombre, color))')
       .order('talle')
       .limit(5000)
-    return ((data || []).filter(v => v.producto?.activo === true) as VarianteConProducto[])
+    const todas = (data || []) as VarianteConProducto[]
+    const sinProducto = todas.filter(v => !v.producto)
+    const inactivos = todas.filter(v => v.producto && v.producto.activo !== true)
+    if (sinProducto.length > 0) console.warn('[BuscadorPOS] variantes sin producto (join null):', sinProducto.map(v => ({ id: v.id, talle: v.talle, producto_id: v.producto_id })))
+    if (inactivos.length > 0) console.warn('[BuscadorPOS] variantes con producto inactivo:', inactivos.map(v => ({ id: v.id, talle: v.talle, nombre: v.producto?.nombre_base, activo: v.producto?.activo })))
+    console.log(`[BuscadorPOS] total: ${todas.length} | sin producto: ${sinProducto.length} | inactivos: ${inactivos.length}`)
+    return todas.filter(v => v.producto?.activo === true) as VarianteConProducto[]
   })
   const todasVariantes = _variantes ?? []
 
