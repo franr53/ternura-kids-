@@ -55,19 +55,20 @@ export default function BuscadorProducto({ onSeleccionar, onCerrar }: Props) {
   const [productoExpandido, setProductoExpandido] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes:v3', async () => {
+  const { data: _variantes, loading } = useCache<VarianteConProducto[]>('pos:variantes:v4', async () => {
+    // Consultar desde productos (561 activos < 1000 max_rows) con variantes anidadas,
+    // así esquivamos el límite de PostgREST que corta en 1000 variantes totales.
     const { data } = await supabase
-      .from('variantes')
-      .select('*, producto:productos(*, categoria:categorias(nombre, color))')
-      .order('talle')
-      .limit(5000)
-    const todas = (data || []) as VarianteConProducto[]
-    const sinProducto = todas.filter(v => !v.producto)
-    const inactivos = todas.filter(v => v.producto && v.producto.activo !== true)
-    if (sinProducto.length > 0) console.warn('[BuscadorPOS] variantes sin producto (join null):', sinProducto.map(v => ({ id: v.id, talle: v.talle, producto_id: v.producto_id })))
-    if (inactivos.length > 0) console.warn('[BuscadorPOS] variantes con producto inactivo:', inactivos.map(v => ({ id: v.id, talle: v.talle, nombre: v.producto?.nombre_base, activo: v.producto?.activo })))
-    console.log(`[BuscadorPOS] total: ${todas.length} | sin producto: ${sinProducto.length} | inactivos: ${inactivos.length}`)
-    return todas.filter(v => v.producto?.activo === true) as VarianteConProducto[]
+      .from('productos')
+      .select('*, categoria:categorias(nombre, color), variantes(*)')
+      .eq('activo', true)
+    const productos = (data || []) as (Producto & { categoria?: { nombre: string; color: string }; variantes: Variante[] })[]
+    return productos.flatMap(p =>
+      (p.variantes || []).map(v => ({
+        ...v,
+        producto: { id: p.id, nombre_base: p.nombre_base, activo: p.activo, categoria: p.categoria } as Producto & { categoria?: { nombre: string; color: string } },
+      }))
+    ) as VarianteConProducto[]
   })
   const todasVariantes = _variantes ?? []
 

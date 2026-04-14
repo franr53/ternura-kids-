@@ -357,6 +357,7 @@ export default function DevolucionDialog({ onCerrar }: Props) {
   const supabase = createClient()
 
   const [paso, setPaso] = useState<1 | 2 | '2b' | 3 | 4>(1)
+  const [filtroPeriodo, setFiltroPeriodo] = useState<'semana' | 'mes' | 'todo' | 'fecha'>('todo')
   const [filtroFecha, setFiltroFecha] = useState('')
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroProducto, setFiltroProducto] = useState('')
@@ -388,9 +389,9 @@ export default function DevolucionDialog({ onCerrar }: Props) {
 
   // ── live search ventas ────────────────────────────────────────────────────
   useEffect(() => {
-    const clienteOk = filtroCliente.trim().length >= 2
+    const clienteOk  = filtroCliente.trim().length >= 2
     const productoOk = filtroProducto.trim().length >= 2
-    const fechaOk    = !!filtroFecha
+    const fechaOk    = filtroPeriodo === 'fecha' ? !!filtroFecha : filtroPeriodo !== 'todo'
 
     if (!clienteOk && !productoOk && !fechaOk) {
       setVentas([]); setBuscadoAlguna(false); setBuscando(false); return
@@ -432,16 +433,32 @@ export default function DevolucionDialog({ onCerrar }: Props) {
         if (ventaIdsProd.length === 0) { if (!cancelled) { setBuscando(false); setVentas([]); setBuscadoAlguna(true) } return }
       }
 
+      // calcular rango de fechas según período
+      const ahora = new Date()
+      let desdeStr: string | null = null
+      let hastaStr: string | null = null
+      if (filtroPeriodo === 'semana') {
+        const desde = new Date(ahora); desde.setDate(ahora.getDate() - 7)
+        desdeStr = desde.toISOString().slice(0, 10)
+      } else if (filtroPeriodo === 'mes') {
+        const desde = new Date(ahora); desde.setDate(ahora.getDate() - 30)
+        desdeStr = desde.toISOString().slice(0, 10)
+      } else if (filtroPeriodo === 'fecha' && filtroFecha) {
+        desdeStr = filtroFecha
+        hastaStr = filtroFecha + 'T23:59:59'
+      }
+
       let q = supabase.from('ventas')
         .select(`id, total, descuento, creado_en, estado,
           cliente:clientes(id, nombre, telefono),
           venta_items(variante_id, cantidad, precio_unitario,
             variante:variantes(talle, producto:productos(nombre_base))),
           venta_pagos(metodo, monto)`)
-        .eq('estado', 'completada').order('creado_en', { ascending: false }).limit(30)
-      if (filtroFecha)  q = q.gte('creado_en', filtroFecha).lte('creado_en', filtroFecha + 'T23:59:59')
-      if (clienteIds)   q = q.in('cliente_id', clienteIds)
-      if (ventaIdsProd) q = q.in('id', ventaIdsProd)
+        .eq('estado', 'completada').order('creado_en', { ascending: false }).limit(50)
+      if (desdeStr && hastaStr) q = q.gte('creado_en', desdeStr).lte('creado_en', hastaStr)
+      else if (desdeStr)        q = q.gte('creado_en', desdeStr)
+      if (clienteIds)           q = q.in('cliente_id', clienteIds)
+      if (ventaIdsProd)         q = q.in('id', ventaIdsProd)
 
       const { data, error } = await q
       if (cancelled) return
@@ -451,7 +468,7 @@ export default function DevolucionDialog({ onCerrar }: Props) {
     }, delay)
 
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [filtroCliente, filtroProducto, filtroFecha]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtroCliente, filtroProducto, filtroFecha, filtroPeriodo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── live search productos nuevos ──────────────────────────────────────────
   useEffect(() => {
@@ -672,8 +689,23 @@ export default function DevolucionDialog({ onCerrar }: Props) {
           <div className="flex flex-1 min-h-0">
             <div className="w-72 shrink-0 border-r border-gray-100 overflow-y-auto p-4 space-y-4">
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Fecha</p>
-                <CalendarPicker value={filtroFecha} onChange={setFiltroFecha} />
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Período</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(['semana', 'mes', 'todo', 'fecha'] as const).map(p => (
+                    <button key={p}
+                      onClick={() => { setFiltroPeriodo(p); if (p !== 'fecha') setFiltroFecha('') }}
+                      className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                        filtroPeriodo === p ? 'bg-teal-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-teal-50 hover:text-teal-700'
+                      }`}>
+                      {p === 'semana' ? 'Esta semana' : p === 'mes' ? 'Este mes' : p === 'todo' ? 'Todo' : 'Fecha exacta'}
+                    </button>
+                  ))}
+                </div>
+                {filtroPeriodo === 'fecha' && (
+                  <div className="mt-3">
+                    <CalendarPicker value={filtroFecha} onChange={setFiltroFecha} />
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-2">
