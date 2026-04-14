@@ -76,17 +76,22 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   const supabase = createClient()
 
   // Data (cached)
-  const { data: posData, loading: loadingData } = useCache<{ variantes: VarianteConProducto[]; clientes: Cliente[]; proveedores: Proveedor[] }>('pos:dialog', async () => {
-    const [{ data: variantes }, { data: clientes }, { data: proveedores }] = await Promise.all([
+  const { data: posData, loading: loadingData } = useCache<{ variantes: VarianteConProducto[]; clientes: Cliente[]; proveedores: Proveedor[] }>('pos:dialog:v2', async () => {
+    const [{ data: productos }, { data: clientes }, { data: proveedores }] = await Promise.all([
       supabase
-        .from('variantes')
-        .select('*, producto:productos(*, categoria:categorias(nombre, color))')
-        .order('talle'),
+        .from('productos')
+        .select('*, categoria:categorias(nombre, color), variantes(*)')
+        .eq('activo', true),
       supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
     ])
+    const variantes = ((productos || []) as (Producto & { categoria?: { nombre: string; color: string }; variantes: Variante[] })[])
+      .flatMap(p => (p.variantes || []).map(v => ({
+        ...v,
+        producto: { id: p.id, nombre_base: p.nombre_base, activo: p.activo, categoria: p.categoria } as Producto & { categoria?: { nombre: string; color: string } },
+      }))) as VarianteConProducto[]
     return {
-      variantes: ((variantes || []).filter((v) => v.producto?.activo === true) as VarianteConProducto[]),
+      variantes,
       clientes: (clientes || []) as Cliente[],
       proveedores: ((proveedores || []) as Proveedor[]),
     }
