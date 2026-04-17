@@ -88,6 +88,17 @@ export async function confirmarVenta({
 
   const ventaId: string = (data as { venta_id: string }).venta_id
 
+  // Re-fetch deuda real del cliente para que el comprobante no use el cache local
+  let deudaRealActual = cliente?.deuda_total || 0
+  if (cliente && pagos.some(p => p.metodo === 'fiado')) {
+    const { data: clienteActual } = await supabase
+      .from('clientes')
+      .select('deuda_total')
+      .eq('id', cliente.id)
+      .single()
+    if (clienteActual) deudaRealActual = clienteActual.deuda_total
+  }
+
   // Generar comprobante para WhatsApp
   let comprobante: string | undefined
   if (cliente) {
@@ -112,12 +123,11 @@ export async function confirmarVenta({
 
     const pagoFiado = pagos.find(p => p.metodo === 'fiado')
     if (pagoFiado) {
-      const deudaAnterior = cliente.deuda_total || 0
-      const deudaNueva = deudaAnterior + Math.round(pagoFiado.monto)
+      const deudaAnterior = deudaRealActual - Math.round(pagoFiado.monto)
       partes.push('')
       partes.push(`*Fiado: ${formatPrecio(pagoFiado.monto)}*`)
-      partes.push(`Deuda anterior: ${formatPrecio(deudaAnterior)}`)
-      partes.push(`*Deuda actual: ${formatPrecio(deudaNueva)}*`)
+      partes.push(`Deuda anterior: ${formatPrecio(Math.max(0, deudaAnterior))}`)
+      partes.push(`*Deuda actual: ${formatPrecio(deudaRealActual)}*`)
     }
 
     const totalPagado = pagos.filter(p => p.metodo !== 'fiado').reduce((s, p) => s + p.monto, 0)

@@ -68,7 +68,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
     async function cargar() {
       const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
-        supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(30),
+        supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).is('venta_id', null).order('creado_en', { ascending: false }).limit(30),
         supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
         supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
         supabase.from('cambios').select('id, creado_en, items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(20),

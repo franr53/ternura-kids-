@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, Producto, Proveedor, Variante, MetodoPago } from '@/types'
@@ -165,6 +165,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
 
   // UI
   const [loading, setLoading] = useState(false)
+  const procesandoRef = useRef(false) // guard síncrono contra doble-tap
 
   // Edición de precio — sin interrumpir la venta
   const [editandoPrecioIdx, setEditandoPrecioIdx] = useState<number | null>(null)
@@ -389,7 +390,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   }
 
   async function handleConfirmarVenta() {
-    if (carrito.length === 0) return
+    if (procesandoRef.current || carrito.length === 0) return
     const esOcasional = cliente?.id === '__ocasional__'
     if (pagos.some(p => p.metodo === 'fiado') && (!cliente || esOcasional)) {
       toast.error('Para registrar fiado necesitás seleccionar un cliente con cuenta')
@@ -399,6 +400,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
       toast.error(`Los montos no cuadran — ${diferenciaPago > 0 ? 'sobran' : 'faltan'} ${formatPrecio(Math.abs(diferenciaPago))}`)
       return
     }
+    procesandoRef.current = true
     setLoading(true)
     try {
       const pagosFinales = pagos.filter(p => p.monto > 0).map(p => ({
@@ -434,6 +436,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
       setVentaResultado(resultado)
       setEtapaPostVenta(true)
     } finally {
+      procesandoRef.current = false
       setLoading(false)
     }
   }
