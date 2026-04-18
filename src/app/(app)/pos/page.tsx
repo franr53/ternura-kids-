@@ -88,6 +88,26 @@ export default function PosPage() {
 
   type CambioSimple = { id: string; creado_en: string; diferencia: number; resolucion_diferencia?: string; total_devuelto: number; total_nuevo: number }
   const [cambiosPorVenta, setCambiosPorVenta] = useState<Record<string, CambioSimple>>({})
+
+  type DevolucionDetalle = { items: { nombre: string; talle: string; cantidad: number; precio: number }[]; total: number; loading: boolean }
+  const [devolucionDetalles, setDevolucionDetalles] = useState<Record<string, DevolucionDetalle>>({})
+
+  async function cargarDetalleDev(cobroId: string, ventaId: string) {
+    if (devolucionDetalles[cobroId]) return
+    setDevolucionDetalles(prev => ({ ...prev, [cobroId]: { items: [], total: 0, loading: true } }))
+    const { data } = await supabase
+      .from('venta_items')
+      .select('cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))')
+      .eq('venta_id', ventaId)
+    const { data: venta } = await supabase.from('ventas').select('total').eq('id', ventaId).single()
+    const items = ((data as any[]) || []).map((i: any) => ({
+      nombre: i.variante?.producto?.nombre_base || '—',
+      talle: i.variante?.talle || '',
+      cantidad: i.cantidad,
+      precio: i.precio_unitario,
+    }))
+    setDevolucionDetalles(prev => ({ ...prev, [cobroId]: { items, total: venta?.total || 0, loading: false } }))
+  }
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
   const [soloFacturar, setSoloFacturar] = useState(false)
@@ -334,12 +354,23 @@ export default function PosPage() {
             if (registro._tipo === 'cobro') {
               const cobro = registro
               const esDevolucion = !!cobro.venta_id || !cobro.metodo_pago
+              const abiertaCobro = expandida === `cobro-${cobro.id}`
+              const detDev = devolucionDetalles[cobro.id]
               const fechaCobro = new Date(cobro.creado_en)
               const hora = fechaCobro.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
               const fechaCorta = fechaCobro.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
               return (
-                <div key={`cobro-${cobro.id}`} className={cn('bg-white rounded-2xl border shadow-sm overflow-hidden', esDevolucion ? 'border-orange-100' : 'border-violet-100')}>
-                  <div className="flex items-center gap-4 px-4 py-3.5">
+                <div key={`cobro-${cobro.id}`} className={cn('bg-white rounded-2xl border shadow-sm overflow-hidden', esDevolucion ? (abiertaCobro ? 'border-orange-200' : 'border-orange-100') : 'border-violet-100')}>
+                  <button
+                    className={cn('w-full flex items-center gap-4 px-4 py-3.5 text-left transition-colors', esDevolucion ? 'hover:bg-orange-50/40' : '')}
+                    onClick={() => {
+                      if (!esDevolucion) return
+                      const nuevo = abiertaCobro ? null : `cobro-${cobro.id}`
+                      setExpandida(nuevo)
+                      if (nuevo && cobro.venta_id) cargarDetalleDev(cobro.id, cobro.venta_id)
+                    }}
+                    style={{ cursor: esDevolucion ? 'pointer' : 'default' }}
+                  >
                     <div className="flex flex-col items-center shrink-0 w-14 text-gray-400">
                       <div className="flex items-center gap-1">
                         <Clock size={11} />
@@ -355,6 +386,7 @@ export default function PosPage() {
                         {cobro.cliente ? (
                           <Link
                             href={`/clientes/${cobro.cliente.id}`}
+                            onClick={e => e.stopPropagation()}
                             className="flex items-center gap-1.5 min-w-0 transition-colors"
                           >
                             <User size={12} className={cn('shrink-0', esDevolucion ? 'text-orange-400' : 'text-violet-400')} />
@@ -393,7 +425,43 @@ export default function PosPage() {
                       <p className={cn('font-bold text-sm', esDevolucion ? 'text-orange-500' : 'text-violet-600')}>{mask(formatPrecio(cobro.monto))}</p>
                       {esDevolucion && <p className="text-[10px] text-gray-400">saldo a favor</p>}
                     </div>
-                  </div>
+
+                    {esDevolucion && (
+                      abiertaCobro
+                        ? <ChevronDown size={15} className="text-orange-400 shrink-0" />
+                        : <ChevronRight size={15} className="text-gray-300 shrink-0" />
+                    )}
+                  </button>
+
+                  {abiertaCobro && esDevolucion && (
+                    <div className="border-t border-orange-100 px-4 py-3 bg-orange-50/30">
+                      {detDev?.loading && <p className="text-xs text-gray-400 py-2">Cargando venta original...</p>}
+                      {detDev && !detDev.loading && (
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Artículos de la venta original</p>
+                          {detDev.items.map((item, j) => (
+                            <div key={j} className="flex items-center justify-between">
+                              <span className="text-sm text-gray-700">
+                                {formatNombreConTalle(item.nombre, item.talle)}
+                                {item.cantidad > 1 && <span className="text-gray-400"> ×{item.cantidad}</span>}
+                              </span>
+                              <span className="text-sm font-semibold text-gray-700 ml-4">{mask(formatPrecio(item.precio * item.cantidad))}</span>
+                            </div>
+                          ))}
+                          <div className="pt-2 border-t border-orange-100 space-y-1">
+                            <div className="flex justify-between text-xs text-gray-500">
+                              <span>Total venta original</span>
+                              <span className="font-semibold">{mask(formatPrecio(detDev.total))}</span>
+                            </div>
+                            <div className="flex justify-between text-xs text-orange-600 font-semibold">
+                              <span>Saldo a favor generado</span>
+                              <span>{mask(formatPrecio(cobro.monto))}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             }
