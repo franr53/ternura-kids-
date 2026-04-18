@@ -783,7 +783,10 @@ export default function CajaPage() {
                             <Separator className="my-1" />
                             <div className="flex justify-between text-xs font-bold">
                               <span>Efectivo en caja</span>
-                              <span className="text-green-700">{formatPrecio((c.monto_inicial || 0) + (c.total_efectivo || 0) - (c.total_retiros || 0))}</span>
+                              <span className="text-green-700">{formatPrecio(
+                                (c.monto_inicial || 0) + (c.total_efectivo || 0) - (c.total_retiros || 0) -
+                                (det?.gastos?.filter(g => g.metodo_pago === 'efectivo' && (g.fuente_pago === 'caja_hoy' || !g.fuente_pago)).reduce((s, g) => s + g.monto, 0) || 0)
+                              )}</span>
                             </div>
                             {c.notas_cierre && (
                               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
