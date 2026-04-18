@@ -89,24 +89,72 @@ export default function PosPage() {
   type CambioSimple = { id: string; creado_en: string; diferencia: number; resolucion_diferencia?: string; total_devuelto: number; total_nuevo: number }
   const [cambiosPorVenta, setCambiosPorVenta] = useState<Record<string, CambioSimple>>({})
 
-  type DevolucionDetalle = { items: { nombre: string; talle: string; cantidad: number; precio: number }[]; total: number; loading: boolean }
+  type ItemDev = { nombre: string; talle: string; cantidad: number; precio: number }
+  type DevolucionDetalle = {
+    loading: boolean
+    tipo: 'cambio' | 'devolucion_simple'
+    ventaTotal: number
+    ventaMetodo: string
+    itemsDevueltos: ItemDev[]
+    itemsNuevos: ItemDev[]
+    diferencia: number
+    resolucion: string
+  }
   const [devolucionDetalles, setDevolucionDetalles] = useState<Record<string, DevolucionDetalle>>({})
 
   async function cargarDetalleDev(cobroId: string, ventaId: string) {
     if (devolucionDetalles[cobroId]) return
-    setDevolucionDetalles(prev => ({ ...prev, [cobroId]: { items: [], total: 0, loading: true } }))
-    const { data } = await supabase
-      .from('venta_items')
-      .select('cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))')
-      .eq('venta_id', ventaId)
-    const { data: venta } = await supabase.from('ventas').select('total').eq('id', ventaId).single()
-    const items = ((data as any[]) || []).map((i: any) => ({
+    setDevolucionDetalles(prev => ({ ...prev, [cobroId]: { loading: true, tipo: 'devolucion_simple', ventaTotal: 0, ventaMetodo: '', itemsDevueltos: [], itemsNuevos: [], diferencia: 0, resolucion: '' } }))
+
+    const [{ data: cambioData }, { data: ventaData }, { data: ventaItemsData }] = await Promise.all([
+      supabase.from('cambios').select('items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('venta_original_id', ventaId).maybeSingle(),
+      supabase.from('ventas').select('total, venta_pagos(metodo)').eq('id', ventaId).single(),
+      supabase.from('venta_items').select('cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))').eq('venta_id', ventaId),
+    ])
+
+    const ventaTotal = (ventaData as any)?.total || 0
+    const ventaMetodo = (ventaData as any)?.venta_pagos?.[0]?.metodo || ''
+
+    const mapItems = (arr: any[]): ItemDev[] => arr.map((i: any) => ({
       nombre: i.variante?.producto?.nombre_base || '—',
       talle: i.variante?.talle || '',
       cantidad: i.cantidad,
       precio: i.precio_unitario,
     }))
-    setDevolucionDetalles(prev => ({ ...prev, [cobroId]: { items, total: venta?.total || 0, loading: false } }))
+
+    if (cambioData) {
+      // Es un cambio: items están en la tabla cambios como JSONB con variante_id
+      const allIds = [
+        ...((cambioData as any).items_devueltos || []),
+        ...((cambioData as any).items_nuevos || []),
+      ].map((i: any) => i.variante_id)
+      const { data: variantesData } = await supabase
+        .from('variantes').select('id, talle, producto:productos(nombre_base)').in('id', allIds)
+      const varMap: Record<string, { talle: string; nombre: string }> = {}
+      ;((variantesData as any[]) || []).forEach((v: any) => { varMap[v.id] = { talle: v.talle, nombre: v.producto?.nombre_base || '—' } })
+
+      const toItemDev = (arr: any[]): ItemDev[] => arr.map((i: any) => ({
+        nombre: varMap[i.variante_id]?.nombre || '—',
+        talle: varMap[i.variante_id]?.talle || '',
+        cantidad: i.cantidad,
+        precio: i.precio_unitario,
+      }))
+
+      setDevolucionDetalles(prev => ({ ...prev, [cobroId]: {
+        loading: false, tipo: 'cambio', ventaTotal, ventaMetodo,
+        itemsDevueltos: toItemDev((cambioData as any).items_devueltos || []),
+        itemsNuevos: toItemDev((cambioData as any).items_nuevos || []),
+        diferencia: (cambioData as any).diferencia || 0,
+        resolucion: (cambioData as any).resolucion_diferencia || '',
+      }}))
+    } else {
+      // Es una devolución simple: mostramos items de la venta original como referencia
+      setDevolucionDetalles(prev => ({ ...prev, [cobroId]: {
+        loading: false, tipo: 'devolucion_simple', ventaTotal, ventaMetodo,
+        itemsDevueltos: mapItems((ventaItemsData as any[]) || []),
+        itemsNuevos: [], diferencia: 0, resolucion: '',
+      }}))
+    }
   }
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
@@ -434,32 +482,86 @@ export default function PosPage() {
                   </button>
 
                   {abiertaCobro && esDevolucion && (
-                    <div className="border-t border-orange-100 px-4 py-3 bg-orange-50/30">
-                      {detDev?.loading && <p className="text-xs text-gray-400 py-2">Cargando venta original...</p>}
-                      {detDev && !detDev.loading && (
-                        <div className="space-y-2">
-                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Artículos de la venta original</p>
-                          {detDev.items.map((item, j) => (
-                            <div key={j} className="flex items-center justify-between">
-                              <span className="text-sm text-gray-700">
-                                {formatNombreConTalle(item.nombre, item.talle)}
-                                {item.cantidad > 1 && <span className="text-gray-400"> ×{item.cantidad}</span>}
-                              </span>
-                              <span className="text-sm font-semibold text-gray-700 ml-4">{mask(formatPrecio(item.precio * item.cantidad))}</span>
+                    <div className="border-t border-orange-100 px-4 py-3 bg-orange-50/30 space-y-3">
+                      {detDev?.loading && <p className="text-xs text-gray-400 py-2">Cargando detalles...</p>}
+                      {detDev && !detDev.loading && (() => {
+                        const METODO_LABEL: Record<string, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia', debito: 'Débito', credito: 'Crédito', fiado: 'Fiado' }
+                        const RESOLUCION_LABEL: Record<string, string> = {
+                          saldo_favor: 'Saldo a favor del cliente',
+                          efectivo: 'Devuelto en efectivo',
+                          transferencia: 'Devuelto por transferencia',
+                          fiado: 'Cargado a cuenta (fiado)',
+                          ninguna: 'Cambio exacto',
+                        }
+                        return (
+                          <>
+                            {/* Items devueltos */}
+                            <div>
+                              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                                {detDev.tipo === 'cambio' ? 'Prendas devueltas' : 'Prendas de la venta original'}
+                              </p>
+                              {detDev.itemsDevueltos.map((item, j) => (
+                                <div key={j} className="flex justify-between items-center py-0.5">
+                                  <span className="text-sm text-gray-700">
+                                    {formatNombreConTalle(item.nombre, item.talle)}
+                                    {item.cantidad > 1 && <span className="text-gray-400"> ×{item.cantidad}</span>}
+                                  </span>
+                                  <span className="text-sm font-semibold text-gray-700 ml-4">{mask(formatPrecio(item.precio * item.cantidad))}</span>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                          <div className="pt-2 border-t border-orange-100 space-y-1">
-                            <div className="flex justify-between text-xs text-gray-500">
-                              <span>Total venta original</span>
-                              <span className="font-semibold">{mask(formatPrecio(detDev.total))}</span>
+
+                            {/* Items nuevos (solo cambio) */}
+                            {detDev.tipo === 'cambio' && detDev.itemsNuevos.length > 0 && (
+                              <div className="pt-2 border-t border-orange-100">
+                                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Prendas nuevas llevadas</p>
+                                {detDev.itemsNuevos.map((item, j) => (
+                                  <div key={j} className="flex justify-between items-center py-0.5">
+                                    <span className="text-sm text-gray-700">
+                                      {formatNombreConTalle(item.nombre, item.talle)}
+                                      {item.cantidad > 1 && <span className="text-gray-400"> ×{item.cantidad}</span>}
+                                    </span>
+                                    <span className="text-sm font-semibold text-gray-700 ml-4">{mask(formatPrecio(item.precio * item.cantidad))}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Resumen numérico */}
+                            <div className="pt-2 border-t border-orange-100 space-y-1">
+                              <div className="flex justify-between text-xs text-gray-500">
+                                <span>Venta original ({METODO_LABEL[detDev.ventaMetodo] || detDev.ventaMetodo})</span>
+                                <span className="font-semibold">{mask(formatPrecio(detDev.ventaTotal))}</span>
+                              </div>
+                              {detDev.tipo === 'cambio' ? (
+                                <>
+                                  <div className="flex justify-between text-xs text-orange-600">
+                                    <span>Devuelto</span>
+                                    <span className="font-semibold">− {mask(formatPrecio(detDev.itemsDevueltos.reduce((s, i) => s + i.precio * i.cantidad, 0)))}</span>
+                                  </div>
+                                  {detDev.itemsNuevos.length > 0 && (
+                                    <div className="flex justify-between text-xs text-teal-600">
+                                      <span>Items nuevos</span>
+                                      <span className="font-semibold">+ {mask(formatPrecio(detDev.itemsNuevos.reduce((s, i) => s + i.precio * i.cantidad, 0)))}</span>
+                                    </div>
+                                  )}
+                                  {detDev.resolucion && detDev.resolucion !== 'ninguna' && (
+                                    <div className="flex justify-between text-xs text-gray-600 font-semibold pt-1 border-t border-orange-100">
+                                      <span>Resolución</span>
+                                      <span>{RESOLUCION_LABEL[detDev.resolucion] || detDev.resolucion}</span>
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="flex justify-between text-xs text-orange-600 font-semibold">
+                                  <span>Saldo/deuda revertida</span>
+                                  <span>{mask(formatPrecio(cobro.monto))}</span>
+                                </div>
+                              )}
                             </div>
-                            <div className="flex justify-between text-xs text-orange-600 font-semibold">
-                              <span>Saldo a favor generado</span>
-                              <span>{mask(formatPrecio(cobro.monto))}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                          </>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

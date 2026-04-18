@@ -95,8 +95,6 @@ export default function CajaPage() {
   const [caja, setCaja] = useState<Caja | null>(null)
   const [retiros, setRetiros] = useState<Retiro[]>([])
   const [gastosDia, setGastosDia] = useState<GastoDia[]>([])
-  const [costoVentas, setCostoVentas] = useState(0)
-
   // Sync cache to local state (allows local mutations after initial load)
   useEffect(() => {
     if (cajaCache) {
@@ -105,23 +103,6 @@ export default function CajaPage() {
       setGastosDia(cajaCache.gastosDia)
     }
   }, [cajaCache])
-
-  // Costo de ventas del día (para ganancia real)
-  useEffect(() => {
-    if (!caja) return
-    supabase
-      .from('ventas')
-      .select('venta_items(cantidad, variante:variantes(precio_costo))')
-      .eq('caja_id', caja.id)
-      .neq('estado', 'anulada')
-      .then(({ data }) => {
-        if (!data) return
-        const total = (data as any[])
-          .flatMap((v: any) => v.venta_items || [])
-          .reduce((s: number, i: any) => s + i.cantidad * (i.variante?.precio_costo ?? 0), 0)
-        setCostoVentas(total)
-      })
-  }, [caja?.id])
 
   // Auto-cerrar cajas de días anteriores y auto-abrir la de hoy si no existe
   useEffect(() => {
@@ -188,7 +169,7 @@ export default function CajaPage() {
   const [cajaExpandida, setCajaExpandida] = useState<string | null>(null)
   const [periodoAnteriores, setPeriodoAnteriores] = useState(7)
   const [cajaDetalle, setCajaDetalle] = useState<Record<string, CajaDetalle>>({})
-  const [costoPeriodo, setCostoPeriodo] = useState<number | null>(null)
+
 
   async function abrirCaja() {
     const monto = parseFloat(montoInicial) || 0
@@ -352,7 +333,6 @@ export default function CajaPage() {
   async function verAnteriores(dias?: number) {
     setMostrarAnteriores(true)
     setLoadingAnteriores(true)
-    setCostoPeriodo(null)
     const d = dias ?? periodoAnteriores
     const hoy = new Date().toISOString().split('T')[0]
     const desde = new Date()
@@ -367,20 +347,6 @@ export default function CajaPage() {
     const cajas = (data as Caja[]) || []
     setCajasAnteriores(cajas)
     setLoadingAnteriores(false)
-
-    // Fetch costo de ventas del período
-    if (cajas.length > 0) {
-      const ids = cajas.map(c => c.id)
-      const { data: ventasData } = await supabase
-        .from('ventas')
-        .select('venta_items(cantidad, variante:variantes(precio_costo))')
-        .in('caja_id', ids)
-        .neq('estado', 'anulada')
-      const costo = (ventasData as any[] || [])
-        .flatMap((v: any) => v.venta_items || [])
-        .reduce((s: number, i: any) => s + i.cantidad * (i.variante?.precio_costo ?? 0), 0)
-      setCostoPeriodo(costo)
-    }
   }
 
   function cambiarPeriodo(dias: number) {
@@ -453,7 +419,7 @@ export default function CajaPage() {
           <div className="grid grid-cols-2 gap-4">
             <Card>
               <CardContent className="pt-4 pb-4">
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Total ventas</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Total ingresado</p>
                 <p className="text-3xl font-bold text-gray-800 mt-1">{formatPrecio(totalVentas)}</p>
               </CardContent>
             </Card>
@@ -724,7 +690,6 @@ export default function CajaPage() {
             {!loadingAnteriores && cajasAnteriores.length > 0 && (() => {
               const totalPeriodo = cajasAnteriores.reduce((s, c) =>
                 s + (c.total_efectivo || 0) + (c.total_transferencia || 0) + (c.total_debito || 0) + (c.total_credito || 0) + (c.total_fiado || 0), 0)
-              const ganancia = costoPeriodo !== null ? totalPeriodo - costoPeriodo : null
               return (
                 <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap gap-4 justify-between">
                   <div>
