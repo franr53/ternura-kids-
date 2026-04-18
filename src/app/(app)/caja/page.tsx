@@ -390,8 +390,9 @@ export default function CajaPage() {
 
   if (loading) return <div className="p-8 text-center text-gray-400">Cargando...</div>
 
+  // total_cobros ya está incluido en total_efectivo/transferencia/debito — no sumar dos veces
   const totalVentas = caja
-    ? (caja.total_efectivo || 0) + (caja.total_transferencia || 0) + (caja.total_debito || 0) + (caja.total_credito || 0) + (caja.total_fiado || 0) + (caja.total_cobros || 0)
+    ? (caja.total_efectivo || 0) + (caja.total_transferencia || 0) + (caja.total_debito || 0) + (caja.total_credito || 0) + (caja.total_fiado || 0)
     : 0
 
   const totalGastosDia = gastosDia.reduce((s, g) => s + g.monto, 0)
