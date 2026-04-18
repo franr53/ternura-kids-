@@ -47,8 +47,9 @@ type CobroHoy = {
   _tipo: 'cobro'
   id: string
   monto: number
-  metodo_pago: string
+  metodo_pago: string | null
   notas?: string | null
+  venta_id?: string | null
   creado_en: string
   cliente_id: string
   cliente?: { id: string; nombre: string } | null
@@ -119,7 +120,7 @@ export default function PosPage() {
 
     let cobrosQuery = supabase
       .from('fiado_movimientos')
-      .select('id, monto, metodo_pago, notas, creado_en, cliente_id')
+      .select('id, monto, metodo_pago, notas, venta_id, creado_en, cliente_id')
       .eq('tipo', 'abono')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
@@ -136,7 +137,7 @@ export default function PosPage() {
     if (cobrosError) console.error('[POS] cobros query error:', cobrosError.message)
 
     // Join clientes manualmente para cobros
-    type RawCobro = { id: string; monto: number; metodo_pago: string; notas?: string; creado_en: string; cliente_id: string }
+    type RawCobro = { id: string; monto: number; metodo_pago: string | null; notas?: string; venta_id?: string | null; creado_en: string; cliente_id: string }
     const rawCobros: RawCobro[] = (cobrosData as unknown as RawCobro[]) || []
     let clientesMap: Record<string, { id: string; nombre: string }> = {}
     if (rawCobros.length > 0) {
@@ -332,11 +333,12 @@ export default function PosPage() {
           registrosFiltrados.map((registro) => {
             if (registro._tipo === 'cobro') {
               const cobro = registro
+              const esDevolucion = !!cobro.venta_id || !cobro.metodo_pago
               const fechaCobro = new Date(cobro.creado_en)
               const hora = fechaCobro.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
               const fechaCorta = fechaCobro.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
               return (
-                <div key={`cobro-${cobro.id}`} className="bg-white rounded-2xl border border-violet-100 shadow-sm overflow-hidden">
+                <div key={`cobro-${cobro.id}`} className={cn('bg-white rounded-2xl border shadow-sm overflow-hidden', esDevolucion ? 'border-orange-100' : 'border-violet-100')}>
                   <div className="flex items-center gap-4 px-4 py-3.5">
                     <div className="flex flex-col items-center shrink-0 w-14 text-gray-400">
                       <div className="flex items-center gap-1">
@@ -353,30 +355,43 @@ export default function PosPage() {
                         {cobro.cliente ? (
                           <Link
                             href={`/clientes/${cobro.cliente.id}`}
-                            className="flex items-center gap-1.5 min-w-0 hover:text-violet-600 transition-colors"
+                            className="flex items-center gap-1.5 min-w-0 transition-colors"
                           >
-                            <User size={12} className="text-violet-400 shrink-0" />
-                            <span className="text-sm font-semibold text-gray-800 truncate hover:text-violet-600 underline-offset-2 hover:underline">{cobro.cliente.nombre}</span>
+                            <User size={12} className={cn('shrink-0', esDevolucion ? 'text-orange-400' : 'text-violet-400')} />
+                            <span className={cn('text-sm font-semibold text-gray-800 truncate underline-offset-2 hover:underline', esDevolucion ? 'hover:text-orange-600' : 'hover:text-violet-600')}>{cobro.cliente.nombre}</span>
                           </Link>
                         ) : (
                           <span className="text-sm text-gray-400">Sin cliente</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <Receipt size={10} className="text-violet-400" />
-                        <p className="text-xs text-violet-500 font-medium">Pago de cuenta</p>
-                        {cobro.notas && <span className="text-xs text-gray-400">· {cobro.notas}</span>}
+                        {esDevolucion ? (
+                          <>
+                            <RotateCcw size={10} className="text-orange-400" />
+                            <p className="text-xs text-orange-500 font-medium">Devolución</p>
+                            <span className="text-xs text-gray-400">· saldo a favor del cliente</span>
+                          </>
+                        ) : (
+                          <>
+                            <Receipt size={10} className="text-violet-400" />
+                            <p className="text-xs text-violet-500 font-medium">Pago de cuenta</p>
+                            {cobro.notas && <span className="text-xs text-gray-400">· {cobro.notas}</span>}
+                          </>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex gap-1 shrink-0">
-                      <span className={cn('flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold', METODO_COLOR[cobro.metodo_pago] || 'bg-gray-100 text-gray-500')}>
-                        {METODO_ICON[cobro.metodo_pago]}
-                      </span>
+                      {!esDevolucion && (
+                        <span className={cn('flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold', cobro.metodo_pago ? (METODO_COLOR[cobro.metodo_pago] || 'bg-gray-100 text-gray-500') : 'bg-gray-100 text-gray-500')}>
+                          {cobro.metodo_pago ? METODO_ICON[cobro.metodo_pago] : null}
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-right shrink-0 min-w-[80px]">
-                      <p className="font-bold text-violet-600 text-sm">{mask(formatPrecio(cobro.monto))}</p>
+                      <p className={cn('font-bold text-sm', esDevolucion ? 'text-orange-500' : 'text-violet-600')}>{mask(formatPrecio(cobro.monto))}</p>
+                      {esDevolucion && <p className="text-[10px] text-gray-400">saldo a favor</p>}
                     </div>
                   </div>
                 </div>
