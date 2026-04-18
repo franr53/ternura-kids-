@@ -106,40 +106,36 @@ export default function PosPage() {
     if (devolucionDetalles[cobroId]) return
     setDevolucionDetalles(prev => ({ ...prev, [cobroId]: { loading: true, tipo: 'devolucion_simple', ventaTotal: 0, ventaMetodo: '', itemsDevueltos: [], itemsNuevos: [], diferencia: 0, resolucion: '' } }))
 
-    const [{ data: cambioData }, { data: ventaData }, { data: ventaItemsData }] = await Promise.all([
+    const [{ data: cambioData }, { data: devData }, { data: ventaData }] = await Promise.all([
       supabase.from('cambios').select('items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('venta_original_id', ventaId).maybeSingle(),
+      supabase.from('devoluciones').select('items_devueltos, total_devuelto, saldo_generado, deuda_revertida').eq('venta_id', ventaId).maybeSingle(),
       supabase.from('ventas').select('total, venta_pagos(metodo)').eq('id', ventaId).single(),
-      supabase.from('venta_items').select('cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))').eq('venta_id', ventaId),
     ])
 
     const ventaTotal = (ventaData as any)?.total || 0
     const ventaMetodo = (ventaData as any)?.venta_pagos?.[0]?.metodo || ''
 
-    const mapItems = (arr: any[]): ItemDev[] => arr.map((i: any) => ({
-      nombre: i.variante?.producto?.nombre_base || '—',
-      talle: i.variante?.talle || '',
+    // Resolver qué items mostrar y enriquecer con nombres de variantes
+    const sourceItems: any[] = cambioData
+      ? [...((cambioData as any).items_devueltos || []), ...((cambioData as any).items_nuevos || [])]
+      : ((devData as any)?.items_devueltos || [])
+
+    const allIds = sourceItems.map((i: any) => i.variante_id).filter(Boolean)
+    const varMap: Record<string, { talle: string; nombre: string }> = {}
+    if (allIds.length > 0) {
+      const { data: variantesData } = await supabase
+        .from('variantes').select('id, talle, producto:productos(nombre_base)').in('id', allIds)
+      ;((variantesData as any[]) || []).forEach((v: any) => { varMap[v.id] = { talle: v.talle, nombre: v.producto?.nombre_base || '—' } })
+    }
+
+    const toItemDev = (arr: any[]): ItemDev[] => arr.map((i: any) => ({
+      nombre: varMap[i.variante_id]?.nombre || '—',
+      talle: varMap[i.variante_id]?.talle || '',
       cantidad: i.cantidad,
       precio: i.precio_unitario,
     }))
 
     if (cambioData) {
-      // Es un cambio: items están en la tabla cambios como JSONB con variante_id
-      const allIds = [
-        ...((cambioData as any).items_devueltos || []),
-        ...((cambioData as any).items_nuevos || []),
-      ].map((i: any) => i.variante_id)
-      const { data: variantesData } = await supabase
-        .from('variantes').select('id, talle, producto:productos(nombre_base)').in('id', allIds)
-      const varMap: Record<string, { talle: string; nombre: string }> = {}
-      ;((variantesData as any[]) || []).forEach((v: any) => { varMap[v.id] = { talle: v.talle, nombre: v.producto?.nombre_base || '—' } })
-
-      const toItemDev = (arr: any[]): ItemDev[] => arr.map((i: any) => ({
-        nombre: varMap[i.variante_id]?.nombre || '—',
-        talle: varMap[i.variante_id]?.talle || '',
-        cantidad: i.cantidad,
-        precio: i.precio_unitario,
-      }))
-
       setDevolucionDetalles(prev => ({ ...prev, [cobroId]: {
         loading: false, tipo: 'cambio', ventaTotal, ventaMetodo,
         itemsDevueltos: toItemDev((cambioData as any).items_devueltos || []),
@@ -147,11 +143,23 @@ export default function PosPage() {
         diferencia: (cambioData as any).diferencia || 0,
         resolucion: (cambioData as any).resolucion_diferencia || '',
       }}))
-    } else {
-      // Es una devolución simple: mostramos items de la venta original como referencia
+    } else if (devData) {
       setDevolucionDetalles(prev => ({ ...prev, [cobroId]: {
         loading: false, tipo: 'devolucion_simple', ventaTotal, ventaMetodo,
-        itemsDevueltos: mapItems((ventaItemsData as any[]) || []),
+        itemsDevueltos: toItemDev((devData as any).items_devueltos || []),
+        itemsNuevos: [], diferencia: 0, resolucion: '',
+      }}))
+    } else {
+      // Devolución antigua sin registro — fallback a items de la venta original
+      const { data: ventaItemsData } = await supabase
+        .from('venta_items').select('cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))').eq('venta_id', ventaId)
+      setDevolucionDetalles(prev => ({ ...prev, [cobroId]: {
+        loading: false, tipo: 'devolucion_simple', ventaTotal, ventaMetodo,
+        itemsDevueltos: ((ventaItemsData as any[]) || []).map((i: any) => ({
+          nombre: i.variante?.producto?.nombre_base || '—',
+          talle: i.variante?.talle || '',
+          cantidad: i.cantidad, precio: i.precio_unitario,
+        })),
         itemsNuevos: [], diferencia: 0, resolucion: '',
       }}))
     }
