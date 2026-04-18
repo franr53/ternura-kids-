@@ -191,7 +191,7 @@ export default function PosPage() {
 
   const registrosFiltrados = soloFacturar
     ? registros.filter(r => {
-        if (r._tipo === 'cobro') return METODOS_FACTURAR.has(r.metodo_pago)
+        if (r._tipo === 'cobro') return !!r.metodo_pago && METODOS_FACTURAR.has(r.metodo_pago)
         return (r.venta_pagos || []).some(p => METODOS_FACTURAR.has(p.metodo))
       })
     : registros
