@@ -509,18 +509,6 @@ export default function CajaPage() {
                 <span>Total ventas</span>
                 <span className="text-gray-800">{formatPrecio(totalVentas)}</span>
               </div>
-              {costoVentas > 0 && (
-                <>
-                  <div className="flex justify-between items-center text-sm text-gray-500">
-                    <span>Costo de ventas</span>
-                    <span>− {formatPrecio(costoVentas)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm font-semibold text-teal-700">
-                    <span>Ganancia real</span>
-                    <span>{formatPrecio(totalVentas - costoVentas)}</span>
-                  </div>
-                </>
-              )}
               {(caja.total_retiros || 0) > 0 && (
                 <div className="flex justify-between items-center text-red-500">
                   <span>Retiros</span>
@@ -718,21 +706,6 @@ export default function CajaPage() {
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Total ventas</p>
                     <p className="text-sm font-bold text-gray-700">{formatPrecio(totalPeriodo)}</p>
                   </div>
-                  {costoPeriodo !== null && costoPeriodo > 0 && (
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Costo de ventas</p>
-                      <p className="text-sm font-bold text-gray-500">− {formatPrecio(costoPeriodo)}</p>
-                    </div>
-                  )}
-                  {ganancia !== null && costoPeriodo! > 0 && (
-                    <div>
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Ganancia real</p>
-                      <p className="text-sm font-bold text-teal-600">{formatPrecio(ganancia)}</p>
-                    </div>
-                  )}
-                  {costoPeriodo === null && (
-                    <p className="text-xs text-gray-400 self-center">Calculando costo...</p>
-                  )}
                 </div>
               )
             })()}
