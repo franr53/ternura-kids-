@@ -491,22 +491,47 @@ export default function CajaPage() {
           <Card>
             <CardHeader><CardTitle className="text-base">Desglose por método de pago</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              {[
-                { label: 'Efectivo',       value: caja.total_efectivo,      color: 'text-green-600' },
-                { label: 'Transferencia',  value: caja.total_transferencia, color: 'text-blue-600' },
-                { label: 'Débito',         value: caja.total_debito,        color: 'text-purple-600' },
-                { label: 'Crédito',        value: caja.total_credito,       color: 'text-orange-600' },
-                { label: 'Fiado',          value: caja.total_fiado,         color: 'text-red-500' },
-                ...(caja.total_cobros > 0 ? [{ label: 'Cobros de deuda', value: caja.total_cobros, color: 'text-teal-600' }] : []),
-              ].map(({ label, value, color }) => (
-                <div key={label} className="flex justify-between items-center">
-                  <span className="text-gray-600">{label}</span>
-                  <span className={`font-semibold ${color}`}>{formatPrecio(value || 0)}</span>
-                </div>
-              ))}
+              {/* Ventas (sin cobros de deuda) */}
+              {(() => {
+                const ventasEfectivo = (caja.total_efectivo || 0) - (caja.total_cobros_efectivo || 0)
+                const ventasTransferencia = (caja.total_transferencia || 0) - (caja.total_cobros_transferencia || 0)
+                const ventasDebito = (caja.total_debito || 0) - (caja.total_cobros_debito || 0)
+                const filas = [
+                  { label: 'Efectivo',      value: ventasEfectivo,           color: 'text-green-600' },
+                  { label: 'Transferencia', value: ventasTransferencia,      color: 'text-blue-600' },
+                  { label: 'Débito',        value: ventasDebito,             color: 'text-purple-600' },
+                  { label: 'Crédito',       value: caja.total_credito,       color: 'text-orange-600' },
+                  { label: 'Fiado',         value: caja.total_fiado,         color: 'text-red-500' },
+                ].filter(f => (f.value || 0) > 0)
+                return filas.map(({ label, value, color }) => (
+                  <div key={label} className="flex justify-between items-center">
+                    <span className="text-gray-600">{label}</span>
+                    <span className={`font-semibold ${color}`}>{formatPrecio(value || 0)}</span>
+                  </div>
+                ))
+              })()}
+
+              {/* Cobros de deuda por método */}
+              {(caja.total_cobros || 0) > 0 && (
+                <>
+                  <Separator />
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Cobros de deuda</p>
+                  {[
+                    { label: 'Efectivo',      value: caja.total_cobros_efectivo,      color: 'text-teal-600' },
+                    { label: 'Transferencia', value: caja.total_cobros_transferencia, color: 'text-teal-600' },
+                    { label: 'Débito',        value: caja.total_cobros_debito,        color: 'text-teal-600' },
+                  ].filter(f => (f.value || 0) > 0).map(({ label, value, color }) => (
+                    <div key={`cobro-${label}`} className="flex justify-between items-center">
+                      <span className="text-gray-600">{label}</span>
+                      <span className={`font-semibold ${color}`}>{formatPrecio(value || 0)}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+
               <Separator />
               <div className="flex justify-between items-center font-bold">
-                <span>Total ventas</span>
+                <span>Total ingresado</span>
                 <span className="text-gray-800">{formatPrecio(totalVentas)}</span>
               </div>
               {(caja.total_retiros || 0) > 0 && (

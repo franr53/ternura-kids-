@@ -115,6 +115,9 @@ export interface Caja {
   total_credito: number
   total_fiado: number
   total_cobros: number
+  total_cobros_efectivo: number
+  total_cobros_transferencia: number
+  total_cobros_debito: number
   total_retiros: number
   estado: EstadoCaja
   abierta_por?: string
