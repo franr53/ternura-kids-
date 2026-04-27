@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Search, Trash2, FileDown, MessageCircle, Phone } from 'lucide-react'
+import { Search, Trash2, FileDown, MessageCircle, Phone, Plus, Check } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
@@ -27,7 +27,7 @@ type ProductoConMarca = Producto & {
 
 interface EtiquetaItem {
   variante_id: string
-  variante: Variante & { produto?: ProductoConMarca }
+  variante: Variante & { producto?: ProductoConMarca }
   cantidad: number
 }
 
@@ -50,12 +50,9 @@ export default function EtiquetasPage() {
       return saved ? JSON.parse(saved) : []
     } catch { return [] }
   })
-  const [productoSeleccionado, setProductoSeleccionado] = useState<ProductoConMarca | null>(null)
-  const [filtroTalle, setFiltroTalle] = useState('')
   const [telefono, setTelefono] = useState('')
   const [generandoPDF, setGenerandoPDF] = useState(false)
 
-  // Persist etiquetas to sessionStorage
   useEffect(() => {
     try {
       if (etiquetas.length > 0) {
@@ -74,11 +71,12 @@ export default function EtiquetasPage() {
     return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   }
 
-  const filtrados = busqueda
-    ? productos.filter(p =>
-        normalizar(busqueda).split(/\s+/).filter(Boolean).every(w => normalizar(p.nombre_base).includes(w))
-      )
-    : []
+  const palabras = normalizar(busqueda).split(/\s+/).filter(Boolean)
+  const filtrados = productos.filter(p => {
+    if (palabras.length === 0) return true
+    const texto = normalizar(`${p.nombre_base} ${p.marca?.nombre ?? ''}`)
+    return palabras.every(w => texto.includes(w))
+  })
 
   function agregarVariante(variante: Variante, producto: ProductoConMarca) {
     const existe = etiquetas.find(e => e.variante_id === variante.id)
@@ -88,8 +86,6 @@ export default function EtiquetasPage() {
       variante: { ...variante, producto },
       cantidad: Math.max(1, variante.stock),
     }])
-    setBusqueda('')
-    setProductoSeleccionado(null)
   }
 
   function actualizarCantidad(varianteId: string, cantidad: number) {
@@ -100,6 +96,22 @@ export default function EtiquetasPage() {
 
   function eliminarEtiqueta(varianteId: string) {
     setEtiquetas(prev => prev.filter(e => e.variante_id !== varianteId))
+  }
+
+  function agregarTodosProducto(producto: ProductoConMarca) {
+    const variantes = producto.variantes ?? []
+    let agregados = 0
+    setEtiquetas(prev => {
+      const nuevas = [...prev]
+      for (const v of variantes) {
+        if (!nuevas.find(e => e.variante_id === v.id)) {
+          nuevas.push({ variante_id: v.id, variante: { ...v, producto }, cantidad: Math.max(1, v.stock) })
+          agregados++
+        }
+      }
+      return nuevas
+    })
+    if (agregados > 0) toast.success(`${agregados} variante${agregados > 1 ? 's' : ''} agregada${agregados > 1 ? 's' : ''}`)
   }
 
   function buildEtiquetaDataList(): EtiquetaData[] {
@@ -160,9 +172,12 @@ export default function EtiquetasPage() {
   }
 
   const totalEtiquetas = etiquetas.reduce((s, e) => s + e.cantidad, 0)
+  const variantesSeleccionadas = new Set(etiquetas.map(e => e.variante_id))
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-5">
+
+      {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Etiquetas</h1>
@@ -196,119 +211,134 @@ export default function EtiquetasPage() {
         </div>
       </div>
 
-      {/* Buscador - div instead of Card to avoid overflow-hidden cutting dropdown */}
-      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-        <div className="px-6 pt-5 pb-2">
-          <h3 className="text-base font-semibold">Agregar producto</h3>
-        </div>
-        <div className="px-6 pb-5">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <Input
-                placeholder="Buscar producto por nombre..."
-                value={productoSeleccionado ? productoSeleccionado.nombre_base : busqueda}
-                onChange={e => { setBusqueda(e.target.value); setProductoSeleccionado(null) }}
-                className="pl-9"
-              />
-            </div>
+      {/* Buscador + lista de productos */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <Input
-              placeholder="Talle"
-              value={filtroTalle}
-              onChange={e => setFiltroTalle(e.target.value)}
-              className="w-20 text-center"
+              placeholder="Buscar por nombre o marca..."
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              className="pl-9"
+              autoComplete="off"
             />
           </div>
-          {filtrados.length > 0 && !productoSeleccionado && (
-            <div className="bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-64 overflow-y-auto mt-1">
-              {filtrados.map(producto => {
-                const variantesFiltradas = filtroTalle.trim()
-                  ? producto.variantes?.filter(v => v.talle.toLowerCase().includes(filtroTalle.trim().toLowerCase()))
-                  : producto.variantes
-                if (!variantesFiltradas || variantesFiltradas.length === 0) return null
-                return (
-                  <div key={producto.id}>
-                    <div className="px-4 py-2 bg-gray-50 text-xs font-medium text-gray-600 flex justify-between">
-                      <span>{producto.nombre_base}</span>
-                      {producto.marca?.nombre && (
-                        <span className="text-gray-400">{producto.marca.nombre}</span>
-                      )}
-                    </div>
-                    {variantesFiltradas.map(v => (
+          <p className="text-xs text-gray-400 mt-2">
+            {filtrados.length} producto{filtrados.length !== 1 ? 's' : ''} — hacé clic en un talle para agregar
+          </p>
+        </div>
+
+        <div className="divide-y divide-gray-50 max-h-[420px] overflow-y-auto">
+          {filtrados.length === 0 && (
+            <p className="text-center text-gray-400 text-sm py-10">Sin resultados para &ldquo;{busqueda}&rdquo;</p>
+          )}
+          {filtrados.map(producto => {
+            const variantes = producto.variantes ?? []
+            const todasSeleccionadas = variantes.length > 0 && variantes.every(v => variantesSeleccionadas.has(v.id))
+            return (
+              <div key={producto.id} className="px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-800 text-sm">{producto.nombre_base}</span>
+                    {producto.marca?.nombre && (
+                      <Badge variant="outline" className="text-xs font-normal text-gray-500 border-gray-200">
+                        {producto.marca.nombre}
+                      </Badge>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => agregarTodosProducto(producto)}
+                    disabled={todasSeleccionadas}
+                    className="text-xs text-teal-600 hover:text-teal-700 disabled:text-gray-300 disabled:cursor-default flex items-center gap-1 transition-colors"
+                  >
+                    <Plus size={12} /> Todos
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {variantes.map(v => {
+                    const seleccionada = variantesSeleccionadas.has(v.id)
+                    return (
                       <button
                         key={v.id}
-                        className="w-full text-left px-6 py-2 hover:bg-teal-50 text-sm border-b border-gray-50 last:border-0 flex justify-between items-center"
                         onClick={() => agregarVariante(v, producto)}
+                        disabled={seleccionada}
+                        className={`
+                          inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-all
+                          ${seleccionada
+                            ? 'bg-teal-50 border-teal-300 text-teal-700 cursor-default'
+                            : 'bg-white border-gray-200 text-gray-700 hover:border-teal-400 hover:bg-teal-50 hover:text-teal-700'
+                          }
+                        `}
                       >
-                        <span>
-                          T{v.talle}
-                          <span className="text-gray-400 ml-2">(stock: {v.stock})</span>
-                          {v.codigo_barras && <span className="text-gray-400 font-mono ml-2 text-xs">{v.codigo_barras}</span>}
+                        {seleccionada && <Check size={10} />}
+                        T{v.talle}
+                        <span className={`${seleccionada ? 'text-teal-500' : 'text-gray-400'}`}>
+                          {formatPrecio(v.precio_venta)}
                         </span>
-                        <span className="font-medium text-gray-700">{formatPrecio(v.precio_venta)}</span>
                       </button>
-                    ))}
-                  </div>
-                )
-              })}
-            </div>
-          )}
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
 
-      {/* Lista de etiquetas */}
+      {/* Lista de etiquetas seleccionadas */}
       {etiquetas.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Lista de etiquetas</CardTitle></CardHeader>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Etiquetas a imprimir</CardTitle>
+              <Badge className="bg-teal-500">{totalEtiquetas} etiqueta{totalEtiquetas !== 1 ? 's' : ''}</Badge>
+            </div>
+          </CardHeader>
           <CardContent>
-            <div className="space-y-2">
+            <div className="space-y-1">
               {etiquetas.map(e => (
-                <div key={e.variante_id} className="flex items-center gap-4 py-2 border-b border-gray-50 last:border-0">
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-800">{formatNombreConTalle(e.variante.producto?.nombre_base || '', e.variante.talle)}</p>
+                <div key={e.variante_id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-800 text-sm truncate">
+                      {formatNombreConTalle(e.variante.producto?.nombre_base || '', e.variante.talle)}
+                    </p>
                     <div className="flex items-center gap-2 mt-0.5">
                       {e.variante.producto?.marca?.nombre && (
                         <span className="text-xs text-gray-400">{e.variante.producto.marca.nombre}</span>
                       )}
-                      <span className="text-sm text-gray-500">
+                      <span className="text-xs text-gray-500">
                         {formatPrecio(e.variante.precio_venta)}
-                        <span className="text-xs text-gray-400 ml-1">
-                          · ef. {formatPrecio(Math.round((e.variante.precio_venta) * 0.8))}
-                        </span>
                       </span>
                       {e.variante.codigo_barras && (
-                        <span className="text-xs text-gray-400 font-mono">{e.variante.codigo_barras}</span>
+                        <span className="text-xs text-gray-300 font-mono">{e.variante.codigo_barras}</span>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs text-gray-500">Cant:</Label>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Label className="text-xs text-gray-400">Cant:</Label>
                     <Input
                       type="number"
                       value={e.cantidad}
                       onChange={ev => actualizarCantidad(e.variante_id, parseInt(ev.target.value) || 1)}
-                      className="w-20 text-center"
+                      className="w-16 text-center text-sm h-8"
                       min="1"
                     />
                   </div>
-                  <button onClick={() => eliminarEtiqueta(e.variante_id)} className="text-red-400 hover:text-red-600">
-                    <Trash2 size={16} />
+                  <button onClick={() => eliminarEtiqueta(e.variante_id)} className="text-red-300 hover:text-red-500 transition-colors shrink-0">
+                    <Trash2 size={15} />
                   </button>
                 </div>
               ))}
-            </div>
-            <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between items-center">
-              <span className="text-gray-500 text-sm">Total etiquetas a generar</span>
-              <Badge className="bg-teal-500">{totalEtiquetas}</Badge>
             </div>
           </CardContent>
         </Card>
       )}
 
       {etiquetas.length === 0 && (
-        <div className="text-center py-16 text-gray-400">
-          <FileDown size={48} className="mx-auto mb-3 opacity-30" />
-          <p>Buscá un producto y seleccioná el talle para agregar etiquetas</p>
+        <div className="text-center py-12 text-gray-300">
+          <FileDown size={40} className="mx-auto mb-2 opacity-40" />
+          <p className="text-sm">Seleccioná talles arriba para agregar etiquetas</p>
         </div>
       )}
     </div>
