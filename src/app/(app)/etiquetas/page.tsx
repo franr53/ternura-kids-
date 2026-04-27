@@ -80,7 +80,10 @@ export default function EtiquetasPage() {
 
   function agregarVariante(variante: Variante, producto: ProductoConMarca) {
     const existe = etiquetas.find(e => e.variante_id === variante.id)
-    if (existe) return
+    if (existe) {
+      setEtiquetas(prev => prev.filter(e => e.variante_id !== variante.id))
+      return
+    }
     setEtiquetas(prev => [...prev, {
       variante_id: variante.id,
       variante: { ...variante, producto },
@@ -262,11 +265,10 @@ export default function EtiquetasPage() {
                       <button
                         key={v.id}
                         onClick={() => agregarVariante(v, producto)}
-                        disabled={seleccionada}
                         className={`
                           inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-all
                           ${seleccionada
-                            ? 'bg-teal-50 border-teal-300 text-teal-700 cursor-default'
+                            ? 'bg-teal-50 border-teal-300 text-teal-700 hover:bg-red-50 hover:border-red-300 hover:text-red-500'
                             : 'bg-white border-gray-200 text-gray-700 hover:border-teal-400 hover:bg-teal-50 hover:text-teal-700'
                           }
                         `}
