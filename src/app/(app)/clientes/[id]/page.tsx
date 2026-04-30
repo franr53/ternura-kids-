@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag, Loader2, X, Receipt } from 'lucide-react'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
@@ -62,6 +63,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
   const [soloFacturar, setSoloFacturar] = useState(false)
+  const [confirmarAbono, setConfirmarAbono] = useState(false)
   const METODOS_FACTURAR_CLI = new Set(['transferencia', 'debito', 'credito'])
 
   useEffect(() => {
@@ -330,7 +332,13 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                 className="text-sm"
               />
               <Button
-                onClick={registrarAbono}
+                onClick={() => {
+                  const monto = parseFloat(montoAbono)
+                  if (!monto || monto <= 0) { toast.error('Ingresá un monto válido'); return }
+                  if (!cliente) return
+                  if (monto > cliente.deuda_total) { toast.error(`El abono no puede superar la deuda (${formatPrecio(cliente.deuda_total)})`); return }
+                  setConfirmarAbono(true)
+                }}
                 className="w-full bg-green-500 hover:bg-green-600 gap-2 h-10"
               >
                 <CheckCircle size={16} /> Confirmar pago
@@ -532,6 +540,53 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           </Card>
         )
       })()}
+      {/* Diálogo de confirmación de abono */}
+      <Dialog open={confirmarAbono} onOpenChange={setConfirmarAbono}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">Confirmar pago</DialogTitle>
+          </DialogHeader>
+          {cliente && (
+            <div className="space-y-3 py-1">
+              <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Cliente</span>
+                  <span className="font-medium">{cliente.nombre}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Monto</span>
+                  <span className="font-bold text-green-700 text-base">{formatPrecio(parseFloat(montoAbono) || 0)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Método</span>
+                  <span className="font-medium capitalize">{metodoPagoAbono}</span>
+                </div>
+                {notasAbono && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Nota</span>
+                    <span className="font-medium">{notasAbono}</span>
+                  </div>
+                )}
+                <div className="border-t pt-2 flex justify-between">
+                  <span className="text-gray-500">Deuda restante</span>
+                  <span className="font-medium text-orange-600">{formatPrecio(Math.max(0, cliente.deuda_total - (parseFloat(montoAbono) || 0)))}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmarAbono(false)}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-green-500 hover:bg-green-600 gap-2"
+              onClick={() => { setConfirmarAbono(false); registrarAbono() }}
+            >
+              <CheckCircle size={15} /> Cobrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
