@@ -38,6 +38,7 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
   const [procesando, setProcesando] = useState(false)
+  const [confirmando, setConfirmando] = useState(false)
 
   useEffect(() => {
     async function cargar() {
@@ -90,7 +91,7 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
         <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3 shrink-0">
           {clienteSeleccionado && (
             <button
-              onClick={() => { setClienteSeleccionado(null); setMonto(''); setNotas(''); setProveedorTransferencia(null) }}
+              onClick={() => { setClienteSeleccionado(null); setMonto(''); setNotas(''); setProveedorTransferencia(null); setConfirmando(false) }}
               className="text-gray-400 hover:text-gray-600"
             >
               <ArrowLeft size={18} />
@@ -121,7 +122,6 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   className="pl-9"
                 />
               </div>
-
               {clientesFiltrados.length === 0 ? (
                 <p className="text-center text-sm text-gray-400 py-6">
                   {busqueda ? 'No hay clientes con ese nombre y deuda pendiente' : 'No hay clientes con deuda pendiente'}
@@ -144,16 +144,13 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                 </div>
               )}
             </div>
-          ) : (
+          ) : !confirmando ? (
             /* Paso 2: ingresar cobro */
             <div className="p-4 space-y-4">
-              {/* Deuda actual */}
               <div className="text-center py-3 rounded-xl bg-red-50 border border-red-100">
                 <p className="text-2xl font-bold text-red-500">{formatPrecio(clienteSeleccionado.deuda_total)}</p>
                 <p className="text-xs text-gray-400 mt-0.5">deuda actual</p>
               </div>
-
-              {/* Monto */}
               <div>
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monto a cobrar</label>
                 <Input
@@ -173,8 +170,6 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   </p>
                 )}
               </div>
-
-              {/* Método de pago */}
               <div>
                 <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Método de pago</label>
                 <div className="flex gap-1.5 mt-1">
@@ -198,8 +193,6 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   ))}
                 </div>
               </div>
-
-              {/* Proveedor destino (solo transferencia) */}
               {metodo === 'transferencia' && proveedores.length > 0 && (
                 <div>
                   {proveedorTransferencia ? (
@@ -234,24 +227,67 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   )}
                 </div>
               )}
-
-              {/* Notas */}
               <Input
                 value={notas}
                 onChange={e => setNotas(e.target.value)}
                 placeholder="Nota (opcional)"
                 className="text-sm"
               />
-
-              {/* Confirmar */}
               <Button
-                onClick={confirmarCobro}
-                disabled={procesando || !monto || parseFloat(monto) <= 0}
+                onClick={() => {
+                  const montoNum = parseFloat(monto)
+                  if (!montoNum || montoNum <= 0) { toast.error('Ingresá un monto válido'); return }
+                  if (montoNum > clienteSeleccionado.deuda_total) {
+                    toast.error(`El monto supera la deuda (${formatPrecio(clienteSeleccionado.deuda_total)})`); return
+                  }
+                  setConfirmando(true)
+                }}
+                disabled={!monto || parseFloat(monto) <= 0}
                 className="w-full bg-green-500 hover:bg-green-600 gap-2 h-11"
               >
-                <CheckCircle size={16} />
-                {procesando ? 'Procesando...' : `Confirmar cobro`}
+                <CheckCircle size={16} /> Confirmar cobro
               </Button>
+            </div>
+          ) : (
+            /* Paso 3: confirmación */
+            <div className="p-4 space-y-4">
+              <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Cliente</span>
+                  <span className="font-medium">{clienteSeleccionado.nombre}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Monto</span>
+                  <span className="font-bold text-green-700 text-base">{formatPrecio(parseFloat(monto))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Método</span>
+                  <span className="font-medium capitalize">{metodo}</span>
+                </div>
+                {notas && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Nota</span>
+                    <span className="font-medium">{notas}</span>
+                  </div>
+                )}
+                <div className="border-t pt-2 flex justify-between">
+                  <span className="text-gray-500">Deuda resultante</span>
+                  <span className="font-medium text-orange-600">{formatPrecio(Math.max(0, clienteSeleccionado.deuda_total - parseFloat(monto)))}</span>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => setConfirmando(false)}>
+                  Volver
+                </Button>
+                <Button
+                  className="flex-1 bg-green-500 hover:bg-green-600 gap-2"
+                  disabled={procesando}
+                  onClick={confirmarCobro}
+                >
+                  <CheckCircle size={15} />
+                  {procesando ? 'Procesando...' : 'Cobrar'}
+                </Button>
+              </div>
             </div>
           )}
         </div>
