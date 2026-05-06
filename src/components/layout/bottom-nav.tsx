@@ -17,6 +17,7 @@ import {
   WhatsappLogo,
   DownloadSimple,
   DotsThree,
+  ClipboardText,
 } from '@phosphor-icons/react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -34,6 +35,7 @@ const primaryItems: NavItem[] = [
 ]
 
 const secondaryItems: NavItem[] = [
+  { label: 'Ventas', href: '/ventas', icon: ClipboardText },
   { label: 'Proveedores', href: '/proveedores', icon: Truck },
   { label: 'Caja', href: '/caja', icon: Wallet },
   { label: 'Gastos', href: '/gastos', icon: Receipt },

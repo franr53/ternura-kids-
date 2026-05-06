@@ -214,7 +214,7 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
     : todosClientes.slice(0, 6)
 
   const subtotal = carrito.reduce((s, i) => s + i.precio * (1 - i.descuentoItem / 100) * i.cantidad, 0)
-  const descEfectivo = (!esMixto && (metodoPrincipal === 'efectivo' || metodoPrincipal === 'transferencia')) ? 20 : 0
+  const descEfectivo = pagos.every(p => (['efectivo', 'transferencia'] as MetodoPago[]).includes(p.metodo)) ? 20 : 0
   const descTotal = descEfectivo + descuentoAdicional
   const montoDesc = subtotal * (descTotal / 100)
   const total = subtotal - montoDesc

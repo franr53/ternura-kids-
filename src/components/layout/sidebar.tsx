@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
   BarChart3, Tag, Wallet, MessageCircle, LogOut, Download,
-  ChevronLeft, ChevronRight, Receipt,
+  ChevronLeft, ChevronRight, Receipt, History,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -16,6 +16,7 @@ const navItems = [
   { href: '/pos',         label: 'Punto de Venta', icon: ShoppingCart },
   { href: '/inventario',  label: 'Inventario',     icon: Package },
   { href: '/clientes',    label: 'Clientes',       icon: Users },
+  { href: '/ventas',      label: 'Ventas',         icon: History },
   { href: '/proveedores', label: 'Proveedores',    icon: Truck },
   { href: '/caja',        label: 'Caja',           icon: Wallet },
   { href: '/gastos',      label: 'Gastos',         icon: Receipt },

@@ -2,7 +2,8 @@
 
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Cliente, FiadoMovimiento, Proveedor, Venta } from '@/types'
+import { Cliente, FiadoMovimiento, MetodoPago, Proveedor, Venta } from '@/types'
+import EditarPagoDialog, { VentaEditable } from '@/components/ventas/editar-pago-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag, Loader2, X, Receipt } from 'lucide-react'
+import { ArrowLeft, Save, MessageCircle, CheckCircle, Banknote, Smartphone, CreditCard, ChevronDown, ChevronRight, ShoppingBag, Loader2, X, Receipt, Pencil } from 'lucide-react'
 import { cn, formatPrecio, formatNombreConTalle } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import Link from 'next/link'
@@ -27,6 +28,7 @@ type VentaItem = {
 type VentaConItems = Venta & {
   venta_items?: VentaItem[]
   venta_pagos?: { metodo: string; monto: number }[]
+  caja?: { id: string; estado: string }
 }
 
 type CambioLocal = {
@@ -48,6 +50,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [movimientos, setMovimientos] = useState<FiadoMovimiento[]>([])
   const [ventas, setVentas] = useState<VentaConItems[]>([])
   const [ventaExpandida, setVentaExpandida] = useState<string | null>(null)
+  const [ventaEditando, setVentaEditando] = useState<VentaEditable | null>(null)
   const [cambios, setCambios] = useState<CambioLocal[]>([])
   const [loading, setLoading] = useState(true)
   const [guardando, setGuardando] = useState(false)
@@ -71,7 +74,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).is('venta_id', null).order('creado_en', { ascending: false }).limit(30),
-        supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
+        supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto), caja:cajas(id, estado)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
         supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
         supabase.from('cambios').select('id, creado_en, items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(20),
       ])
@@ -84,6 +87,15 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
     }
     cargar()
   }, [id, supabase])
+
+  async function recargarDatos() {
+    const [{ data: c }, { data: vs }] = await Promise.all([
+      supabase.from('clientes').select('*').eq('id', id).single(),
+      supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto), caja:cajas(id, estado)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
+    ])
+    if (c) setCliente(c)
+    setVentas((vs || []) as VentaConItems[])
+  }
 
   async function guardar() {
     const errNombre = validarRequerido(nombre, 'Nombre') || validarMaxLength(nombre, 100, 'Nombre')
@@ -426,8 +438,8 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                   const metodos = venta.venta_pagos?.map(p => p.metodo).join(' + ') || ''
                   return (
                     <div key={`v-${venta.id}`} className={cn('border-b border-gray-50 last:border-0', expandida && 'bg-teal-50/40')}>
-                      <button
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                      <div
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
                         onClick={() => setVentaExpandida(expandida ? null : venta.id)}
                       >
                         <div className="shrink-0">
@@ -445,11 +457,34 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                             {items.length > 0 && <span className="ml-2">· {items.length} {items.length === 1 ? 'art.' : 'arts.'}</span>}
                           </p>
                         </div>
-                        <div className="text-right shrink-0">
-                          <p className="font-bold text-red-500 text-sm">+{mask(formatPrecio(venta.total))}</p>
-                          {expandida ? <ChevronDown size={13} className="text-gray-400 ml-auto" /> : <ChevronRight size={13} className="text-gray-400 ml-auto" />}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <div className="text-right">
+                            <p className="font-bold text-red-500 text-sm">+{mask(formatPrecio(venta.total))}</p>
+                            {expandida ? <ChevronDown size={13} className="text-gray-400 ml-auto" /> : <ChevronRight size={13} className="text-gray-400 ml-auto" />}
+                          </div>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation()
+                              setVentaEditando({
+                                id: venta.id,
+                                subtotal: venta.subtotal,
+                                total: venta.total,
+                                descuento: venta.descuento,
+                                cliente_id: venta.cliente_id,
+                                caja_id: venta.caja_id,
+                                creado_en: venta.creado_en,
+                                pagos: (venta.venta_pagos || []).map(p => ({ metodo: p.metodo as MetodoPago, monto: p.monto })),
+                                caja: venta.caja ? { estado: venta.caja.estado } : undefined,
+                                venta_items: venta.venta_items?.map(it => ({ cantidad: it.cantidad, variante: it.variante })),
+                              })
+                            }}
+                            className="p-1.5 rounded-lg text-gray-300 hover:text-teal-600 hover:bg-teal-50 transition-colors ml-1"
+                            title="Editar pago"
+                          >
+                            <Pencil size={14} />
+                          </button>
                         </div>
-                      </button>
+                      </div>
                       {expandida && items.length > 0 && (
                         <div className="px-4 pb-3">
                           <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
@@ -587,6 +622,12 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <EditarPagoDialog
+        venta={ventaEditando}
+        open={!!ventaEditando}
+        onClose={() => setVentaEditando(null)}
+        onSaved={recargarDatos}
+      />
     </div>
   )
 }
