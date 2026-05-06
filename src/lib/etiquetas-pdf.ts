@@ -34,7 +34,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
         ` : '<div class="barcode-placeholder"></div>'}
         <div class="precios">
           <div class="precio-efec">${formatPrecio(item.precioEfectivo)}<span class="efec-label">efec</span></div>
-          <div class="precio-lista">L: ${formatPrecio(item.precioLista)}</div>
+          <div class="precio-lista">${formatPrecio(item.precioLista)}<span class="lista-label">list</span></div>
         </div>
       </div>
     </div>`
@@ -132,7 +132,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
     }
     .precio-efec {
       font-size: 11pt;
-      font-weight: 700;
+      font-weight: 800;
       color: #111;
       display: flex;
       align-items: baseline;
@@ -146,8 +146,19 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       letter-spacing: 0.3px;
     }
     .precio-lista {
-      font-size: 7.5pt;
-      color: #999;
+      font-size: 9.5pt;
+      font-weight: 800;
+      color: #111;
+      display: flex;
+      align-items: baseline;
+      gap: 1mm;
+    }
+    .lista-label {
+      font-size: 6pt;
+      font-weight: 400;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
   </style>
 </head>
@@ -211,7 +222,7 @@ async function renderPageToCanvas(
         ${item.codigoBarras ? `<div class="barcode-wrap"><svg id="${bcId}" data-barcode="${item.codigoBarras}"></svg></div>` : '<div class="barcode-placeholder"></div>'}
         <div class="precios">
           <div class="precio-efec">${formatPrecio(item.precioEfectivo)}<span class="efec-label">efec</span></div>
-          <div class="precio-lista">L: ${formatPrecio(item.precioLista)}</div>
+          <div class="precio-lista">${formatPrecio(item.precioLista)}<span class="lista-label">list</span></div>
         </div>
       </div>`
     contenedor.appendChild(div)
