@@ -160,6 +160,34 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
+    /* Dorso doble faz */
+    .dorso-cuerpo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2mm;
+      text-align: center;
+      width: 100%;
+      height: 100%;
+      gap: 0.8mm;
+    }
+    .dorso-logo {
+      width: 16mm;
+      height: auto;
+    }
+    .dorso-nombre {
+      font-size: 7.5pt;
+      font-weight: 800;
+      color: #0B3D39;
+      letter-spacing: 0.5px;
+    }
+    .dorso-sub {
+      font-size: 5.5pt;
+      color: #aaa;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -250,7 +278,38 @@ async function renderPageToCanvas(
   return canvas
 }
 
-async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
+async function renderDorsoPageToCanvas(
+  count: number,
+  iframeDoc: Document,
+  iframeWin: Window,
+): Promise<HTMLCanvasElement> {
+  const contenedor = iframeDoc.querySelector('.contenedor') as HTMLElement
+  contenedor.innerHTML = ''
+
+  for (let i = 0; i < count; i++) {
+    const div = iframeDoc.createElement('div')
+    div.className = 'etiqueta'
+    div.style.alignItems = 'center'
+    div.style.justifyContent = 'center'
+    div.innerHTML = `
+      <div class="dorso-cuerpo">
+        <img src="${LOGO_BASE64}" class="dorso-logo" />
+        <p class="dorso-nombre">Ternura Kids</p>
+        <p class="dorso-sub">Indumentaria infantil</p>
+      </div>`
+    contenedor.appendChild(div)
+  }
+
+  await new Promise(r => setTimeout(r, 150))
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const canvas = await (iframeWin as any).html2canvas(contenedor, {
+    scale: 2, useCORS: true, logging: false,
+  })
+  return canvas
+}
+
+async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Promise<Blob> {
   // Usamos una plantilla vacía para el iframe base (sin etiquetas aún)
   const htmlBase = generarHTMLEtiquetas([])
 
@@ -311,6 +370,14 @@ async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
       const drawH = (canvas.height * contentW) / canvas.width
       const imgData = canvas.toDataURL('image/jpeg', 0.92)
       pdf.addImage(imgData, 'JPEG', margin, margin, contentW, drawH)
+
+      if (dobleFaz) {
+        pdf.addPage()
+        const dorsoCanvas = await renderDorsoPageToCanvas(pages[p].length, iframeDoc, iframeWin)
+        const dorsoH = (dorsoCanvas.height * contentW) / dorsoCanvas.width
+        const dorsoImg = dorsoCanvas.toDataURL('image/jpeg', 0.92)
+        pdf.addImage(dorsoImg, 'JPEG', margin, margin, contentW, dorsoH)
+      }
     }
 
     return pdf.output('blob') as Blob
@@ -319,8 +386,8 @@ async function generarBlobEtiquetas(items: EtiquetaData[]): Promise<Blob> {
   }
 }
 
-export async function generarPDFEtiquetas(items: EtiquetaData[]): Promise<Blob> {
-  const blob = await generarBlobEtiquetas(items)
+export async function generarPDFEtiquetas(items: EtiquetaData[], dobleFaz = false): Promise<Blob> {
+  const blob = await generarBlobEtiquetas(items, dobleFaz)
   // Auto-download
   const fecha = new Date().toISOString().slice(0, 10)
   const url = URL.createObjectURL(blob)

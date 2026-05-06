@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Search, Trash2, FileDown, MessageCircle, Phone, Plus, Check } from 'lucide-react'
+import { Search, Trash2, FileDown, MessageCircle, Phone, Plus, Check, FlipHorizontal } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
 import { toast } from 'sonner'
 import {
@@ -52,6 +52,7 @@ export default function EtiquetasPage() {
   })
   const [telefono, setTelefono] = useState('')
   const [generandoPDF, setGenerandoPDF] = useState(false)
+  const [dobleFaz, setDobleFaz] = useState(false)
 
   useEffect(() => {
     try {
@@ -141,8 +142,8 @@ export default function EtiquetasPage() {
     if (etiquetas.length === 0) return
     setGenerandoPDF(true)
     try {
-      await generarPDFEtiquetas(buildEtiquetaDataList())
-      toast.success('PDF descargado')
+      await generarPDFEtiquetas(buildEtiquetaDataList(), dobleFaz)
+      toast.success(dobleFaz ? 'PDF doble faz descargado' : 'PDF descargado')
     } catch (err) {
       toast.error(`Error al generar PDF: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -158,7 +159,7 @@ export default function EtiquetasPage() {
     setWhatsAppTel(telefono.trim())
     setGenerandoPDF(true)
     try {
-      const blob = await generarPDFEtiquetas(buildEtiquetaDataList())
+      const blob = await generarPDFEtiquetas(buildEtiquetaDataList(), dobleFaz)
       const fecha = new Date().toISOString().slice(0, 10)
       const resultado = await compartirPDFWhatsApp(blob, `etiquetas_${fecha}.pdf`, telefono.trim())
       toast.success(resultado === 'shared' ? 'Etiquetas compartidas' : 'PDF descargado — adjuntalo en el chat de WhatsApp')
@@ -196,6 +197,18 @@ export default function EtiquetasPage() {
               className="h-7 w-32 text-xs border-0 bg-transparent p-0 focus-visible:ring-0"
             />
           </div>
+          <button
+            onClick={() => setDobleFaz(v => !v)}
+            title="Doble faz: agrega el dorso con el logo del local"
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+              dobleFaz
+                ? 'bg-teal-50 border-teal-400 text-teal-700'
+                : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+            }`}
+          >
+            <FlipHorizontal size={16} />
+            Doble faz
+          </button>
           <Button
             onClick={handleGenerarPDF}
             disabled={etiquetas.length === 0 || generandoPDF}
