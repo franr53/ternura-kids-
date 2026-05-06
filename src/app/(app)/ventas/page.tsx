@@ -1,13 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { MetodoPago } from '@/types'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Search, Pencil } from 'lucide-react'
+import { Pencil, CalendarDays, X } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 import EditarPagoDialog, { VentaEditable } from '@/components/ventas/editar-pago-dialog'
 
@@ -37,6 +36,20 @@ const METODO_COLORS: Record<string, string> = {
   fiado: 'bg-orange-100 text-orange-700',
 }
 
+type FiltroRapido = 'hoy' | '7dias' | 'mes' | 'custom'
+
+function getRango(filtro: Exclude<FiltroRapido, 'custom'>): { desde: string; hasta: string } {
+  const hoy = new Date()
+  const hasta = hoy.toISOString().split('T')[0]
+  if (filtro === 'hoy') return { desde: hasta, hasta }
+  if (filtro === '7dias') {
+    const d = new Date(hoy); d.setDate(d.getDate() - 6)
+    return { desde: d.toISOString().split('T')[0], hasta }
+  }
+  const d = new Date(hoy); d.setDate(d.getDate() - 29)
+  return { desde: d.toISOString().split('T')[0], hasta }
+}
+
 function ventaAEditable(v: VentaLista): VentaEditable {
   return {
     id: v.id,
@@ -52,19 +65,26 @@ function ventaAEditable(v: VentaLista): VentaEditable {
   }
 }
 
+const FILTROS: { key: FiltroRapido; label: string }[] = [
+  { key: 'hoy', label: 'Hoy' },
+  { key: '7dias', label: '7 días' },
+  { key: 'mes', label: 'Mes' },
+  { key: 'custom', label: 'Fechas' },
+]
+
 export default function VentasPage() {
   const supabase = createClient()
   const hoy = new Date().toISOString().split('T')[0]
 
-  const [desde, setDesde] = useState(hoy)
-  const [hasta, setHasta] = useState(hoy)
+  const [filtro, setFiltro] = useState<FiltroRapido>('hoy')
+  const [customDesde, setCustomDesde] = useState(hoy)
+  const [customHasta, setCustomHasta] = useState(hoy)
+  const [busqueda, setBusqueda] = useState('')
   const [ventas, setVentas] = useState<VentaLista[]>([])
   const [loading, setLoading] = useState(false)
-  const [buscado, setBuscado] = useState(false)
   const [ventaEditando, setVentaEditando] = useState<VentaLista | null>(null)
 
-  async function buscar() {
-    if (!desde || !hasta) { toast.error('Seleccioná las fechas'); return }
+  const fetchVentas = useCallback(async (desde: string, hasta: string) => {
     setLoading(true)
     const { data, error } = await supabase
       .from('ventas')
@@ -79,50 +99,110 @@ export default function VentasPage() {
       .gte('creado_en', `${desde}T00:00:00`)
       .lte('creado_en', `${hasta}T23:59:59`)
       .order('creado_en', { ascending: false })
-    if (error) { toast.error('Error al buscar: ' + error.message); setLoading(false); return }
-    setVentas((data || []) as unknown as VentaLista[])
-    setBuscado(true)
     setLoading(false)
+    if (error) { toast.error('Error al buscar: ' + error.message); return }
+    setVentas((data || []) as unknown as VentaLista[])
+  }, [supabase])
+
+  useEffect(() => {
+    if (filtro !== 'custom') {
+      const { desde, hasta } = getRango(filtro)
+      fetchVentas(desde, hasta)
+    }
+  }, [filtro, fetchVentas])
+
+  function aplicarCustom() {
+    if (!customDesde || !customHasta) { toast.error('Seleccioná las fechas'); return }
+    fetchVentas(customDesde, customHasta)
   }
 
-  const totalFacturado = ventas.reduce((s, v) => s + v.total, 0)
+  const ventasFiltradas = useMemo(() => {
+    if (!busqueda.trim()) return ventas
+    const q = busqueda.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    return ventas.filter(v => {
+      const nombre = (v.cliente?.nombre || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      return nombre.includes(q)
+    })
+  }, [ventas, busqueda])
+
+  const totalFacturado = ventasFiltradas.reduce((s, v) => s + v.total, 0)
 
   return (
     <div className="p-4 max-w-3xl mx-auto pb-28">
       <h1 className="text-xl font-bold text-gray-800 mb-4">Historial de ventas</h1>
 
-      {/* Filtros */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">Desde</span>
+      {/* Filtros rápidos */}
+      <div className="flex gap-2 mb-3">
+        {FILTROS.map(f => (
+          <button
+            key={f.key}
+            onClick={() => setFiltro(f.key)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border ${
+              filtro === f.key
+                ? 'bg-teal-500 text-white border-teal-500'
+                : 'bg-white text-gray-500 border-gray-200 hover:border-teal-300 hover:text-teal-600'
+            }`}
+          >
+            {f.key === 'custom' && <CalendarDays size={13} />}
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Rango personalizado */}
+      {filtro === 'custom' && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
           <Input
             type="date"
-            value={desde}
-            onChange={e => setDesde(e.target.value)}
-            className="h-9 text-sm w-36"
+            value={customDesde}
+            onChange={e => setCustomDesde(e.target.value)}
+            className="h-8 text-sm w-36"
           />
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">Hasta</span>
+          <span className="text-xs text-gray-400">→</span>
           <Input
             type="date"
-            value={hasta}
-            onChange={e => setHasta(e.target.value)}
-            className="h-9 text-sm w-36"
+            value={customHasta}
+            onChange={e => setCustomHasta(e.target.value)}
+            className="h-8 text-sm w-36"
           />
+          <button
+            onClick={aplicarCustom}
+            disabled={loading}
+            className="px-3 py-1.5 rounded-full text-sm font-medium bg-teal-500 text-white hover:bg-teal-600 disabled:opacity-50 transition-colors"
+          >
+            {loading ? 'Buscando...' : 'Buscar'}
+          </button>
         </div>
-        <Button onClick={buscar} disabled={loading} className="h-9 bg-teal-500 hover:bg-teal-600 gap-1.5">
-          <Search size={15} />
-          {loading ? 'Buscando...' : 'Buscar'}
-        </Button>
+      )}
+
+      {/* Buscador por cliente */}
+      <div className="relative mb-4">
+        <input
+          type="text"
+          placeholder="Buscar por cliente..."
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          className="w-full h-9 pl-9 pr-8 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+        />
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </span>
+        {busqueda && (
+          <button
+            onClick={() => setBusqueda('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
       {/* Resumen */}
-      {buscado && ventas.length > 0 && (
+      {ventasFiltradas.length > 0 && (
         <div className="flex gap-3 mb-4">
           <div className="flex-1 bg-teal-50 rounded-xl p-3 text-center">
             <p className="text-xs text-gray-500">Ventas</p>
-            <p className="text-xl font-bold text-teal-600">{ventas.length}</p>
+            <p className="text-xl font-bold text-teal-600">{ventasFiltradas.length}</p>
           </div>
           <div className="flex-1 bg-teal-50 rounded-xl p-3 text-center">
             <p className="text-xs text-gray-500">Total</p>
@@ -131,15 +211,26 @@ export default function VentasPage() {
         </div>
       )}
 
-      {/* Lista */}
-      {buscado && ventas.length === 0 && (
+      {/* Loading */}
+      {loading && (
+        <div className="text-center py-12 text-sm text-gray-400">Cargando...</div>
+      )}
+
+      {/* Sin resultados */}
+      {!loading && ventas.length === 0 && (
         <div className="text-center py-12 text-sm text-gray-400">
           No hay ventas en ese período
         </div>
       )}
+      {!loading && ventas.length > 0 && ventasFiltradas.length === 0 && (
+        <div className="text-center py-12 text-sm text-gray-400">
+          No hay ventas para "{busqueda}"
+        </div>
+      )}
 
+      {/* Lista */}
       <div className="space-y-2">
-        {ventas.map(v => {
+        {ventasFiltradas.map(v => {
           const items = v.venta_items || []
           const resumen = items.length > 0
             ? items.slice(0, 2).map(it => it.variante?.producto?.nombre_base || '—').join(', ')
@@ -195,7 +286,14 @@ export default function VentasPage() {
         venta={ventaEditando ? ventaAEditable(ventaEditando) : null}
         open={!!ventaEditando}
         onClose={() => setVentaEditando(null)}
-        onSaved={buscar}
+        onSaved={() => {
+          if (filtro !== 'custom') {
+            const { desde, hasta } = getRango(filtro)
+            fetchVentas(desde, hasta)
+          } else {
+            fetchVentas(customDesde, customHasta)
+          }
+        }}
       />
     </div>
   )
