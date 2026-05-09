@@ -12,7 +12,7 @@
 1. **Alcance primero**: Confirmá qué archivos tocás y cuáles NO antes de escribir código. Más de 3 archivos → listá cambios antes de ejecutar. Nunca modifiques migraciones, RLS o auth sin confirmación explícita.
 2. **Modo plan**: Para tareas no triviales (3+ pasos o arquitectura), planificá antes de ejecutar.
 3. **Subagentes**: Delegá investigación, exploración y análisis paralelo. Contexto principal solo para ejecución.
-4. **Verificación**: Nunca marques tarea como completada sin demostrar que funciona. Abrí `http://localhost:3000` con Playwright y probá el flujo.
+4. **Verificación (OBLIGATORIO)**: Nunca marques tarea como completada sin probar el flujo completo con Playwright (`http://localhost:3000`). Para cualquier operación que guarde datos en DB: ejecutar el guardado real, verificar que no hay errores en consola ni en toast, y confirmar que los datos quedaron correctos. No hay excepción a esta regla.
 5. **Claridad**: Código claro > elegante. Para cambios complejos, buscá la forma más simple.
 6. **Errores**: Si recibís un reporte, arreglalo autónomamente. No pidas más info si podés encontrarla.
 7. **Commits atómicos**: `tipo(módulo): descripción`. Un cambio funcional = un commit.

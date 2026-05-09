@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { ArrowLeft, Save, Plus, FileText, Upload, TrendingUp, TrendingDown, Minus, Pencil, Check } from 'lucide-react'
+import { ArrowLeft, Save, Plus, FileText, Upload, TrendingUp, TrendingDown, Minus, Pencil, Check, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { formatPrecio } from '@/lib/utils'
 import * as XLSX from 'xlsx'
@@ -80,6 +80,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
 
   const [montoPago, setMontoPago] = useState('')
   const [metodoPago, setMetodoPago] = useState('efectivo')
+  const [eliminandoPago, setEliminandoPago] = useState<string | null>(null)
 
   const [montoDeuda, setMontoDeuda] = useState('')
   const [remitoDeuda, setRemitoDeuda] = useState('')
@@ -189,6 +190,26 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
     setRegistrandoDeuda(false)
   }
 
+  async function eliminarPago(pago: PagoProveedor) {
+    if (!confirm(`¿Eliminar pago de ${formatPrecio(pago.monto)}? Se revertirá la deuda del proveedor.`)) return
+    setEliminandoPago(pago.id)
+
+    const { error } = await supabase.from('pagos_proveedores').delete().eq('id', pago.id)
+    if (error) { toast.error('Error al eliminar: ' + error.message); setEliminandoPago(null); return }
+
+    if (pago.gasto_id) {
+      await supabase.from('gastos').delete().eq('id', pago.gasto_id)
+    }
+
+    const { data: marcaActual } = await supabase.from('marcas').select('deuda_total').eq('id', id).single()
+    const nuevaDeuda = (marcaActual?.deuda_total || 0) + pago.monto
+    await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', id)
+    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
+    setPagos(prev => prev.filter(p => p.id !== pago.id))
+    setEliminandoPago(null)
+    toast.success(`Pago de ${formatPrecio(pago.monto)} eliminado`)
+  }
+
   function procesarExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -296,29 +317,33 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
   if (!proveedor) return <div className="p-8 text-center text-gray-500">Proveedor no encontrado</div>
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/proveedores"><Button variant="ghost" size="icon"><ArrowLeft size={20} /></Button></Link>
-          <div>
-            <h1 className="text-xl font-bold text-gray-800">{proveedor.nombre}</h1>
-            {proveedor.deuda_total > 0 && (
-              <Badge variant="destructive" className="mt-1">Deuda: {formatPrecio(proveedor.deuda_total)}</Badge>
-            )}
+    <div className="max-w-5xl mx-auto">
+      {/* Header sticky bajo el TopBar */}
+      <div className="sticky top-14 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-100 -mx-4 lg:-mx-8 px-4 lg:px-8 py-3 mb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/proveedores"><Button variant="ghost" size="icon"><ArrowLeft size={20} /></Button></Link>
+            <div>
+              <h1 className="text-xl font-bold text-gray-800">{proveedor.nombre}</h1>
+              {proveedor.deuda_total > 0 && (
+                <Badge variant="destructive" className="mt-0.5">Deuda: {formatPrecio(proveedor.deuda_total)}</Badge>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <Link href={`/proveedores/ingreso?proveedor=${id}`}>
-            <Button variant="outline" className="gap-2 border-teal-300 text-teal-700 hover:bg-teal-50">
-              <FileText size={16} /> Cargar boleta
+          <div className="flex gap-2">
+            <Link href={`/proveedores/ingreso?proveedor=${id}`}>
+              <Button variant="outline" className="gap-2 border-teal-300 text-teal-700 hover:bg-teal-50">
+                <FileText size={16} /> Cargar boleta
+              </Button>
+            </Link>
+            <Button onClick={guardar} disabled={guardando} className="bg-teal-500 hover:bg-teal-600 gap-2">
+              <Save size={16} /> {guardando ? 'Guardando...' : 'Guardar'}
             </Button>
-          </Link>
-          <Button onClick={guardar} disabled={guardando} className="bg-teal-500 hover:bg-teal-600 gap-2">
-            <Save size={16} /> {guardando ? 'Guardando...' : 'Guardar'}
-          </Button>
+          </div>
         </div>
       </div>
 
+      <div className="space-y-6">
       {/* Deuda prominente */}
       {proveedor.deuda_total > 0 && (
         <Card className="border-red-200 bg-red-50">
@@ -338,7 +363,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
         </TabsList>
 
         <TabsContent value="datos" className="space-y-6 mt-4">
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {/* Datos */}
             <Card>
               <CardHeader><CardTitle className="text-base">Datos</CardTitle></CardHeader>
@@ -454,7 +479,17 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
                           {pago.notas && <span className="text-xs text-gray-400 truncate max-w-[180px]">{pago.notas}</span>}
                         </div>
                       </div>
-                      <p className="font-semibold text-green-600">{formatPrecio(pago.monto)}</p>
+                      <div className="flex items-center gap-3">
+                        <p className="font-semibold text-green-600">{formatPrecio(pago.monto)}</p>
+                        <button
+                          onClick={() => eliminarPago(pago)}
+                          disabled={eliminandoPago === pago.id}
+                          className="text-gray-300 hover:text-red-400 transition-colors disabled:opacity-50"
+                          title="Eliminar pago"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -636,6 +671,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
           </Card>
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   )
 }
