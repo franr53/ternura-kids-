@@ -319,7 +319,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header sticky bajo el TopBar */}
-      <div className="sticky top-14 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-100 -mx-4 lg:-mx-8 px-4 lg:px-8 py-3 mb-4">
+      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-100 -mx-4 lg:-mx-8 px-4 lg:px-8 py-3 -mt-2 mb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/proveedores"><Button variant="ghost" size="icon"><ArrowLeft size={20} /></Button></Link>
