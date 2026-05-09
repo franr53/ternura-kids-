@@ -100,7 +100,7 @@ export default function EditarPagoDialog({ venta, open, onClose, onSaved }: Prop
   }
 
   function actualizarMonto(idx: number, monto: number) {
-    setPagos(prev => prev.map((p, i) => i === idx ? { ...p, monto } : p))
+    setPagos(prev => prev.map((p, i) => i === idx ? { ...p, monto: Math.round(monto) } : p))
   }
 
   function quitarMetodo(idx: number) {
@@ -122,9 +122,9 @@ export default function EditarPagoDialog({ venta, open, onClose, onSaved }: Prop
     setLoading(true)
     const { error } = await supabase.rpc('editar_pagos_venta', {
       p_venta_id: venta!.id,
-      p_nuevos_pagos: pagos,
-      p_nuevo_total: nuevoTotal,
-      p_nuevo_descuento: nuevoDescuento,
+      p_nuevos_pagos: pagos.map(p => ({ ...p, monto: Math.round(p.monto) })),
+      p_nuevo_total: Math.round(nuevoTotal),
+      p_nuevo_descuento: Math.round(nuevoDescuento),
     })
     setLoading(false)
 
