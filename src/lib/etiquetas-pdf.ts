@@ -1,5 +1,6 @@
 import { formatPrecio } from '@/lib/utils'
 import { LOGO_BASE64 } from '@/lib/logo-base64'
+import { DORSO_BASE64 } from '@/lib/dorso-base64'
 
 export interface EtiquetaData {
   nombre: string
@@ -162,40 +163,22 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
-    /* Dorso doble faz — layout horizontal */
+    /* Dorso doble faz */
     .dorso-cuerpo {
       display: flex;
-      flex-direction: row;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 3mm;
-      padding: 2mm 4mm;
+      gap: 1mm;
+      padding: 1.5mm 2mm;
       width: 100%;
       height: 100%;
     }
-    .dorso-icono {
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-    }
-    .dorso-icono svg {
-      width: 16mm;
-      height: auto;
+    .dorso-img {
+      width: auto;
+      height: 24mm;
+      object-fit: contain;
       display: block;
-    }
-    .dorso-texto {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.5mm;
-    }
-    .dorso-nombre {
-      font-family: 'Nunito', 'Arial Rounded MT Bold', sans-serif;
-      font-size: 10pt;
-      font-weight: 800;
-      color: #777;
-      line-height: 1;
-      white-space: nowrap;
     }
     .dorso-ig {
       display: flex;
@@ -203,8 +186,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       gap: 1mm;
       font-size: 5.5pt;
       color: #aaa;
-      font-family: 'Nunito', sans-serif;
-      white-space: nowrap;
+      font-family: Arial, sans-serif;
     }
     .dorso-ig svg {
       width: 6pt;
@@ -316,24 +298,12 @@ async function renderDorsoPageToCanvas(
     div.style.alignItems = 'stretch'
     div.innerHTML = `
       <div class="dorso-cuerpo">
-        <div class="dorso-icono">
-          <svg viewBox="0 0 80 90" xmlns="http://www.w3.org/2000/svg" fill="#888">
-            <ellipse cx="40" cy="65" rx="26" ry="21"/>
-            <ellipse cx="13" cy="60" rx="8" ry="14" transform="rotate(-35 13 60)"/>
-            <ellipse cx="24" cy="30" rx="7.5" ry="21"/>
-            <ellipse cx="38" cy="23" rx="7.5" ry="24"/>
-            <ellipse cx="52" cy="26" rx="7" ry="22"/>
-            <ellipse cx="65" cy="36" rx="6" ry="17"/>
+        <img src="${DORSO_BASE64}" class="dorso-img" alt="Ternura Kids"/>
+        <div class="dorso-ig">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#aaa">
+            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
           </svg>
-        </div>
-        <div class="dorso-texto">
-          <span class="dorso-nombre">Ternura Kids</span>
-          <div class="dorso-ig">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#aaa">
-              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-            </svg>
-            @ternurakids_ok
-          </div>
+          @ternurakids_ok
         </div>
       </div>`
     contenedor.appendChild(div)
