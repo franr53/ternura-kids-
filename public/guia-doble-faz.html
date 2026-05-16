@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cómo imprimir doble faz — Ternura Kids</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 16px;
+      color: #222;
+      background: #f8f8f8;
+      padding: 24px 16px;
+    }
+
+    .guia {
+      max-width: 700px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+
+    /* Header */
+    .header {
+      background: #4EC3BD;
+      color: white;
+      padding: 28px 32px;
+      text-align: center;
+    }
+    .header h1 { font-size: 26px; font-weight: bold; margin-bottom: 6px; }
+    .header p { font-size: 15px; opacity: 0.9; }
+
+    /* Intro */
+    .intro {
+      background: #f0fafa;
+      border-left: 5px solid #4EC3BD;
+      padding: 18px 24px;
+      margin: 24px 24px 0;
+      border-radius: 0 8px 8px 0;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    .intro strong { color: #2a9d96; }
+
+    /* Sección */
+    .seccion {
+      padding: 24px 32px;
+    }
+    .seccion + .seccion {
+      border-top: 1px solid #eee;
+    }
+
+    .seccion-titulo {
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #4EC3BD;
+      margin-bottom: 16px;
+    }
+
+    /* Pasos */
+    .paso {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .paso-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #4EC3BD;
+      color: white;
+      font-weight: bold;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .paso-cuerpo h3 {
+      font-size: 16px;
+      font-weight: bold;
+      color: #222;
+      margin-bottom: 6px;
+    }
+    .paso-cuerpo p, .paso-cuerpo li {
+      font-size: 15px;
+      line-height: 1.6;
+      color: #444;
+    }
+    .paso-cuerpo ul {
+      padding-left: 20px;
+      margin-top: 6px;
+    }
+    .paso-cuerpo li { margin-bottom: 3px; }
+
+    /* Tip */
+    .tip {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #555;
+    }
+    .tip::before { content: "💡 "; }
+
+    /* Alerta */
+    .alerta {
+      background: #fff0f0;
+      border: 1px solid #fca5a5;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #555;
+    }
+    .alerta::before { content: "⚠️ "; }
+
+    /* Diagrama de páginas del PDF */
+    .pdf-diagram {
+      display: flex;
+      gap: 12px;
+      margin: 16px 0;
+      flex-wrap: wrap;
+    }
+    .pdf-page {
+      border: 2px solid #ccc;
+      border-radius: 6px;
+      width: 90px;
+      padding: 10px 8px;
+      text-align: center;
+      font-size: 12px;
+    }
+    .pdf-page.frente { border-color: #4EC3BD; background: #f0fafa; }
+    .pdf-page.dorso  { border-color: #f59e0b; background: #fffbeb; }
+    .pdf-page .pg-label { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+    .pdf-page .pg-desc  { color: #666; font-size: 11px; }
+
+    /* Diagrama dar vuelta */
+    .flip-diagram {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 16px 0;
+      flex-wrap: wrap;
+    }
+    .hoja {
+      border: 2px solid #aaa;
+      border-radius: 4px;
+      width: 90px;
+      height: 120px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      text-align: center;
+      padding: 8px;
+      background: white;
+      position: relative;
+    }
+    .hoja .etiqueta-cara {
+      font-size: 11px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .hoja .etiqueta-desc {
+      font-size: 10px;
+      color: #777;
+    }
+    .hoja.frente-impreso { border-color: #4EC3BD; }
+    .hoja.frente-impreso .etiqueta-cara { color: #4EC3BD; }
+    .hoja.resultado { border-color: #f59e0b; }
+    .hoja.resultado .etiqueta-cara { color: #b45309; }
+    .flecha { font-size: 24px; color: #888; }
+    .flip-label {
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+      margin-top: 6px;
+    }
+    .flip-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* Tabla páginas */
+    .tabla-paginas {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    .tabla-paginas th {
+      background: #f0fafa;
+      color: #2a9d96;
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 13px;
+    }
+    .tabla-paginas td {
+      padding: 9px 12px;
+      border-bottom: 1px solid #eee;
+    }
+    .tabla-paginas tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .badge.verde { background: #d1fae5; color: #065f46; }
+    .badge.amarillo { background: #fef3c7; color: #92400e; }
+
+    /* Resumen final */
+    .resumen {
+      background: #4EC3BD;
+      color: white;
+      padding: 20px 32px;
+      border-radius: 0 0 12px 12px;
+    }
+    .resumen h3 { font-size: 17px; margin-bottom: 14px; }
+    .resumen ol {
+      padding-left: 20px;
+      font-size: 15px;
+      line-height: 1.8;
+    }
+    .resumen li { margin-bottom: 4px; }
+
+    @media print {
+      body { background: white; padding: 0; }
+      .guia { box-shadow: none; border-radius: 0; }
+    }
+  </style>
+</head>
+<body>
+<div class="guia">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>🖨️ Cómo imprimir doble faz</h1>
+    <p>Guía paso a paso — Etiquetas Ternura Kids</p>
+  </div>
+
+  <!-- Intro -->
+  <div class="intro" style="margin: 24px 24px 0;">
+    El PDF que genera la app tiene <strong>dos partes</strong>:
+    la primera mitad son los <strong>frentes</strong> (con precio y talle),
+    y la segunda mitad son los <strong>dorsos</strong> (con el logo Ternura Kids).<br><br>
+    La idea es imprimir los frentes, dar vuelta las hojas, e imprimir los dorsos al reverso.
+  </div>
+
+  <!-- Cómo está armado el PDF -->
+  <div class="seccion">
+    <div class="seccion-titulo">📄 Cómo está organizado el PDF</div>
+
+    <p style="font-size:15px; color:#444; margin-bottom:14px;">
+      Si generás etiquetas para, por ejemplo, <strong>24 artículos</strong>,
+      el PDF tiene <strong>2 páginas</strong>:
+    </p>
+
+    <div class="pdf-diagram">
+      <div class="pdf-page frente">
+        <div class="pg-label">Pág. 1</div>
+        <div class="pg-desc">FRENTE<br>precios y talles</div>
+      </div>
+      <div class="pdf-page dorso">
+        <div class="pg-label">Pág. 2</div>
+        <div class="pg-desc">DORSO<br>logo Ternura Kids</div>
+      </div>
+    </div>
+
+    <table class="tabla-paginas">
+      <tr>
+        <th>Total de páginas en el PDF</th>
+        <th>Páginas de FRENTE</th>
+        <th>Páginas de DORSO</th>
+      </tr>
+      <tr>
+        <td>2 páginas</td>
+        <td><span class="badge verde">1</span></td>
+        <td><span class="badge amarillo">2</span></td>
+      </tr>
+      <tr>
+        <td>4 páginas</td>
+        <td><span class="badge verde">1 – 2</span></td>
+        <td><span class="badge amarillo">3 – 4</span></td>
+      </tr>
+      <tr>
+        <td>6 páginas</td>
+        <td><span class="badge verde">1 – 3</span></td>
+        <td><span class="badge amarillo">4 – 6</span></td>
+      </tr>
+    </table>
+
+    <div class="tip">
+      La regla siempre es la misma: la <strong>primera mitad</strong> son frentes,
+      la <strong>segunda mitad</strong> son dorsos.
+    </div>
+  </div>
+
+  <!-- Paso 0: Test -->
+  <div class="seccion">
+    <div class="seccion-titulo">🧪 Antes de empezar (hacé esto una sola vez)</div>
+
+    <p style="font-size:15px; color:#444; margin-bottom:16px;">
+      Cada impresora expulsa el papel de una manera distinta.
+      Antes de gastar hojas, hacé este test rápido:
+    </p>
+
+    <div class="paso">
+      <div class="paso-num">1</div>
+      <div class="paso-cuerpo">
+        <h3>Marcá una hoja de prueba</h3>
+        <p>Tomá una hoja en blanco. Del lado que va a entrar primero a la impresora,
+        escribí con lápiz una <strong>X grande</strong> en el centro.</p>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">2</div>
+      <div class="paso-cuerpo">
+        <h3>Imprimí solo la página 1</h3>
+        <p>Abrí el PDF, apretá <kbd style="background:#eee;padding:2px 6px;border-radius:4px;font-family:monospace;">Ctrl + P</kbd>,
+        en <em>"Páginas"</em> escribí solo <strong>1</strong> y apretá Imprimir.</p>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">3</div>
+      <div class="paso-cuerpo">
+        <h3>Mirá cómo salió</h3>
+        <p>Cuando sale la hoja impresa, fijate:</p>
+        <ul>
+          <li>¿En qué cara quedó el texto impreso?</li>
+          <li>¿La X quedó arriba o abajo?</li>
+          <li>¿La X quedó al mismo lado que el texto, o al reverso?</li>
+        </ul>
+        <p style="margin-top:8px;">Con esa info ya sabés cómo dar vuelta el papel en el Paso 2.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Paso 1: Imprimir frentes -->
+  <div class="seccion">
+    <div class="seccion-titulo">🟢 Paso 1 — Imprimir los FRENTES</div>
+
+    <div class="paso">
+      <div class="paso-num">1</div>
+      <div class="paso-cuerpo">
+        <h3>Abrí el PDF en el navegador o Adobe</h3>
+        <p>Hacé doble clic en el archivo PDF que descargaste.</p>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">2</div>
+      <div class="paso-cuerpo">
+        <h3>Apretá Ctrl + P para imprimir</h3>
+        <p>Se abre la ventana de impresión.</p>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">3</div>
+      <div class="paso-cuerpo">
+        <h3>Seleccioná solo las páginas de frente</h3>
+        <p>En el campo <em>"Páginas"</em> (o <em>"Rango de páginas"</em>), escribí:</p>
+        <ul>
+          <li>Si el PDF tiene 2 páginas → escribí <strong>1</strong></li>
+          <li>Si el PDF tiene 4 páginas → escribí <strong>1-2</strong></li>
+          <li>Si el PDF tiene 6 páginas → escribí <strong>1-3</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">4</div>
+      <div class="paso-cuerpo">
+        <h3>Imprimí y esperá</h3>
+        <p>Dejá que salgan todas las hojas. <strong>No las muevas todavía.</strong></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Paso 2: Dar vuelta -->
+  <div class="seccion">
+    <div class="seccion-titulo">🔄 Paso 2 — Dar vuelta el papel</div>
+
+    <p style="font-size:15px; color:#444; margin-bottom:16px;">
+      Este es el paso más importante. Hay dos formas comunes de dar vuelta el papel.
+      Usá la que funcione con tu impresora (lo descubriste en el test de arriba).
+    </p>
+
+    <!-- Opción A -->
+    <p style="font-weight:bold; margin-bottom:10px; color:#333;">Opción A — Voltear sobre el borde largo (más común)</p>
+    <div class="flip-diagram">
+      <div class="flip-step">
+        <div class="hoja frente-impreso">
+          <div class="etiqueta-cara">✅ FRENTE</div>
+          <div class="etiqueta-desc">cara impresa<br>mirando arriba</div>
+        </div>
+        <div class="flip-label">Cómo salió</div>
+      </div>
+      <div class="flecha">→</div>
+      <div class="flip-step">
+        <div class="hoja" style="border-color:#aaa;">
+          <div style="font-size:28px;">↕️</div>
+          <div class="etiqueta-desc" style="margin-top:6px;">Girala<br>boca abajo<br>(sobre el eje<br>horizontal)</div>
+        </div>
+        <div class="flip-label">Dar vuelta</div>
+      </div>
+      <div class="flecha">→</div>
+      <div class="flip-step">
+        <div class="hoja resultado">
+          <div class="etiqueta-cara">🔵 DORSO</div>
+          <div class="etiqueta-desc">cara en blanco<br>mirando arriba</div>
+        </div>
+        <div class="flip-label">Lista para el paso 3</div>
+      </div>
+    </div>
+
+    <!-- Opción B -->
+    <p style="font-weight:bold; margin: 20px 0 10px; color:#333;">Opción B — Voltear sobre el borde corto</p>
+    <div class="flip-diagram">
+      <div class="flip-step">
+        <div class="hoja frente-impreso">
+          <div class="etiqueta-cara">✅ FRENTE</div>
+          <div class="etiqueta-desc">cara impresa<br>mirando arriba</div>
+        </div>
+        <div class="flip-label">Cómo salió</div>
+      </div>
+      <div class="flecha">→</div>
+      <div class="flip-step">
+        <div class="hoja" style="border-color:#aaa;">
+          <div style="font-size:28px;">↔️</div>
+          <div class="etiqueta-desc" style="margin-top:6px;">Girala<br>de costado<br>(sobre el eje<br>vertical)</div>
+        </div>
+        <div class="flip-label">Dar vuelta</div>
+      </div>
+      <div class="flecha">→</div>
+      <div class="flip-step">
+        <div class="hoja resultado">
+          <div class="etiqueta-cara">🔵 DORSO</div>
+          <div class="etiqueta-desc">cara en blanco<br>mirando arriba</div>
+        </div>
+        <div class="flip-label">Lista para el paso 3</div>
+      </div>
+    </div>
+
+    <div class="alerta">
+      Si el dorso salió al revés o girado 180°, probá la opción contraria la próxima vez.
+      Con el test inicial vas a descubrir cuál es la correcta para tu impresora.
+    </div>
+
+    <div class="tip">
+      Si imprimís varias hojas: mantené el orden de la pila tal como salió de la impresora.
+      Solo dala vuelta entera, sin mezclar las hojas.
+    </div>
+  </div>
+
+  <!-- Paso 3: Imprimir dorsos -->
+  <div class="seccion">
+    <div class="seccion-titulo">🟡 Paso 3 — Imprimir los DORSOS</div>
+
+    <div class="paso">
+      <div class="paso-num">1</div>
+      <div class="paso-cuerpo">
+        <h3>Poné las hojas dadas vuelta en la bandeja</h3>
+        <p>Las hojas ya impresas van a entrar de nuevo a la impresora, pero del lado en blanco.</p>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">2</div>
+      <div class="paso-cuerpo">
+        <h3>Volvé al PDF y apretá Ctrl + P</h3>
+        <p>Esta vez seleccioná <strong>solo las páginas de dorso</strong>:</p>
+        <ul>
+          <li>Si el PDF tiene 2 páginas → escribí <strong>2</strong></li>
+          <li>Si el PDF tiene 4 páginas → escribí <strong>3-4</strong></li>
+          <li>Si el PDF tiene 6 páginas → escribí <strong>4-6</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="paso">
+      <div class="paso-num">3</div>
+      <div class="paso-cuerpo">
+        <h3>¡Listo!</h3>
+        <p>Cuando salgan las hojas, cada etiqueta debería tener el precio y talle al frente,
+        y el logo Ternura Kids al dorso. ✂️ Cortá y listo.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resumen -->
+  <div class="resumen">
+    <h3>📋 Resumen rápido</h3>
+    <ol>
+      <li>Abrí el PDF → imprimí la <strong>primera mitad</strong> (frentes)</li>
+      <li>Dá vuelta las hojas</li>
+      <li>Volvé al PDF → imprimí la <strong>segunda mitad</strong> (dorsos)</li>
+      <li>Cortá las etiquetas ✂️</li>
+    </ol>
+  </div>
+
+</div>
+</body>
+</html>
