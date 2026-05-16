@@ -183,37 +183,37 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       flex-shrink: 0;
     }
     .dorso-mano {
-      width: 88%;
-      height: 33mm;
+      width: 90%;
+      height: 36mm;
       flex-shrink: 0;
       background-size: contain;
       background-repeat: no-repeat;
       background-position: center;
-      margin-bottom: 2mm;
+      margin-bottom: 1.5mm;
     }
     .dorso-nombre {
       font-family: 'Caveat', cursive;
-      font-size: 13pt;
+      font-size: 17pt;
       font-weight: 400;
       color: #777;
       line-height: 1;
       white-space: nowrap;
       flex-shrink: 0;
     }
-    .dorso-spacer { flex: 1; }
+    .dorso-spacer { flex: 1; min-height: 4mm; }
     .dorso-ig {
       display: flex;
       align-items: center;
       gap: 1.5mm;
-      font-size: 7pt;
+      font-size: 7.5pt;
       color: #aaa;
       font-family: Arial, sans-serif;
       white-space: nowrap;
       flex-shrink: 0;
     }
     .dorso-ig svg {
-      width: 8pt;
-      height: 8pt;
+      width: 8.5pt;
+      height: 8.5pt;
       fill: #aaa;
       flex-shrink: 0;
     }
