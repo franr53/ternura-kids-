@@ -171,35 +171,31 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       justify-content: center;
     }
     .dorso-inner {
-      width: 34mm;
-      height: 65mm;
+      width: 35mm;
+      height: 66mm;
       transform: rotate(-90deg);
       transform-origin: center center;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 1mm;
-      gap: 1.5mm;
+      justify-content: space-between;
+      padding: 1.5mm 1mm;
       flex-shrink: 0;
     }
     .dorso-mano {
       flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       width: 100%;
-    }
-    .dorso-img {
-      width: 30mm;
-      height: auto;
-      object-fit: contain;
-      display: block;
+      min-height: 0;
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
     }
     .dorso-texto {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 1.5mm;
+      gap: 1mm;
+      flex-shrink: 0;
     }
     .dorso-nombre {
       font-family: 'Caveat', cursive;
@@ -328,9 +324,7 @@ async function renderDorsoPageToCanvas(
     div.className = 'etiqueta dorso'
     div.innerHTML = `
       <div class="dorso-inner">
-        <div class="dorso-mano">
-          <img src="${DORSO_BASE64}" class="dorso-img" alt=""/>
-        </div>
+        <div class="dorso-mano" style="background-image:url('${DORSO_BASE64}')"></div>
         <div class="dorso-texto">
           <span class="dorso-nombre">Ternura Kids</span>
           <div class="dorso-ig">
