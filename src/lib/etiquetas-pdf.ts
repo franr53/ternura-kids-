@@ -46,7 +46,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
   <meta charset="utf-8">
   <title>Etiquetas - Ternura Kids</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; color: #000; }
@@ -180,30 +180,31 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       justify-content: center;
     }
     .dorso-icono svg {
-      width: 14mm;
+      width: 13mm;
       height: auto;
-      fill: #4EC3BD;
+      fill: #888;
     }
     .dorso-nombre {
-      font-family: 'Caveat', cursive;
-      font-size: 11pt;
-      font-weight: 700;
-      color: #4EC3BD;
+      font-family: 'Nunito', 'Arial Rounded MT Bold', sans-serif;
+      font-size: 10pt;
+      font-weight: 800;
+      color: #777;
       line-height: 1;
       margin: 0;
+      letter-spacing: 0.3px;
     }
     .dorso-ig {
       display: flex;
       align-items: center;
       gap: 1mm;
-      font-size: 6pt;
-      color: #555;
+      font-size: 5.5pt;
+      color: #999;
       margin-top: 0.8mm;
     }
     .dorso-ig svg {
-      width: 7pt;
-      height: 7pt;
-      fill: #555;
+      width: 6.5pt;
+      height: 6.5pt;
+      fill: #999;
       flex-shrink: 0;
     }
   </style>
@@ -311,20 +312,24 @@ async function renderDorsoPageToCanvas(
     div.innerHTML = `
       <div class="dorso-cuerpo">
         <div class="dorso-icono">
-          <svg viewBox="0 0 80 100" xmlns="http://www.w3.org/2000/svg">
-            <g fill="#4EC3BD">
-              <rect x="10" y="52" width="60" height="42" rx="10"/>
-              <rect x="2" y="38" width="14" height="30" rx="7" transform="rotate(-18 9 53)"/>
-              <rect x="18" y="14" width="13" height="44" rx="6"/>
-              <rect x="33" y="7" width="13" height="50" rx="6"/>
-              <rect x="48" y="11" width="13" height="47" rx="6"/>
-              <rect x="62" y="23" width="11" height="38" rx="5"/>
-            </g>
+          <svg viewBox="0 0 90 105" xmlns="http://www.w3.org/2000/svg" fill="#888">
+            <!-- Palm -->
+            <ellipse cx="47" cy="74" rx="29" ry="24"/>
+            <!-- Thumb (lower-left, angled) -->
+            <rect x="7" y="56" width="16" height="33" rx="8" transform="rotate(-38 15 72)"/>
+            <!-- Index finger -->
+            <rect x="18" y="15" width="15" height="49" rx="7" transform="rotate(-12 25 39)"/>
+            <!-- Middle finger (tallest) -->
+            <rect x="35" y="7" width="15" height="55" rx="7" transform="rotate(-2 42 34)"/>
+            <!-- Ring finger -->
+            <rect x="52" y="12" width="14" height="51" rx="7" transform="rotate(8 59 37)"/>
+            <!-- Pinky -->
+            <rect x="67" y="22" width="12" height="43" rx="6" transform="rotate(17 73 43)"/>
           </svg>
         </div>
         <p class="dorso-nombre">Ternura Kids</p>
         <div class="dorso-ig">
-          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#555">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#999">
             <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
           </svg>
           @ternurakids_ok
@@ -333,7 +338,7 @@ async function renderDorsoPageToCanvas(
     contenedor.appendChild(div)
   }
 
-  await new Promise(r => setTimeout(r, 800))
+  await new Promise(r => setTimeout(r, 1500))
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const canvas = await (iframeWin as any).html2canvas(contenedor, {
@@ -397,14 +402,18 @@ async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Pr
       pages.push(items.slice(i, i + ITEMS_PER_PAGE))
     }
 
+    // Todos los frentes primero
     for (let p = 0; p < pages.length; p++) {
       if (p > 0) pdf.addPage()
       const canvas = await renderPageToCanvas(pages[p], iframeDoc, iframeWin)
       const drawH = (canvas.height * contentW) / canvas.width
       const imgData = canvas.toDataURL('image/jpeg', 0.92)
       pdf.addImage(imgData, 'JPEG', margin, margin, contentW, drawH)
+    }
 
-      if (dobleFaz) {
+    // Todos los dorsos después (para impresión manual: imprimir frentes, dar vuelta, imprimir dorsos)
+    if (dobleFaz) {
+      for (let p = 0; p < pages.length; p++) {
         pdf.addPage()
         const dorsoCanvas = await renderDorsoPageToCanvas(pages[p].length, iframeDoc, iframeWin)
         const dorsoH = (dorsoCanvas.height * contentW) / dorsoCanvas.width
