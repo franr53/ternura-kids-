@@ -47,7 +47,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
   <meta charset="utf-8">
   <title>Etiquetas - Ternura Kids</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Varela+Round&family=Nunito:wght@700;800&family=Caveat&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Varela+Round&family=Nunito:wght@700;800&family=Caveat:wght@700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; color: #000; }
@@ -190,8 +190,8 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
     .dorso-nombre {
       font-family: 'Caveat', cursive;
       font-size: 11pt;
-      font-weight: 400;
-      color: #777;
+      font-weight: 700;
+      color: #4EC3BD;
       line-height: 1;
       white-space: nowrap;
       text-align: center;
@@ -200,15 +200,15 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       display: flex;
       align-items: center;
       gap: 1.5mm;
-      font-size: 5.5pt;
-      color: #aaa;
+      font-size: 6pt;
+      color: #555;
       font-family: Arial, sans-serif;
       white-space: nowrap;
     }
     .dorso-ig svg {
       width: 7pt;
       height: 7pt;
-      fill: #aaa;
+      fill: #555;
       flex-shrink: 0;
     }
   </style>
