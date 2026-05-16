@@ -54,7 +54,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
     body { font-family: Arial, sans-serif; background: #fff; color: #000; }
     .contenedor {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 0;
       padding: 4mm;
       width: 210mm;
@@ -63,7 +63,7 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       border: 1px solid #e0e0e0;
       background: white;
       overflow: hidden;
-      min-height: 30mm;
+      min-height: 44mm;
       display: flex;
       flex-direction: column;
     }
@@ -219,11 +219,11 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       try {
         JsBarcode(el, el.getAttribute('data-barcode'), {
           format: 'CODE128',
-          width: 1.5,
-          height: 38,
+          width: 2,
+          height: 44,
           displayValue: true,
-          fontSize: 8,
-          margin: 1,
+          fontSize: 9,
+          margin: 2,
           lineColor: '#000',
           background: '#fff',
         });
@@ -244,9 +244,9 @@ function injectScript(doc: Document, src: string): Promise<void> {
   })
 }
 
-// Cuántas filas de 3 etiquetas caben por página A4 (~30mm por fila, margin 5mm)
-const ROWS_PER_PAGE = 8  // 8 filas × 3 col = 24 etiquetas por página
-const ITEMS_PER_PAGE = ROWS_PER_PAGE * 3
+// A4 portrait, 2 columnas landscape: 6 filas × 2 col = 12 etiquetas por página
+const ROWS_PER_PAGE = 6
+const ITEMS_PER_PAGE = ROWS_PER_PAGE * 2
 
 async function renderPageToCanvas(
   items: EtiquetaData[],
@@ -285,8 +285,8 @@ async function renderPageToCanvas(
     iframeDoc.querySelectorAll('[data-barcode]').forEach(el => {
       try {
         JsBarcode(el, el.getAttribute('data-barcode'), {
-          format: 'CODE128', width: 1.5, height: 38, displayValue: true,
-          fontSize: 8, margin: 1, lineColor: '#000', background: '#fff',
+          format: 'CODE128', width: 2, height: 44, displayValue: true,
+          fontSize: 9, margin: 2, lineColor: '#000', background: '#fff',
         })
       } catch (e) { console.error('Barcode error:', e) }
     })
