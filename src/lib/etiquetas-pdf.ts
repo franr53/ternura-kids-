@@ -57,13 +57,13 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
       grid-template-columns: repeat(3, 1fr);
       gap: 0;
       padding: 4mm;
-      width: 297mm;
+      width: 210mm;
     }
     .etiqueta {
       border: 1px solid #e0e0e0;
       background: white;
       overflow: hidden;
-      min-height: 38mm;
+      min-height: 30mm;
       display: flex;
       flex-direction: column;
     }
@@ -244,8 +244,8 @@ function injectScript(doc: Document, src: string): Promise<void> {
   })
 }
 
-// A4 landscape (297×210mm): 5 filas × 3 col = 15 etiquetas por página
-const ROWS_PER_PAGE = 5
+// Cuántas filas de 3 etiquetas caben por página A4 (~30mm por fila, margin 5mm)
+const ROWS_PER_PAGE = 8  // 8 filas × 3 col = 24 etiquetas por página
 const ITEMS_PER_PAGE = ROWS_PER_PAGE * 3
 
 async function renderPageToCanvas(
@@ -345,8 +345,8 @@ async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Pr
   iframe.style.position = 'fixed'
   iframe.style.left = '-9999px'
   iframe.style.top = '-9999px'
-  iframe.style.width = '297mm'
-  iframe.style.height = '210mm'
+  iframe.style.width = '210mm'
+  iframe.style.height = '297mm'
   document.body.appendChild(iframe)
 
   iframe.srcdoc = htmlBase
@@ -381,8 +381,8 @@ async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Pr
   const jsPDF = win.jspdf.jsPDF
 
   try {
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-    const pageW = 297
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const pageW = 210
     const margin = 5
     const contentW = pageW - margin * 2
 
