@@ -27,9 +27,17 @@ export interface ItemCarrito {
 }
 
 type VentaItem = {
+  variante_id?: string
   cantidad: number
   precio_unitario: number
   variante?: { talle: string; producto?: { nombre_base: string } }
+}
+
+type DevolucionSimple = {
+  id: string
+  creado_en: string
+  items_devueltos: { variante_id: string; cantidad: number; precio_unitario: number }[]
+  total_devuelto: number
 }
 
 type VentaHoy = {
@@ -88,6 +96,7 @@ export default function PosPage() {
 
   type CambioSimple = { id: string; creado_en: string; diferencia: number; resolucion_diferencia?: string; total_devuelto: number; total_nuevo: number }
   const [cambiosPorVenta, setCambiosPorVenta] = useState<Record<string, CambioSimple>>({})
+  const [devolucionesPorVenta, setDevolucionesPorVenta] = useState<Record<string, DevolucionSimple>>({})
 
   type ItemDev = { nombre: string; talle: string; cantidad: number; precio: number }
   type DevolucionDetalle = {
@@ -189,7 +198,7 @@ export default function PosPage() {
 
     let ventasQuery = supabase
       .from('ventas')
-      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto, notas)')
+      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(variante_id, cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto, notas)')
       .eq('estado', 'completada')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
@@ -233,16 +242,21 @@ export default function PosPage() {
   useEffect(() => {
     if (ventas.length === 0) return
     const ids = ventas.map(v => v.id)
-    supabase
-      .from('cambios')
-      .select('id, venta_original_id, creado_en, diferencia, resolucion_diferencia, total_devuelto, total_nuevo')
-      .in('venta_original_id', ids)
-      .then(({ data }) => {
-        if (!data) return
+    Promise.all([
+      supabase.from('cambios').select('id, venta_original_id, creado_en, diferencia, resolucion_diferencia, total_devuelto, total_nuevo').in('venta_original_id', ids),
+      supabase.from('devoluciones').select('id, venta_id, creado_en, items_devueltos, total_devuelto').in('venta_id', ids),
+    ]).then(([{ data: cambiosData }, { data: devsData }]) => {
+      if (cambiosData) {
         const map: Record<string, CambioSimple> = {}
-        ;(data as (CambioSimple & { venta_original_id: string })[]).forEach(c => { map[c.venta_original_id] = c })
+        ;(cambiosData as (CambioSimple & { venta_original_id: string })[]).forEach(c => { map[c.venta_original_id] = c })
         setCambiosPorVenta(map)
-      })
+      }
+      if (devsData) {
+        const map: Record<string, DevolucionSimple> = {}
+        ;(devsData as (DevolucionSimple & { venta_id: string })[]).forEach(d => { map[d.venta_id] = d })
+        setDevolucionesPorVenta(map)
+      }
+    })
   }, [ventas])
 
   const registrosFiltrados = soloFacturar
@@ -657,34 +671,57 @@ export default function PosPage() {
                   }
                 </button>
 
-                {abierta && items.length > 0 && (
+                {abierta && items.length > 0 && (() => {
+                  const dev = devolucionesPorVenta[venta.id]
+                  const devMap = dev ? new Map(dev.items_devueltos.map(it => [it.variante_id, it.cantidad])) : null
+                  const totalDev = dev?.total_devuelto || 0
+                  const tieneDevolucion = !!dev
+                  return (
                   <div className="border-t border-gray-50 px-4 py-3 bg-teal-50/40">
+                    {/* Barra resumen devolución */}
+                    {tieneDevolucion && (
+                      <div className="grid grid-cols-3 divide-x divide-gray-200 rounded-xl border border-gray-200 overflow-hidden text-xs mb-3">
+                        <div className="px-3 py-2 text-center">
+                          <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Compra</p>
+                          <p className="font-bold text-gray-700 mt-0.5">{mask(formatPrecio(venta.total))}</p>
+                        </div>
+                        <div className="px-3 py-2 text-center bg-red-50">
+                          <p className="text-[10px] text-red-400 uppercase tracking-wide font-semibold">Devuelto</p>
+                          <p className="font-bold text-red-600 mt-0.5">{mask(formatPrecio(totalDev))}</p>
+                        </div>
+                        <div className="px-3 py-2 text-center bg-green-50">
+                          <p className="text-[10px] text-green-500 uppercase tracking-wide font-semibold">Quedan</p>
+                          <p className="font-bold text-green-600 mt-0.5">{mask(formatPrecio(venta.total - totalDev))}</p>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-2">
-                      {items.map((item, j) => (
-                        <div key={j} className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <span className="text-sm text-gray-700 font-medium">
-                              {item.variante?.talle
-                                ? formatNombreConTalle(item.variante?.producto?.nombre_base || '—', item.variante.talle)
-                                : (item.variante?.producto?.nombre_base || '—')}
-                            </span>
+                      {items.map((item, j) => {
+                        const cantDevuelta = devMap?.get(item.variante_id ?? '') || 0
+                        const esDevuelto = cantDevuelta > 0
+                        const label = item.variante?.talle
+                          ? formatNombreConTalle(item.variante?.producto?.nombre_base || '—', item.variante.talle)
+                          : (item.variante?.producto?.nombre_base || '—')
+                        return (
+                        <div key={j} className={`flex items-center justify-between rounded-lg px-2 py-1 ${esDevuelto ? 'bg-red-50' : ''}`}>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            {tieneDevolucion && (esDevuelto
+                              ? <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">↩ devuelto</span>
+                              : <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-600">✓ queda</span>
+                            )}
+                            <span className={`text-sm font-medium ${esDevuelto ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{label}</span>
                           </div>
                           <div className="text-right shrink-0 ml-4">
-                            {item.cantidad > 1 ? (
-                              <div>
-                                <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>
-                                <p className="text-sm font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
-                                  {mask(formatPrecio(item.precio_unitario * item.cantidad))}
-                                </p>
-                              </div>
-                            ) : (
-                              <p className="text-sm font-bold text-gray-800" style={{ fontFamily: 'var(--font-display)' }}>
-                                {mask(formatPrecio(item.precio_unitario))}
-                              </p>
+                            {item.cantidad > 1 && (
+                              <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>
                             )}
+                            <p className={`text-sm font-bold ${esDevuelto ? 'text-gray-400 line-through' : 'text-gray-800'}`} style={{ fontFamily: 'var(--font-display)' }}>
+                              {mask(formatPrecio(item.precio_unitario * item.cantidad))}
+                            </p>
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                     {/* Desglose de pagos */}
                     {pagos.length > 0 && (
@@ -736,7 +773,8 @@ export default function PosPage() {
                       )
                     })()}
                   </div>
-                )}
+                  )
+                })()}
               </div>
             )
           })
