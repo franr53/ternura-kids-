@@ -6,7 +6,7 @@ import { MetodoPago } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Pencil, CalendarDays, X } from 'lucide-react'
+import { Pencil, CalendarDays, X, ChevronDown, ChevronRight } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 import EditarPagoDialog, { VentaEditable } from '@/components/ventas/editar-pago-dialog'
 
@@ -280,26 +280,30 @@ export default function VentasPage() {
           const fecha = new Date(v.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
 
           return (
-            <div key={v.id} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+            <div key={v.id} className={`bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden ${expandida ? 'bg-teal-50/40' : ''}`}>
               <div
-                className={`flex items-start gap-3 p-4 ${tieneDevolucion ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
-                onClick={() => tieneDevolucion && setVentaExpandida(expandida ? null : v.id)}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
+                onClick={() => setVentaExpandida(expandida ? null : v.id)}
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs text-gray-400">{fecha} {hora}</span>
-                    {v.caja?.estado === 'cerrada' && (
-                      <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full">Caja cerrada</span>
-                    )}
-                    {tieneDevolucion && (
-                      <span className="text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">Devolución</span>
-                    )}
-                  </div>
-                  {v.cliente?.nombre && (
-                    <p className="text-sm font-semibold text-gray-700 truncate">{v.cliente.nombre}</p>
+                {/* Badges izquierda */}
+                <div className="shrink-0 flex flex-col gap-1 items-start">
+                  <span className="text-xs bg-teal-100 text-teal-700 font-medium px-2 py-0.5 rounded-full">Compra</span>
+                  {tieneDevolucion && (
+                    <span className="text-xs bg-red-100 text-red-600 font-medium px-2 py-0.5 rounded-full">Devolución</span>
                   )}
-                  {!expandida && <p className="text-xs text-gray-500 truncate">{resumen}</p>}
-                  <div className="flex flex-wrap gap-1 mt-2">
+                </div>
+
+                {/* Contenido central */}
+                <div className="flex-1 min-w-0">
+                  {v.cliente?.nombre
+                    ? <p className="text-sm text-gray-700 font-medium truncate">{v.cliente.nombre}</p>
+                    : <p className="text-sm text-gray-700 truncate">{resumen}</p>
+                  }
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {fecha} {hora}
+                    {v.caja?.estado === 'cerrada' && <span className="ml-2 text-amber-500">· Caja cerrada</span>}
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
                     {v.pagos?.map((p, i) => (
                       <Badge key={i} className={`text-xs border-0 ${METODO_COLORS[p.metodo] || 'bg-gray-100 text-gray-600'}`}>
                         {METODO_LABELS[p.metodo] || p.metodo} {formatPrecio(p.monto)}
@@ -307,48 +311,54 @@ export default function VentasPage() {
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+
+                {/* Total + acciones */}
+                <div className="flex items-center gap-1 shrink-0">
                   <div className="text-right">
                     {tieneDevolucion
                       ? <>
-                          <p className="font-bold text-gray-400 line-through text-sm">{formatPrecio(v.total)}</p>
-                          <p className="font-bold text-gray-800">{formatPrecio(v.total - totalDev)}</p>
+                          <p className="text-xs text-gray-400 line-through">{formatPrecio(v.total)}</p>
+                          <p className="font-bold text-gray-800 text-sm">{formatPrecio(v.total - totalDev)}</p>
                         </>
-                      : <p className="font-bold text-gray-800">{formatPrecio(v.total)}</p>
+                      : <p className="font-bold text-gray-800 text-sm">{formatPrecio(v.total)}</p>
                     }
                     {v.descuento > 0 && (
-                      <p className="text-xs text-green-600">−{formatPrecio(v.descuento)} desc.</p>
+                      <p className="text-xs text-green-600">−{formatPrecio(v.descuento)}</p>
                     )}
+                    {expandida
+                      ? <ChevronDown size={13} className="text-gray-400 ml-auto mt-0.5" />
+                      : <ChevronRight size={13} className="text-gray-400 ml-auto mt-0.5" />
+                    }
                   </div>
                   <button
                     onClick={e => { e.stopPropagation(); setVentaEditando(v) }}
-                    className="p-2 rounded-xl text-gray-400 hover:text-teal-600 hover:bg-teal-50 transition-colors"
+                    className="p-1.5 rounded-lg text-gray-300 hover:text-teal-600 hover:bg-teal-50 transition-colors ml-1"
                     title="Editar pago"
                   >
-                    <Pencil size={16} />
+                    <Pencil size={14} />
                   </button>
                 </div>
               </div>
 
-              {/* Detalle expandido con estado de devolución */}
-              {expandida && tieneDevolucion && (
-                <div className="px-4 pb-4 space-y-2 border-t border-gray-50 pt-3">
-                  {/* Barra resumen 3 columnas */}
-                  <div className="grid grid-cols-3 divide-x divide-gray-200 rounded-xl border border-gray-200 overflow-hidden text-xs">
-                    <div className="px-3 py-2 text-center">
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Compra</p>
-                      <p className="font-bold text-gray-700 mt-0.5">{formatPrecio(v.total)}</p>
+              {/* Detalle expandido */}
+              {expandida && (
+                <div className="px-4 pb-4 space-y-2 border-t border-gray-100 pt-3">
+                  {tieneDevolucion && (
+                    <div className="grid grid-cols-3 divide-x divide-gray-200 rounded-xl border border-gray-200 overflow-hidden text-xs">
+                      <div className="px-3 py-2 text-center">
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Compra</p>
+                        <p className="font-bold text-gray-700 mt-0.5">{formatPrecio(v.total)}</p>
+                      </div>
+                      <div className="px-3 py-2 text-center bg-red-50">
+                        <p className="text-[10px] text-red-400 uppercase tracking-wide font-semibold">Devuelto</p>
+                        <p className="font-bold text-red-600 mt-0.5">{formatPrecio(totalDev)}</p>
+                      </div>
+                      <div className="px-3 py-2 text-center bg-green-50">
+                        <p className="text-[10px] text-green-500 uppercase tracking-wide font-semibold">Quedan</p>
+                        <p className="font-bold text-green-600 mt-0.5">{formatPrecio(v.total - totalDev)}</p>
+                      </div>
                     </div>
-                    <div className="px-3 py-2 text-center bg-red-50">
-                      <p className="text-[10px] text-red-400 uppercase tracking-wide font-semibold">Devuelto</p>
-                      <p className="font-bold text-red-600 mt-0.5">{formatPrecio(totalDev)}</p>
-                    </div>
-                    <div className="px-3 py-2 text-center bg-green-50">
-                      <p className="text-[10px] text-green-500 uppercase tracking-wide font-semibold">Quedan</p>
-                      <p className="font-bold text-green-600 mt-0.5">{formatPrecio(v.total - totalDev)}</p>
-                    </div>
-                  </div>
-                  {/* Items */}
+                  )}
                   <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
                     {items.map((item, j) => {
                       const cantDevuelta = devMap?.get(item.variante_id ?? '') || 0
@@ -360,10 +370,10 @@ export default function VentasPage() {
                       return (
                         <div key={j} className={`flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0 ${esDevuelto ? 'bg-red-50/60' : ''}`}>
                           <div className="flex items-center gap-2 flex-1 min-w-0">
-                            {esDevuelto
+                            {tieneDevolucion && (esDevuelto
                               ? <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">↩ devuelto</span>
                               : <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-600">✓ queda</span>
-                            }
+                            )}
                             <p className={`text-sm truncate ${esDevuelto ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{label}</p>
                           </div>
                           <p className={`text-sm font-semibold shrink-0 ml-3 ${esDevuelto ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
