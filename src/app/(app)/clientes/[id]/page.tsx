@@ -20,6 +20,7 @@ import { validarRequerido, validarMaxLength, validarTelefono } from '@/lib/valid
 import { generarPDFRecibo, compartirPDFWhatsApp, type ReciboAbonoData } from '@/lib/etiquetas-pdf'
 
 type VentaItem = {
+  variante_id?: string
   cantidad: number
   precio_unitario: number
   variante?: { talle: string; producto?: { nombre_base: string } }
