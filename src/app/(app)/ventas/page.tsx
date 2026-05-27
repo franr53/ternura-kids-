@@ -108,10 +108,8 @@ export default function VentasPage() {
       .gte('creado_en', `${desde}T00:00:00`)
       .lte('creado_en', `${hasta}T23:59:59`)
       .order('creado_en', { ascending: false })
-    setLoading(false)
-    if (error) { toast.error('Error al buscar: ' + error.message); return }
+    if (error) { setLoading(false); toast.error('Error al buscar: ' + error.message); return }
     const ventasData = (data || []) as unknown as VentaLista[]
-    setVentas(ventasData)
     if (ventasData.length > 0) {
       const ids = ventasData.map(v => v.id)
       const { data: devs } = await supabase
@@ -122,6 +120,8 @@ export default function VentasPage() {
     } else {
       setDevoluciones([])
     }
+    setVentas(ventasData)
+    setLoading(false)
   }, [supabase])
 
   useEffect(() => {
