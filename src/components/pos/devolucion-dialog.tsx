@@ -797,17 +797,39 @@ export default function DevolucionDialog({ onCerrar }: Props) {
                 </div>
               ) : (
                 <>
-                  <p className="text-sm text-gray-500">Seleccioná los items a devolver:</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-500">Tocá cada prenda para marcarla como devuelta:</p>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="flex items-center gap-1 bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">↩ Devuelve</span>
+                      <span className="flex items-center gap-1 bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-medium">✓ Queda</span>
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     {items.map((it, idx) => (
                       <div key={it.variante_id} onClick={() => toggleItem(idx)}
-                        className={`border rounded-2xl px-4 py-3 cursor-pointer transition-all ${it.seleccionado ? 'border-teal-400 bg-teal-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        className={`border-2 rounded-2xl px-4 py-3 cursor-pointer transition-all ${
+                          it.seleccionado
+                            ? 'border-red-300 bg-red-50 shadow-sm'
+                            : 'border-green-200 bg-green-50/40 hover:border-green-300'
+                        }`}>
                         <div className="flex items-center gap-3">
-                          <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${it.seleccionado ? 'border-teal-500 bg-teal-500' : 'border-gray-300'}`}>
-                            {it.seleccionado && <CheckCircle size={12} className="text-white" />}
+                          <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
+                            it.seleccionado ? 'border-red-500 bg-red-500' : 'border-green-400 bg-green-400'
+                          }`}>
+                            {it.seleccionado
+                              ? <X size={10} className="text-white" />
+                              : <CheckCircle size={12} className="text-white" />
+                            }
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800 truncate">{it.nombre}</p>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <p className="text-sm font-medium text-gray-800 truncate">{it.nombre}</p>
+                              <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                it.seleccionado ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'
+                              }`}>
+                                {it.seleccionado ? '↩ Devuelve' : '✓ Queda'}
+                              </span>
+                            </div>
                             <p className="text-xs text-gray-400">{formatPrecio(it.precio_unitario)} c/u · cant. original: {it.cantidad_max}</p>
                           </div>
                           {it.seleccionado ? (
@@ -821,12 +843,27 @@ export default function DevolucionDialog({ onCerrar }: Props) {
                       </div>
                     ))}
                   </div>
-                  {itemsSel.length > 0 && (
-                    <div className="bg-gray-50 rounded-2xl px-4 py-3 flex justify-between text-sm font-semibold text-gray-700">
-                      <span>Total a devolver</span>
-                      <span className="text-teal-600">{formatPrecio(totalDev)}</span>
+                  {/* resumen montos — siempre visible */}
+                  <div className="rounded-2xl border border-gray-200 overflow-hidden">
+                    <div className="grid grid-cols-3 divide-x divide-gray-200">
+                      <div className="px-3 py-2.5 text-center">
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-0.5">Total compra</p>
+                        <p className="text-sm font-bold text-gray-700">{formatPrecio(ventaSeleccionada.total)}</p>
+                      </div>
+                      <div className="px-3 py-2.5 text-center bg-red-50">
+                        <p className="text-[10px] text-red-400 uppercase tracking-wide font-semibold mb-0.5">Se devuelve</p>
+                        <p className={`text-sm font-bold ${totalDev > 0 ? 'text-red-600' : 'text-gray-300'}`}>
+                          {totalDev > 0 ? formatPrecio(totalDev) : '—'}
+                        </p>
+                      </div>
+                      <div className="px-3 py-2.5 text-center bg-green-50">
+                        <p className="text-[10px] text-green-500 uppercase tracking-wide font-semibold mb-0.5">Queda</p>
+                        <p className={`text-sm font-bold ${ventaSeleccionada.total - totalDev > 0 ? 'text-green-600' : 'text-gray-300'}`}>
+                          {ventaSeleccionada.total - totalDev > 0 ? formatPrecio(ventaSeleccionada.total - totalDev) : '—'}
+                        </p>
+                      </div>
                     </div>
-                  )}
+                  </div>
                   {itemsSel.length > 0 && (
                     <button onClick={() => setLlevaAlgoNuevo(v => !v)}
                       className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all ${llevaAlgoNuevo ? 'border-teal-400 bg-teal-50' : 'border-dashed border-gray-300 hover:border-teal-300 hover:bg-teal-50/40'}`}>
@@ -842,9 +879,33 @@ export default function DevolucionDialog({ onCerrar }: Props) {
 
             {/* columna cliente */}
             {cliente && (
-              <div className="w-72 shrink-0 overflow-y-auto p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Cuenta del cliente</p>
+              <div className="w-72 shrink-0 overflow-y-auto p-4 space-y-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cuenta del cliente</p>
                 <ClientePanel {...clientePanelProps} compacto={false} />
+                {/* resumen de esta devolución en el panel del cliente */}
+                <div className="rounded-2xl border border-gray-200 overflow-hidden text-xs">
+                  <div className="bg-gray-50 px-3 py-2 border-b border-gray-100">
+                    <p className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Esta devolución</p>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    <div className="flex justify-between px-3 py-2">
+                      <span className="text-gray-500">Total compra</span>
+                      <span className="font-semibold text-gray-700">{formatPrecio(ventaSeleccionada.total)}</span>
+                    </div>
+                    <div className="flex justify-between px-3 py-2 bg-red-50">
+                      <span className="text-red-500">↩ Devuelve</span>
+                      <span className={`font-bold ${totalDev > 0 ? 'text-red-600' : 'text-gray-300'}`}>
+                        {totalDev > 0 ? formatPrecio(totalDev) : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between px-3 py-2 bg-green-50">
+                      <span className="text-green-600">✓ Queda</span>
+                      <span className={`font-bold ${ventaSeleccionada.total - totalDev > 0 ? 'text-green-600' : 'text-gray-300'}`}>
+                        {ventaSeleccionada.total - totalDev > 0 ? formatPrecio(ventaSeleccionada.total - totalDev) : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>

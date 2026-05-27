@@ -42,6 +42,16 @@ type CambioLocal = {
   resolucion_diferencia?: string
 }
 
+type DevolucionLocal = {
+  id: string
+  venta_id: string
+  creado_en: string
+  items_devueltos: { variante_id: string; cantidad: number; precio_unitario: number }[]
+  total_devuelto: number
+  saldo_generado: number
+  deuda_revertida: number
+}
+
 export default function ClienteDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const supabase = createClient()
@@ -52,6 +62,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [ventaExpandida, setVentaExpandida] = useState<string | null>(null)
   const [ventaEditando, setVentaEditando] = useState<VentaEditable | null>(null)
   const [cambios, setCambios] = useState<CambioLocal[]>([])
+  const [devoluciones, setDevoluciones] = useState<DevolucionLocal[]>([])
   const [loading, setLoading] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const [nombre, setNombre] = useState('')
@@ -71,18 +82,20 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
 
   useEffect(() => {
     async function cargar() {
-      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }] = await Promise.all([
+      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }, { data: devs }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).is('venta_id', null).order('creado_en', { ascending: false }).limit(30),
         supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto), caja:cajas(id, estado)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
         supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
         supabase.from('cambios').select('id, creado_en, items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(20),
+        supabase.from('devoluciones').select('id, venta_id, creado_en, items_devueltos, total_devuelto, saldo_generado, deuda_revertida').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(50),
       ])
       if (c) { setCliente(c); setNombre(c.nombre); setTelefono(c.telefono || ''); setDireccion(c.direccion || '') }
       setMovimientos(movs || [])
       setVentas(vs || [])
       setProveedores((provs || []) as Proveedor[])
       setCambios((cams || []) as CambioLocal[])
+      setDevoluciones((devs || []) as DevolucionLocal[])
       setLoading(false)
     }
     cargar()
@@ -379,22 +392,34 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       </div>
 
       {/* Historial unificado */}
-      {(movimientos.length > 0 || ventas.length > 0 || cambios.length > 0) && (() => {
+      {(movimientos.length > 0 || ventas.length > 0 || cambios.length > 0 || devoluciones.length > 0) && (() => {
         // Combinar y ordenar por fecha descendente
         type Evento =
           | { tipo: 'venta'; fecha: string; data: VentaConItems }
           | { tipo: 'mov'; fecha: string; data: FiadoMovimiento }
           | { tipo: 'cambio'; fecha: string; data: CambioLocal }
+          | { tipo: 'devolucion'; fecha: string; data: DevolucionLocal }
 
         const RESOLUCION_LABEL: Record<string, string> = {
           saldo_favor: 'Saldo a favor', efectivo: 'Efectivo',
           transferencia: 'Transferencia', fiado: 'Fiado', ninguna: 'Sin diferencia',
         }
 
+        // Mapa: venta_id → items devueltos acumulados (para marcar en la venta expandida)
+        const devPorVenta = new Map<string, Map<string, number>>()
+        devoluciones.forEach(dev => {
+          if (!devPorVenta.has(dev.venta_id)) devPorVenta.set(dev.venta_id, new Map())
+          const m = devPorVenta.get(dev.venta_id)!
+          dev.items_devueltos.forEach(it => m.set(it.variante_id, (m.get(it.variante_id) || 0) + it.cantidad))
+        })
+        const totalDevPorVenta = new Map<string, number>()
+        devoluciones.forEach(dev => totalDevPorVenta.set(dev.venta_id, (totalDevPorVenta.get(dev.venta_id) || 0) + dev.total_devuelto))
+
         const todosEventos: Evento[] = [
           ...ventas.map(v => ({ tipo: 'venta' as const, fecha: v.creado_en, data: v })),
           ...movimientos.map(m => ({ tipo: 'mov' as const, fecha: m.creado_en, data: m })),
           ...cambios.map(c => ({ tipo: 'cambio' as const, fecha: c.creado_en, data: c })),
+          ...devoluciones.map(d => ({ tipo: 'devolucion' as const, fecha: d.creado_en, data: d })),
         ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
 
         const eventos = soloFacturar
@@ -485,25 +510,58 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                           </button>
                         </div>
                       </div>
-                      {expandida && items.length > 0 && (
-                        <div className="px-4 pb-3">
-                          <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
-                            {items.map((item, j) => (
-                              <div key={j} className="flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0">
-                                <p className="text-sm text-gray-800 truncate flex-1">
-                                  {item.variante?.talle
-                                    ? formatNombreConTalle(item.variante?.producto?.nombre_base || '—', item.variante.talle)
-                                    : (item.variante?.producto?.nombre_base || '—')}
-                                </p>
-                                <div className="text-right shrink-0 ml-3">
-                                  {item.cantidad > 1 && <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>}
-                                  <p className="text-sm font-semibold text-gray-700">{mask(formatPrecio(item.precio_unitario * item.cantidad))}</p>
+                      {expandida && items.length > 0 && (() => {
+                        const devMap = devPorVenta.get(venta.id)
+                        const totalDev = totalDevPorVenta.get(venta.id) || 0
+                        const tieneDevolucion = totalDev > 0
+                        return (
+                          <div className="px-4 pb-3 space-y-2">
+                            {tieneDevolucion && (
+                              <div className="grid grid-cols-3 divide-x divide-gray-200 rounded-xl border border-gray-200 overflow-hidden text-xs">
+                                <div className="px-3 py-2 text-center">
+                                  <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Compra</p>
+                                  <p className="font-bold text-gray-700 mt-0.5">{mask(formatPrecio(venta.total))}</p>
+                                </div>
+                                <div className="px-3 py-2 text-center bg-red-50">
+                                  <p className="text-[10px] text-red-400 uppercase tracking-wide font-semibold">Devuelto</p>
+                                  <p className="font-bold text-red-600 mt-0.5">{mask(formatPrecio(totalDev))}</p>
+                                </div>
+                                <div className="px-3 py-2 text-center bg-green-50">
+                                  <p className="text-[10px] text-green-500 uppercase tracking-wide font-semibold">Quedan</p>
+                                  <p className="font-bold text-green-600 mt-0.5">{mask(formatPrecio(venta.total - totalDev))}</p>
                                 </div>
                               </div>
-                            ))}
+                            )}
+                            <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
+                              {items.map((item, j) => {
+                                const cantDevuelta = devMap?.get(item.variante_id ?? '') || 0
+                                const esDevuelto = cantDevuelta > 0
+                                return (
+                                  <div key={j} className={`flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0 ${esDevuelto ? 'bg-red-50/60' : ''}`}>
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      {esDevuelto
+                                        ? <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">↩ devuelto</span>
+                                        : tieneDevolucion && <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-600">✓ queda</span>
+                                      }
+                                      <p className={`text-sm truncate ${esDevuelto ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                                        {item.variante?.talle
+                                          ? formatNombreConTalle(item.variante?.producto?.nombre_base || '—', item.variante.talle)
+                                          : (item.variante?.producto?.nombre_base || '—')}
+                                      </p>
+                                    </div>
+                                    <div className="text-right shrink-0 ml-3">
+                                      {item.cantidad > 1 && <p className="text-xs text-gray-400">{item.cantidad} × {mask(formatPrecio(item.precio_unitario))}</p>}
+                                      <p className={`text-sm font-semibold ${esDevuelto ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                                        {mask(formatPrecio(item.precio_unitario * item.cantidad))}
+                                      </p>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )
+                      })()}
                     </div>
                   )
                 }
@@ -534,6 +592,54 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                       </div>
                       <div className="text-right shrink-0 text-xs text-gray-400">
                         {mask(formatPrecio(c.total_devuelto))}
+                      </div>
+                    </div>
+                  )
+                }
+
+                // Devolución de prenda
+                if (ev.tipo === 'devolucion') {
+                  const dev = ev.data
+                  const ventaRef = ventas.find(v => v.id === dev.venta_id)
+                  const varianteNombre = (varianteId: string) => {
+                    const item = ventaRef?.venta_items?.find(it => {
+                      const id = (it as { variante_id?: string; variante?: { talle?: string; producto?: { nombre_base?: string } } }).variante_id ?? ''
+                      return id === varianteId
+                    }) as { variante?: { talle?: string; producto?: { nombre_base?: string } } } | undefined
+                    const base = item?.variante?.producto?.nombre_base
+                    const talle = item?.variante?.talle
+                    if (!base) return '—'
+                    return talle ? `${base} T.${talle}` : base
+                  }
+                  const nItems = dev.items_devueltos.reduce((s, i) => s + i.cantidad, 0)
+                  return (
+                    <div key={`dev-${dev.id}`} className="flex items-start gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
+                      <div className="shrink-0 pt-0.5">
+                        <span className="text-xs bg-red-100 text-red-700 font-medium px-2 py-0.5 rounded-full">Devolución</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-gray-700">
+                          {nItems} prenda{nItems !== 1 ? 's' : ''} devuelta{nItems !== 1 ? 's' : ''}
+                        </p>
+                        <div className="mt-1 space-y-0.5">
+                          {dev.items_devueltos.map((it, j) => (
+                            <p key={j} className="text-xs text-gray-500">
+                              {it.cantidad > 1 ? `${it.cantidad}× ` : ''}{varianteNombre(it.variante_id)} · {mask(formatPrecio(it.precio_unitario * it.cantidad))}
+                            </p>
+                          ))}
+                        </div>
+                        {dev.deuda_revertida > 0 && (
+                          <p className="text-xs text-green-600 mt-1">Deuda revertida: −{mask(formatPrecio(dev.deuda_revertida))}</p>
+                        )}
+                        {dev.saldo_generado > 0 && (
+                          <p className="text-xs text-teal-600 mt-0.5">Saldo a favor: +{mask(formatPrecio(dev.saldo_generado))}</p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {new Date(dev.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-bold text-sm text-red-500">−{mask(formatPrecio(dev.total_devuelto))}</p>
                       </div>
                     </div>
                   )
