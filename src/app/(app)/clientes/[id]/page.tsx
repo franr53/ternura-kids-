@@ -105,7 +105,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   async function recargarDatos() {
     const [{ data: c }, { data: vs }] = await Promise.all([
       supabase.from('clientes').select('*').eq('id', id).single(),
-      supabase.from('ventas').select('*, venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto), caja:cajas(id, estado)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
+      supabase.from('ventas').select('*, venta_items(variante_id, cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto), caja:cajas(id, estado)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
     ])
     if (c) setCliente(c)
     setVentas((vs || []) as VentaConItems[])
