@@ -312,13 +312,8 @@ function IngresoMercaderiaContent() {
     }
 
     // Actualizar deuda del proveedor
-    const { data: prov, error: errProv } = await supabase.from('marcas').select('deuda_total').eq('id', proveedorId).single()
-    if (errProv) {
-      // Si falla por RLS (vendedor no puede modificar proveedor), continuar igual
-      console.warn('No se pudo actualizar deuda del proveedor:', errProv.message)
-    } else if (prov) {
-      await supabase.from('marcas').update({ deuda_total: (prov.deuda_total || 0) + total }).eq('id', proveedorId)
-    }
+    const { error: errDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: proveedorId, p_delta: total })
+    if (errDeuda) console.warn('No se pudo actualizar deuda del proveedor:', errDeuda.message)
 
     toast.success('Ingreso registrado')
     router.push(`/proveedores/${proveedorId}`)

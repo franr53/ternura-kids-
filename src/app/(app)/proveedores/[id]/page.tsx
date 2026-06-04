@@ -80,6 +80,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
 
   const [montoPago, setMontoPago] = useState('')
   const [metodoPago, setMetodoPago] = useState('efectivo')
+  const [registrandoPago, setRegistrandoPago] = useState(false)
   const [eliminandoPago, setEliminandoPago] = useState<string | null>(null)
 
   const [montoDeuda, setMontoDeuda] = useState('')
@@ -147,27 +148,28 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
   }
 
   async function registrarPago() {
-    const monto = parseFloat(montoPago)
+    const monto = Math.round(parseFloat(montoPago))
     if (!monto || monto <= 0) { toast.error('Ingresá un monto válido'); return }
     if (!proveedor) return
 
-    const { error } = await supabase.from('pagos_proveedores').insert({
+    setRegistrandoPago(true)
+    const { data: nuevoPago, error } = await supabase.from('pagos_proveedores').insert({
       proveedor_id: id,
       monto,
       metodo: metodoPago,
-    })
-    if (error) { toast.error('Error al registrar pago'); return }
+    }).select().single()
+    if (error) { toast.error('Error al registrar pago: ' + error.message); setRegistrandoPago(false); return }
 
-    const nuevaDeuda = Math.max(0, (proveedor.deuda_total || 0) - monto)
-    await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', id)
-    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
-    setPagos(prev => [{ id: Date.now().toString(), proveedor_id: id, monto, metodo: metodoPago, creado_en: new Date().toISOString() }, ...prev])
+    const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: id, p_delta: -monto })
+    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda ?? Math.max(0, (prev.deuda_total || 0) - monto) } : null)
+    setPagos(prev => [nuevoPago as PagoProveedor, ...prev])
     setMontoPago('')
     toast.success(`Pago de ${formatPrecio(monto)} registrado`)
+    setRegistrandoPago(false)
   }
 
   async function registrarDeuda() {
-    const monto = parseFloat(montoDeuda)
+    const monto = Math.round(parseFloat(montoDeuda))
     if (!monto || monto <= 0) { toast.error('Ingresá un monto válido'); return }
     if (!proveedor) return
 
@@ -180,9 +182,8 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
 
     if (error) { toast.error('Error: ' + error.message); setRegistrandoDeuda(false); return }
 
-    const nuevaDeuda = (proveedor.deuda_total || 0) + monto
-    await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', id)
-    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
+    const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: id, p_delta: monto })
+    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda ?? (prev.deuda_total || 0) + monto } : null)
     setIngresos(prev => [ing as IngresoMercaderia, ...prev])
     setMontoDeuda('')
     setRemitoDeuda('')
@@ -201,10 +202,8 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
       await supabase.from('gastos').delete().eq('id', pago.gasto_id)
     }
 
-    const { data: marcaActual } = await supabase.from('marcas').select('deuda_total').eq('id', id).single()
-    const nuevaDeuda = (marcaActual?.deuda_total || 0) + pago.monto
-    await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', id)
-    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda } : null)
+    const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: id, p_delta: pago.monto })
+    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda ?? (prev.deuda_total || 0) + pago.monto } : null)
     setPagos(prev => prev.filter(p => p.id !== pago.id))
     setEliminandoPago(null)
     toast.success(`Pago de ${formatPrecio(pago.monto)} eliminado`)
@@ -404,8 +403,8 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
                     <p className="font-mono font-semibold text-blue-800 select-all">{proveedor.alias_cbu}</p>
                   </div>
                 )}
-                <Button onClick={registrarPago} className="w-full bg-green-500 hover:bg-green-600 gap-2">
-                  <Plus size={16} /> Registrar pago
+                <Button onClick={registrarPago} disabled={registrandoPago} className="w-full bg-green-500 hover:bg-green-600 gap-2">
+                  <Plus size={16} /> {registrandoPago ? 'Registrando…' : 'Registrar pago'}
                 </Button>
               </CardContent>
             </Card>

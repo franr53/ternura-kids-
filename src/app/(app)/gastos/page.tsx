@@ -217,7 +217,7 @@ export default function GastosPage() {
   useEffect(() => { cargarPie() }, [cargarPie])
 
   async function agregarGasto() {
-    const montoNum = parseFloat(monto)
+    const montoNum = Math.round(parseFloat(monto))
     if (!concepto.trim()) { toast.error('Ingresá un concepto'); return }
     if (concepto.length > 200) { toast.error('El concepto no puede tener más de 200 caracteres'); return }
     if (!montoNum || montoNum <= 0) { toast.error('Ingresá un monto válido'); return }
@@ -250,11 +250,9 @@ export default function GastosPage() {
         notas: concepto.trim(),
       })
 
-      // Reducir deuda — leer valor actual de DB para evitar estado stale
-      const { data: marcaActual } = await supabase.from('marcas').select('deuda_total').eq('id', proveedorGastoId).single()
-      const nuevaDeuda = Math.max(0, (marcaActual?.deuda_total || 0) - montoNum)
-      await supabase.from('marcas').update({ deuda_total: nuevaDeuda }).eq('id', proveedorGastoId)
-      setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda } : m))
+      // Reducir deuda del proveedor (ajuste atómico vía RPC)
+      const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: proveedorGastoId, p_delta: -montoNum })
+      setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda ?? Math.max(0, (m.deuda_total || 0) - montoNum) } : m))
     }
 
     setGastos(prev => [data as unknown as Gasto, ...prev])
