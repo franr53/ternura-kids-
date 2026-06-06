@@ -21,12 +21,14 @@ interface VentaItem {
   variante_id: string
   cantidad: number
   precio_unitario: number
+  descuento_item?: number
   variante?: { talle: string; producto?: { nombre_base: string } }
 }
 interface VentaPago { metodo: string; monto: number }
 interface Venta {
   id: string
   total: number
+  subtotal: number
   descuento: number
   creado_en: string
   estado: string
@@ -39,6 +41,7 @@ interface ItemSel {
   cantidad: number
   cantidad_max: number
   precio_unitario: number
+  descuento_item: number
   nombre: string
   seleccionado: boolean
 }
@@ -449,9 +452,9 @@ export default function DevolucionDialog({ onCerrar }: Props) {
       }
 
       let q = supabase.from('ventas')
-        .select(`id, total, descuento, creado_en, estado,
+        .select(`id, total, subtotal, descuento, creado_en, estado,
           cliente:clientes(id, nombre, telefono),
-          venta_items(variante_id, cantidad, precio_unitario,
+          venta_items(variante_id, cantidad, precio_unitario, descuento_item,
             variante:variantes(talle, producto:productos(nombre_base))),
           venta_pagos(metodo, monto)`)
         .eq('estado', 'completada').order('creado_en', { ascending: false }).limit(50)
@@ -514,6 +517,7 @@ export default function DevolucionDialog({ onCerrar }: Props) {
     setItems((v.venta_items || []).map(vi => ({
       variante_id: vi.variante_id,
       cantidad: vi.cantidad, cantidad_max: vi.cantidad, precio_unitario: vi.precio_unitario,
+      descuento_item: vi.descuento_item ?? 0,
       nombre: vi.variante?.producto?.nombre_base ? `${vi.variante.producto.nombre_base} T${vi.variante.talle}` : vi.variante_id,
       seleccionado: false,
     })))
@@ -576,7 +580,14 @@ export default function DevolucionDialog({ onCerrar }: Props) {
   }
 
   const itemsSel = items.filter(it => it.seleccionado)
-  const totalDev = itemsSel.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0)
+  // Reintegro = lo realmente pagado: precio × (1 − desc. ítem) × cantidad × factor global.
+  // factor = total / subtotal de la venta (descuento global). Sin descuento → factor 1.
+  const factorVenta = ventaSeleccionada && ventaSeleccionada.subtotal > 0
+    ? ventaSeleccionada.total / ventaSeleccionada.subtotal
+    : 1
+  const totalDev = Math.round(
+    itemsSel.reduce((s, it) => s + it.precio_unitario * (1 - (it.descuento_item ?? 0) / 100) * it.cantidad, 0) * factorVenta
+  )
   const totalNuevo = itemsNuevos.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0)
   const diferencia = totalDev - totalNuevo
   const metodo   = ventaSeleccionada?.venta_pagos?.[0]?.metodo ?? ''
