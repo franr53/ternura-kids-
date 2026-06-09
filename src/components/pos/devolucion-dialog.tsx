@@ -580,16 +580,20 @@ export default function DevolucionDialog({ onCerrar }: Props) {
   }
 
   const itemsSel = items.filter(it => it.seleccionado)
-  // Reintegro = lo realmente pagado: precio × (1 − desc. ítem) × cantidad × factor global.
-  // factor = total / subtotal de la venta (descuento global). Sin descuento → factor 1.
+  // Precios "en efectivo": el cambio se valúa en los mismos términos de pago que la compra
+  // original. factorVenta = total / subtotal de la venta original (captura el descuento global,
+  // ej. 20% efectivo). Se aplica tanto a lo devuelto (lo pagado, con desc. por ítem) como a las
+  // prendas nuevas. Venta sin descuento → factor 1 → precio de lista. Espeja el RPC (mig 029/030).
   const factorVenta = ventaSeleccionada && ventaSeleccionada.subtotal > 0
     ? ventaSeleccionada.total / ventaSeleccionada.subtotal
     : 1
-  const totalDev = Math.round(
-    itemsSel.reduce((s, it) => s + it.precio_unitario * (1 - (it.descuento_item ?? 0) / 100) * it.cantidad, 0) * factorVenta
-  )
-  const totalNuevo = itemsNuevos.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0)
+  const montoDevItem = (it: ItemSel) =>
+    Math.round(it.precio_unitario * (1 - (it.descuento_item ?? 0) / 100) * it.cantidad * factorVenta)
+  const montoNuevoItem = (it: ItemNuevo) => Math.round(it.precio_unitario * it.cantidad * factorVenta)
+  const totalDev = itemsSel.reduce((s, it) => s + montoDevItem(it), 0)
+  const totalNuevo = itemsNuevos.reduce((s, it) => s + montoNuevoItem(it), 0)
   const diferencia = totalDev - totalNuevo
+  const descEfectivoPct = Math.round((1 - factorVenta) * 100)
   const metodo   = ventaSeleccionada?.venta_pagos?.[0]?.metodo ?? ''
   const esMixto  = (ventaSeleccionada?.venta_pagos?.length ?? 0) > 1
   const cliente  = ventaSeleccionada?.cliente
@@ -665,8 +669,8 @@ export default function DevolucionDialog({ onCerrar }: Props) {
       const fecha = new Date(ventaSeleccionada.creado_en).toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' })
       const cambioData: CambioData = {
         fecha, clienteNombre: cliente?.nombre, clienteTelefono: cliente?.telefono ?? '',
-        itemsDevueltos: itemsSel.map(it => ({ nombre: it.nombre, talle: it.nombre.match(/T(\w+)$/)?.[1] ?? '', cantidad: it.cantidad, precio: it.precio_unitario })),
-        itemsNuevos: itemsNuevos.map(it => ({ nombre: it.nombre, talle: it.talle, cantidad: it.cantidad, precio: it.precio_unitario })),
+        itemsDevueltos: itemsSel.map(it => ({ nombre: it.nombre, talle: it.nombre.match(/T(\w+)$/)?.[1] ?? '', cantidad: it.cantidad, precio: Math.round(montoDevItem(it) / it.cantidad) })),
+        itemsNuevos: itemsNuevos.map(it => ({ nombre: it.nombre, talle: it.talle, cantidad: it.cantidad, precio: Math.round(montoNuevoItem(it) / it.cantidad) })),
         totalDevuelto: resultadoCambio.total_devuelto, totalNuevo: resultadoCambio.total_nuevo,
         diferencia: resultadoCambio.diferencia, resolucion: diferencia === 0 ? 'ninguna' : resolucionDif,
       }
@@ -1055,11 +1059,12 @@ export default function DevolucionDialog({ onCerrar }: Props) {
                   {/* resumen cambio */}
                   <div className="bg-gray-50 rounded-2xl p-4 space-y-2">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Resumen del cambio</p>
+                    {descEfectivoPct > 0 && <p className="text-[11px] text-teal-600 -mt-1 mb-1">Precios en efectivo (−{descEfectivoPct}%)</p>}
                     <div className="space-y-1">
                       {itemsSel.map(it => (
                         <div key={it.variante_id} className="flex justify-between text-sm text-gray-600">
                           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400 inline-block shrink-0"/>{it.nombre} ×{it.cantidad}</span>
-                          <span className="text-red-500">−{formatPrecio(it.precio_unitario * it.cantidad)}</span>
+                          <span className="text-red-500">−{formatPrecio(montoDevItem(it))}</span>
                         </div>
                       ))}
                     </div>
@@ -1068,7 +1073,7 @@ export default function DevolucionDialog({ onCerrar }: Props) {
                         {itemsNuevos.map(it => (
                           <div key={it.variante_id} className="flex justify-between text-sm text-gray-600">
                             <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-teal-400 inline-block shrink-0"/>{it.nombre} T{it.talle} ×{it.cantidad}</span>
-                            <span className="text-teal-600">+{formatPrecio(it.precio_unitario * it.cantidad)}</span>
+                            <span className="text-teal-600">+{formatPrecio(montoNuevoItem(it))}</span>
                           </div>
                         ))}
                       </div>
@@ -1129,11 +1134,12 @@ export default function DevolucionDialog({ onCerrar }: Props) {
                 /* devolución pura */
                 <>
                   <div className="space-y-1">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Prendas a devolver</p>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Prendas a devolver</p>
+                    {descEfectivoPct > 0 && <p className="text-[11px] text-teal-600 mb-2">Precio en efectivo (−{descEfectivoPct}%)</p>}
                     {itemsSel.map(it => (
                       <div key={it.variante_id} className="flex justify-between text-sm text-gray-600 py-1 border-b border-gray-50">
                         <span>{it.nombre} ×{it.cantidad}</span>
-                        <span>{formatPrecio(it.precio_unitario * it.cantidad)}</span>
+                        <span>{formatPrecio(montoDevItem(it))}</span>
                       </div>
                     ))}
                     <div className="flex justify-between text-sm font-bold text-gray-800 pt-1">
