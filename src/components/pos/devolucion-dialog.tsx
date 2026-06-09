@@ -489,7 +489,9 @@ export default function DevolucionDialog({ onCerrar }: Props) {
       }
       if (prodIds.length === 0) {
         const words = norm(q).split(/\s+/).filter(Boolean)
-        const { data: prods } = await supabase.from('productos').select('id, nombre_base').limit(300)
+        // Traer todo el catálogo y filtrar client-side (tolerante a acentos vía norm).
+        // El límite debe cubrir el total de productos: con 300 quedaban ~500 invisibles.
+        const { data: prods } = await supabase.from('productos').select('id, nombre_base').limit(2000)
         prodIds = (prods || []).filter(p => words.every(w => norm(p.nombre_base).includes(w))).map(p => p.id).slice(0, 15)
       }
       if (prodIds.length === 0) { if (!cancelled) { setResultadosNuevos([]); setBuscandoNuevo(false) } return }
