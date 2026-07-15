@@ -215,7 +215,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   if (!cliente) return <div className="p-8 text-center text-gray-500">Cliente no encontrado</div>
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/clientes"><Button variant="ghost" size="icon"><ArrowLeft size={20} /></Button></Link>

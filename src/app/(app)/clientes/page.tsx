@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Cliente } from '@/types'
@@ -39,6 +39,7 @@ export default function ClientesPage() {
 function ClientesContent() {
   const supabase = createClient()
   const { mask } = usePrivacyMode()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const { data: _clientes, loading } = useCache<Cliente[]>('cli:lista', async () => {
     const { data } = await supabase.from('clientes').select('*').eq('activo', true).order('nombre')
@@ -161,7 +162,7 @@ function ClientesContent() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {clientesFiltrados.map(cliente => (
-                <tr key={cliente.id} className="hover:bg-gray-50 transition-colors group">
+                <tr key={cliente.id} onClick={() => router.push(`/clientes/${cliente.id}`)} className="hover:bg-gray-50 transition-colors group cursor-pointer">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       <InicialAvatar nombre={cliente.nombre} />
@@ -185,14 +186,14 @@ function ClientesContent() {
                     <div className="flex items-center justify-end gap-1">
                       {cliente.telefono && (
                         <button
-                          onClick={() => abrirWhatsApp(cliente.telefono!, cliente.nombre)}
+                          onClick={(e) => { e.stopPropagation(); abrirWhatsApp(cliente.telefono!, cliente.nombre) }}
                           className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                           title="WhatsApp"
                         >
                           <MessageCircle size={15} />
                         </button>
                       )}
-                      <Link href={`/clientes/${cliente.id}`} className="flex items-center gap-1 text-teal-600 hover:text-teal-700 text-xs font-medium px-2 py-1 rounded-lg hover:bg-teal-50 transition-colors">
+                      <Link href={`/clientes/${cliente.id}`} onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 text-teal-600 hover:text-teal-700 text-xs font-medium px-2 py-1 rounded-lg hover:bg-teal-50 transition-colors">
                         Ver <ChevronRight size={13} />
                       </Link>
                     </div>
