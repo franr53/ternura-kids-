@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Plus, Search, Users, AlertCircle, MessageCircle, FileSpreadsheet, ChevronRight } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
+import { waHref } from '@/lib/whatsapp'
 
 function InicialAvatar({ nombre, size = 'sm' }: { nombre: string; size?: 'sm' | 'md' }) {
   const iniciales = nombre.trim().split(' ').slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('')
@@ -60,9 +61,7 @@ function ClientesContent() {
   const conDeuda = clientes.filter(c => c.deuda_total > 0).length
 
   function abrirWhatsApp(telefono: string, nombre: string) {
-    const tel = telefono.replace(/\D/g, '')
-    const url = `https://wa.me/54${tel}?text=${encodeURIComponent(`Hola ${nombre}! Te contactamos desde Ternura Kids.`)}`
-    window.open(url, '_blank')
+    window.open(waHref(telefono, `Hola ${nombre}! Te contactamos desde Ternura Kids.`), '_blank')
   }
 
   return (

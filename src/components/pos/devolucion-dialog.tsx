@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { formatPrecio } from '@/lib/utils'
 import {
-  X, RotateCcw, AlertTriangle, CheckCircle,
+  X, RotateCcw, CheckCircle,
   User, Package, ChevronLeft, ChevronRight,
   Banknote, Smartphone, CreditCard, HandCoins,
   Plus, Minus, Search, MessageCircle,
@@ -596,8 +596,6 @@ export default function DevolucionDialog({ onCerrar }: Props) {
   const totalNuevo = itemsNuevos.reduce((s, it) => s + montoNuevoItem(it), 0)
   const diferencia = totalDev - totalNuevo
   const descEfectivoPct = Math.round((1 - factorVenta) * 100)
-  const metodo   = ventaSeleccionada?.venta_pagos?.[0]?.metodo ?? ''
-  const esMixto  = (ventaSeleccionada?.venta_pagos?.length ?? 0) > 1
   const cliente  = ventaSeleccionada?.cliente
 
   function calcularBalanceProyectado(): BalanceProyectado | null {
@@ -615,15 +613,16 @@ export default function DevolucionDialog({ onCerrar }: Props) {
         deudaDespues = deuda_total + Math.abs(diferencia)
       }
     } else {
-      if (metodo === 'fiado') {
-        const propPagada = Math.max(0, Math.min(1, 1 - (deuda_total / (ventaSeleccionada?.total || 1))))
-        saldoCredito   = Math.round(propPagada * totalDev)
-        deudaRevertida = totalDev - saldoCredito
-        saldoDespues   = saldo_favor + saldoCredito
-        deudaDespues   = Math.max(0, deuda_total - deudaRevertida)
-      } else {
-        saldoCredito = totalDev; saldoDespues = saldo_favor + totalDev
-      }
+      // CASCADA: el valor devuelto cancela primero el fiado pendiente de ESTA venta, el resto a favor.
+      // (Unifica fiado simple, mixto y efectivo/transfer — coincide con procesar_devolucion.)
+      const montoFiado = (ventaSeleccionada?.venta_pagos ?? [])
+        .filter(p => p.metodo === 'fiado')
+        .reduce((s, p) => s + p.monto, 0)
+      const fiadoPendiente = Math.min(montoFiado, Math.max(0, deuda_total))
+      deudaRevertida = Math.min(totalDev, fiadoPendiente)
+      saldoCredito   = totalDev - deudaRevertida
+      saldoDespues   = saldo_favor + saldoCredito
+      deudaDespues   = Math.max(0, deuda_total - deudaRevertida)
     }
     return { saldoAntes: saldo_favor, saldoDespues, deudaAntes: deuda_total, deudaDespues, saldoCredito, deudaRevertida }
   }
@@ -807,12 +806,7 @@ export default function DevolucionDialog({ onCerrar }: Props) {
           <div className="flex flex-1 min-h-0">
             {/* columna items */}
             <div className={`flex-1 overflow-y-auto p-6 space-y-4 ${cliente ? 'border-r border-gray-100' : ''}`}>
-              {esMixto ? (
-                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                  <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-700">Esta venta tiene pago mixto. Las devoluciones de pago mixto no están disponibles en esta versión.</p>
-                </div>
-              ) : (
+              {(
                 <>
                   <div className="flex items-center justify-between">
                     <p className="text-sm text-gray-500">Tocá cada prenda para marcarla como devuelta:</p>
@@ -1218,13 +1212,10 @@ export default function DevolucionDialog({ onCerrar }: Props) {
             {paso === 2 && (
               <>
                 <Button variant="outline" onClick={() => setPaso(1)} className="flex-1">Atrás</Button>
-                {esMixto
-                  ? <Button variant="outline" onClick={onCerrar} className="flex-1">Cerrar</Button>
-                  : <Button onClick={() => llevaAlgoNuevo ? setPaso('2b') : setPaso(3)} disabled={itemsSel.length === 0}
-                      className="flex-1 bg-teal-500 hover:bg-teal-600 text-white">
-                      {llevaAlgoNuevo ? 'Elegir prendas nuevas →' : 'Continuar'}
-                    </Button>
-                }
+                <Button onClick={() => llevaAlgoNuevo ? setPaso('2b') : setPaso(3)} disabled={itemsSel.length === 0}
+                  className="flex-1 bg-teal-500 hover:bg-teal-600 text-white">
+                  {llevaAlgoNuevo ? 'Elegir prendas nuevas →' : 'Continuar'}
+                </Button>
               </>
             )}
             {paso === '2b' && (

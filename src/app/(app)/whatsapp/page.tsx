@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { MessageCircle, Search, Send, CheckSquare, Square, Eye, AlertCircle } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
+import { waHref } from '@/lib/whatsapp'
 
 const LOTE_MAX = 10
 const MSG_DEUDORES = 'Hola {nombre}! Te recordamos que tenés una deuda de {deuda} en Ternura Kids. Podés pasar a abonar cuando quieras. Gracias!'
@@ -32,9 +33,8 @@ function reemplazarVariables(template: string, cliente: Cliente): string {
 }
 
 function abrirWhatsApp(cliente: Cliente, mensaje: string) {
-  const tel = cliente.telefono!.replace(/\D/g, '')
   const msg = reemplazarVariables(mensaje, cliente)
-  window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, '_blank')
+  window.open(waHref(cliente.telefono!, msg), '_blank')
 }
 
 function enviarLote(clientes: Cliente[], mensaje: string, lote: number) {

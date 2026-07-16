@@ -5,13 +5,15 @@ import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, MetodoPago, Variante, Producto } from '@/types'
 import { Input } from '@/components/ui/input'
-import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar, RotateCcw, Receipt } from 'lucide-react'
+import { Plus, ShoppingCart, ChevronRight, ChevronDown, Clock, User, Banknote, Smartphone, CreditCard, HandCoins, Calendar, RotateCcw, Receipt, FileDown, MessageCircle, Loader2 } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle, cn } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import NuevaVentaDialog from '@/components/pos/nueva-venta-dialog'
 import CobroDeudaDialog from '@/components/pos/cobro-deuda-dialog'
 import DevolucionDialog from '@/components/pos/devolucion-dialog'
 import Link from 'next/link'
+import { toast } from 'sonner'
+import { generarPDFComprobante, compartirPDFWhatsApp, type ComprobanteData } from '@/lib/etiquetas-pdf'
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
 
@@ -46,7 +48,7 @@ type VentaHoy = {
   total: number
   descuento: number
   creado_en: string
-  cliente?: { id: string; nombre: string } | null
+  cliente?: { id: string; nombre: string; telefono?: string } | null
   venta_items?: VentaItem[]
   venta_pagos?: { metodo: string; monto: number; notas?: string }[]
 }
@@ -97,6 +99,64 @@ export default function PosPage() {
   type CambioSimple = { id: string; creado_en: string; diferencia: number; resolucion_diferencia?: string; total_devuelto: number; total_nuevo: number }
   const [cambiosPorVenta, setCambiosPorVenta] = useState<Record<string, CambioSimple>>({})
   const [devolucionesPorVenta, setDevolucionesPorVenta] = useState<Record<string, DevolucionSimple>>({})
+  const [enviandoId, setEnviandoId] = useState<string | null>(null)
+
+  function buildComprobante(venta: VentaHoy): ComprobanteData {
+    const dev = devolucionesPorVenta[venta.id]
+    const devMap = dev ? new Map(dev.items_devueltos.map(it => [it.variante_id, it.cantidad])) : null
+    const totalDev = dev?.total_devuelto || 0
+    const METODO_LABEL: Record<string, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia', debito: 'Débito', credito: 'Crédito', fiado: 'Fiado' }
+    const items = (venta.venta_items || []).map(it => ({
+      nombre: it.variante?.producto?.nombre_base || '—',
+      talle: it.variante?.talle || '',
+      cantidad: it.cantidad,
+      precio: it.precio_unitario || 0,
+      devuelto: devMap?.get(it.variante_id ?? '') || 0,
+    }))
+    const metodoPago = (venta.venta_pagos || []).map(p => METODO_LABEL[p.metodo] || p.metodo).join(' + ') || '—'
+    return {
+      items,
+      subtotal: venta.total + venta.descuento,
+      descuento: venta.descuento,
+      total: venta.total,
+      metodoPago,
+      clienteNombre: venta.cliente?.nombre,
+      fecha: new Date(venta.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }),
+      devolucion: totalDev > 0 ? { totalDevuelto: totalDev } : undefined,
+    }
+  }
+
+  async function descargarComprobante(venta: VentaHoy) {
+    setEnviandoId(venta.id)
+    try {
+      const blob = await generarPDFComprobante(buildComprobante(venta))
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `comprobante_${new Date(venta.creado_en).toISOString().slice(0, 10)}.pdf`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Comprobante descargado')
+    } catch (err) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setEnviandoId(null)
+    }
+  }
+
+  async function enviarComprobanteWhatsApp(venta: VentaHoy) {
+    if (!venta.cliente?.telefono) return
+    setEnviandoId(venta.id)
+    try {
+      const blob = await generarPDFComprobante(buildComprobante(venta))
+      const resultado = await compartirPDFWhatsApp(blob, `comprobante_${new Date(venta.creado_en).toISOString().slice(0, 10)}.pdf`, venta.cliente.telefono)
+      toast.success(resultado === 'shared' ? 'Comprobante enviado' : 'PDF descargado — adjuntalo en el chat de WhatsApp')
+    } catch (err) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setEnviandoId(null)
+    }
+  }
 
   type ItemDev = { nombre: string; talle: string; cantidad: number; precio: number }
   type DevolucionDetalle = {
@@ -212,7 +272,7 @@ export default function PosPage() {
 
     let ventasQuery = supabase
       .from('ventas')
-      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre), venta_items(variante_id, cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto, notas)')
+      .select('id, total, descuento, creado_en, cliente:clientes(id, nombre, telefono), venta_items(variante_id, cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto, notas)')
       .eq('estado', 'completada')
       .gte('creado_en', desde.toISOString())
       .order('creado_en', { ascending: false })
@@ -627,8 +687,8 @@ export default function PosPage() {
                   abierta ? 'border-teal-200 shadow-teal-50' : 'border-gray-100'
                 )}
               >
-                <button
-                  className="w-full flex items-center gap-4 px-4 py-3.5 text-left hover:bg-gray-50 transition-colors"
+                <div
+                  className="w-full flex items-center gap-4 px-4 py-3.5 cursor-pointer hover:bg-gray-50 transition-colors"
                   onClick={() => setExpandida(abierta ? null : venta.id)}
                 >
                   <div className="flex flex-col items-center shrink-0 w-14 text-gray-400">
@@ -682,11 +742,33 @@ export default function PosPage() {
                     )}
                   </div>
 
+                  {/* Enviar comprobante — directo en la fila */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      onClick={e => { e.stopPropagation(); descargarComprobante(venta) }}
+                      disabled={enviandoId === venta.id}
+                      title="Descargar comprobante PDF"
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-teal-600 hover:bg-teal-50 transition-colors disabled:opacity-50"
+                    >
+                      {enviandoId === venta.id ? <Loader2 size={15} className="animate-spin" /> : <FileDown size={15} />}
+                    </button>
+                    {venta.cliente?.telefono && (
+                      <button
+                        onClick={e => { e.stopPropagation(); enviarComprobanteWhatsApp(venta) }}
+                        disabled={enviandoId === venta.id}
+                        title="Enviar comprobante por WhatsApp"
+                        className="p-1.5 rounded-lg text-green-500 hover:text-green-700 hover:bg-green-50 transition-colors disabled:opacity-50"
+                      >
+                        {enviandoId === venta.id ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+                      </button>
+                    )}
+                  </div>
+
                   {abierta
                     ? <ChevronDown size={15} className="text-teal-400 shrink-0" />
                     : <ChevronRight size={15} className="text-gray-300 shrink-0" />
                   }
-                </button>
+                </div>
 
                 {abierta && items.length > 0 && (() => {
                   const dev = devolucionesPorVenta[venta.id]

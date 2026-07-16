@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Cliente, FiadoMovimiento, MetodoPago, Proveedor, Venta } from '@/types'
+import { Banco, Cliente, FiadoMovimiento, MetodoPago, Proveedor, Venta } from '@/types'
 import EditarPagoDialog, { VentaEditable } from '@/components/ventas/editar-pago-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +17,8 @@ import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
 import Link from 'next/link'
 import { FieldError } from '@/components/ui/field-error'
 import { validarRequerido, validarMaxLength, validarTelefono } from '@/lib/validations'
-import { generarPDFRecibo, compartirPDFWhatsApp, type ReciboAbonoData } from '@/lib/etiquetas-pdf'
+import { generarPDFRecibo, compartirPDFWhatsApp, generarPDFResumenCuenta, type ReciboAbonoData, type ResumenCuentaData, type ResumenCuentaMovimiento } from '@/lib/etiquetas-pdf'
+import { waHref } from '@/lib/whatsapp'
 
 type VentaItem = {
   variante_id?: string
@@ -75,21 +76,28 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
   const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [ultimoAbono, setUltimoAbono] = useState<{ monto: number; deudaRestante: number } | null>(null)
   const [enviandoRecibo, setEnviandoRecibo] = useState(false)
+  const [enviandoResumen, setEnviandoResumen] = useState(false)
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
+  const [bancos, setBancos] = useState<Banco[]>([])
+  const [bancoTransferencia, setBancoTransferencia] = useState<Banco | null>(null)
+  const [agregandoBanco, setAgregandoBanco] = useState(false)
+  const [nombreBancoNuevo, setNombreBancoNuevo] = useState('')
+  const [guardandoBanco, setGuardandoBanco] = useState(false)
   const [soloFacturar, setSoloFacturar] = useState(false)
   const [confirmarAbono, setConfirmarAbono] = useState(false)
   const METODOS_FACTURAR_CLI = new Set(['transferencia', 'debito', 'credito'])
 
   useEffect(() => {
     async function cargar() {
-      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }, { data: devs }] = await Promise.all([
+      const [{ data: c }, { data: movs }, { data: vs }, { data: provs }, { data: cams }, { data: devs }, { data: bcs }] = await Promise.all([
         supabase.from('clientes').select('*').eq('id', id).single(),
         supabase.from('fiado_movimientos').select('*').eq('cliente_id', id).is('venta_id', null).order('creado_en', { ascending: false }).limit(30),
         supabase.from('ventas').select('*, venta_items(variante_id, cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base))), venta_pagos(metodo, monto), caja:cajas(id, estado)').eq('cliente_id', id).eq('estado', 'completada').order('creado_en', { ascending: false }).limit(20),
-        supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
+        supabase.from('marcas').select('id, nombre, deuda_total, alias_cbu').eq('activo', true).order('nombre'),
         supabase.from('cambios').select('id, creado_en, items_devueltos, items_nuevos, total_devuelto, total_nuevo, diferencia, resolucion_diferencia').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(20),
         supabase.from('devoluciones').select('id, venta_id, creado_en, items_devueltos, total_devuelto, saldo_generado, deuda_revertida').eq('cliente_id', id).order('creado_en', { ascending: false }).limit(50),
+        supabase.from('bancos').select('id, nombre, activo, creado_en').eq('activo', true).order('nombre'),
       ])
       if (c) { setCliente(c); setNombre(c.nombre); setTelefono(c.telefono || ''); setDireccion(c.direccion || '') }
       setMovimientos(movs || [])
@@ -97,6 +105,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       setProveedores((provs || []) as Proveedor[])
       setCambios((cams || []) as CambioLocal[])
       setDevoluciones((devs || []) as DevolucionLocal[])
+      setBancos((bcs || []) as Banco[])
       setLoading(false)
     }
     cargar()
@@ -130,12 +139,17 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
     if (!cliente) return
     if (monto > cliente.deuda_total) { toast.error(`El abono no puede superar la deuda (${formatPrecio(cliente.deuda_total)})`); return }
 
+    // Solo aplican destinos si el pago es transferencia; y son mutuamente excluyentes.
+    const proveedorDestino = metodoPagoAbono === 'transferencia' ? proveedorTransferencia : null
+    const bancoDestino = metodoPagoAbono === 'transferencia' && !proveedorDestino ? bancoTransferencia : null
+
     const { data, error } = await supabase.rpc('procesar_cobro_deuda', {
       p_cliente_id: id,
       p_monto: Math.round(monto),
       p_metodo: metodoPagoAbono,
       p_notas: notasAbono || null,
-      p_proveedor_id: proveedorTransferencia?.id || null,
+      p_proveedor_id: proveedorDestino?.id || null,
+      p_banco_id: bancoDestino?.id || null,
     })
     if (error) { toast.error('Error al registrar abono: ' + error.message); return }
 
@@ -148,20 +162,40 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
       monto,
       notas: notasAbono || undefined,
       metodo_pago: metodoPagoAbono,
+      banco_id: bancoDestino?.id,
       creado_en: new Date().toISOString(),
     }, ...prev])
 
-    if (metodoPagoAbono === 'transferencia' && proveedorTransferencia) {
-      const nuevaDeudaProv = Math.max(0, proveedorTransferencia.deuda_total - monto)
-      setProveedores(prev => prev.map(p => p.id === proveedorTransferencia.id ? { ...p, deuda_total: nuevaDeudaProv } : p))
-      toast.success(`Deuda de ${proveedorTransferencia.nombre} reducida en ${formatPrecio(monto)}`, { duration: 4000 })
-      setProveedorTransferencia(null)
+    if (proveedorDestino) {
+      const nuevaDeudaProv = Math.max(0, proveedorDestino.deuda_total - monto)
+      setProveedores(prev => prev.map(p => p.id === proveedorDestino.id ? { ...p, deuda_total: nuevaDeudaProv } : p))
+      toast.success(`Deuda de ${proveedorDestino.nombre} reducida en ${formatPrecio(monto)}`, { duration: 4000 })
+    } else if (bancoDestino) {
+      toast.success(`Transferencia registrada en ${bancoDestino.nombre}`, { duration: 3000 })
     }
+    setProveedorTransferencia(null)
+    setBancoTransferencia(null)
 
     setMontoAbono('')
     setNotasAbono('')
     setUltimoAbono({ monto, deudaRestante })
     toast.success(`Abono de ${formatPrecio(monto)} registrado`)
+  }
+
+  async function agregarBanco() {
+    const nombre = nombreBancoNuevo.trim()
+    if (!nombre) { toast.error('Ingresá el nombre del banco'); return }
+    setGuardandoBanco(true)
+    const { data, error } = await supabase.from('bancos').insert({ nombre }).select('id, nombre, activo, creado_en').single()
+    setGuardandoBanco(false)
+    if (error || !data) { toast.error('Error al agregar banco: ' + (error?.message || '')); return }
+    const nuevo = data as Banco
+    setBancos(prev => [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    setBancoTransferencia(nuevo)
+    setProveedorTransferencia(null)
+    setNombreBancoNuevo('')
+    setAgregandoBanco(false)
+    toast.success(`Banco "${nuevo.nombre}" agregado`)
   }
 
   async function enviarReciboAbono() {
@@ -203,12 +237,100 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
     }
   }
 
+  function buildResumenCuenta(): ResumenCuentaData {
+    const fmtFecha = (iso: string) => new Date(iso).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })
+    const metodoLabel: Record<string, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia', debito: 'Débito', credito: 'Crédito' }
+
+    const movs: { ts: number; mov: ResumenCuentaMovimiento }[] = []
+
+    // Compras fiadas (con detalle de productos)
+    ventas.forEach(v => {
+      const fiadoPago = (v.venta_pagos || []).find(p => p.metodo === 'fiado')
+      if (!fiadoPago || fiadoPago.monto <= 0) return
+      movs.push({
+        ts: new Date(v.creado_en).getTime(),
+        mov: {
+          tipo: 'compra',
+          fecha: fmtFecha(v.creado_en),
+          items: (v.venta_items || []).map(it => ({
+            nombre: it.variante?.producto?.nombre_base || '—',
+            talle: it.variante?.talle || '',
+            cantidad: it.cantidad,
+            precio: it.precio_unitario || 0,
+          })),
+          montoFiado: fiadoPago.monto,
+        },
+      })
+    })
+
+    // Abonos / pagos
+    movimientos.forEach(m => {
+      if (m.tipo !== 'abono') return
+      movs.push({
+        ts: new Date(m.creado_en).getTime(),
+        mov: { tipo: 'abono', fecha: fmtFecha(m.creado_en), monto: m.monto, metodo: metodoLabel[m.metodo_pago || ''] || m.metodo_pago || 'Pago' },
+      })
+    })
+
+    // Devoluciones
+    devoluciones.forEach(d => {
+      movs.push({ ts: new Date(d.creado_en).getTime(), mov: { tipo: 'devolucion', fecha: fmtFecha(d.creado_en), totalDevuelto: d.total_devuelto } })
+    })
+
+    // Cambios
+    cambios.forEach(c => {
+      movs.push({ ts: new Date(c.creado_en).getTime(), mov: { tipo: 'cambio', fecha: fmtFecha(c.creado_en), diferencia: c.diferencia } })
+    })
+
+    movs.sort((a, b) => b.ts - a.ts)
+    const LIMIT = 12
+
+    return {
+      clienteNombre: cliente!.nombre,
+      fecha: new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }),
+      deudaActual: cliente!.deuda_total,
+      saldoFavor: cliente!.saldo_favor || 0,
+      movimientos: movs.slice(0, LIMIT).map(x => x.mov),
+      movimientosOcultos: Math.max(0, movs.length - LIMIT),
+    }
+  }
+
+  async function enviarResumenCuenta() {
+    if (!cliente || !telefono) return
+    setEnviandoResumen(true)
+    try {
+      const blob = await generarPDFResumenCuenta(buildResumenCuenta())
+      const nombre = `estado_cuenta_${new Date().toISOString().slice(0, 10)}.pdf`
+
+      // 1) Descargar siempre una copia
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = nombre
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      // 2) Enviar por WhatsApp (share nativo en celu; en PC ya quedó descargado, abre el chat)
+      const file = new File([blob], nombre, { type: 'application/pdf' })
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Ternura Kids' })
+        toast.success('Estado de cuenta descargado y enviado')
+      } else {
+        window.open(waHref(telefono), '_blank')
+        toast.success('Estado de cuenta descargado — adjuntalo en el chat de WhatsApp')
+      }
+    } catch (err) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setEnviandoResumen(false)
+    }
+  }
+
   function abrirWhatsApp() {
     if (!telefono) return
-    const tel = telefono.replace(/\D/g, '')
     const deuda = cliente?.deuda_total || 0
     const msg = `Hola ${nombre}! Te recordamos que tenés una deuda pendiente de *${formatPrecio(deuda)}* en Ternura Kids. Podés pasar a abonar cuando quieras. 💕`
-    window.open(`https://wa.me/54${tel}?text=${encodeURIComponent(msg)}`, '_blank')
+    window.open(waHref(telefono, msg), '_blank')
   }
 
   if (loading) return <div className="p-8 text-center text-gray-400">Cargando...</div>
@@ -272,6 +394,17 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
               )}
             </div>
 
+            {telefono && (
+              <button
+                onClick={enviarResumenCuenta}
+                disabled={enviandoResumen}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 text-sm font-medium hover:bg-teal-100 transition-colors disabled:opacity-50"
+              >
+                {enviandoResumen ? <Loader2 size={15} className="animate-spin" /> : <Receipt size={15} />}
+                Enviar estado de cuenta
+              </button>
+            )}
+
             <div className="space-y-2">
               <Label className="text-sm font-medium">Registrar pago</Label>
               <Input
@@ -312,8 +445,8 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                 ))}
               </div>
 
-              {/* Selector proveedor (solo con transferencia) */}
-              {metodoPagoAbono === 'transferencia' && proveedores.length > 0 && (
+              {/* Selector proveedor (solo con transferencia, si no se eligió banco) */}
+              {metodoPagoAbono === 'transferencia' && !bancoTransferencia && proveedores.length > 0 && (
                 <div>
                   {proveedorTransferencia ? (
                     <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
@@ -336,7 +469,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                       value=""
                       onChange={e => {
                         const prov = proveedores.find(p => p.id === e.target.value)
-                        if (prov) setProveedorTransferencia(prov)
+                        if (prov) { setProveedorTransferencia(prov); setBancoTransferencia(null) }
                       }}
                       className="w-full h-8 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     >
@@ -346,6 +479,57 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
                           {p.nombre}{p.deuda_total > 0 ? ` — debe ${formatPrecio(p.deuda_total)}` : ''}
                         </option>
                       ))}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              {/* Selector banco (solo con transferencia, si no se eligió proveedor) */}
+              {metodoPagoAbono === 'transferencia' && !proveedorTransferencia && (
+                <div>
+                  {bancoTransferencia ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 border border-teal-200">
+                      <Banknote size={13} className="text-teal-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-teal-700 truncate">{bancoTransferencia.nombre}</p>
+                        <p className="text-xs text-teal-500">Transferencia registrada en esta cuenta</p>
+                      </div>
+                      <button onClick={() => setBancoTransferencia(null)} className="text-teal-300 hover:text-teal-600 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ) : agregandoBanco ? (
+                    <div className="flex gap-1.5">
+                      <Input
+                        value={nombreBancoNuevo}
+                        onChange={e => setNombreBancoNuevo(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); agregarBanco() } }}
+                        placeholder="Nombre del banco / cuenta"
+                        autoFocus
+                        className="flex-1 h-8 text-xs"
+                      />
+                      <Button onClick={agregarBanco} disabled={guardandoBanco} className="h-8 px-3 bg-teal-500 hover:bg-teal-600 text-xs">
+                        {guardandoBanco ? <Loader2 size={13} className="animate-spin" /> : 'Agregar'}
+                      </Button>
+                      <button onClick={() => { setAgregandoBanco(false); setNombreBancoNuevo('') }} className="text-gray-300 hover:text-gray-600 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value=""
+                      onChange={e => {
+                        if (e.target.value === '__add__') { setAgregandoBanco(true); return }
+                        const b = bancos.find(x => x.id === e.target.value)
+                        if (b) { setBancoTransferencia(b); setProveedorTransferencia(null) }
+                      }}
+                      className="w-full h-8 rounded-lg border border-teal-200 bg-teal-50 text-teal-700 text-xs px-2 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                    >
+                      <option value="">🏦 ¿A qué banco te transfirió?</option>
+                      {bancos.map(b => (
+                        <option key={b.id} value={b.id}>{b.nombre}</option>
+                      ))}
+                      <option value="__add__">+ Agregar banco…</option>
                     </select>
                   )}
                 </div>

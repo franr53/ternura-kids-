@@ -37,6 +37,14 @@ export interface Marca {
 // Alias temporal para no romper archivos que aún usan Proveedor
 export type Proveedor = Marca
 
+// Cuentas bancarias del local que reciben transferencias de cobro
+export interface Banco {
+  id: string
+  nombre: string
+  activo: boolean
+  creado_en: string
+}
+
 export interface TipoPrenda {
   id: string
   nombre: string
@@ -170,6 +178,7 @@ export interface FiadoMovimiento {
   monto: number
   notas?: string
   metodo_pago?: string
+  banco_id?: string
   usuario_id?: string
   creado_en: string
   cliente?: Cliente

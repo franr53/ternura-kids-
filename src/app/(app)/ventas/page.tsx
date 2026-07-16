@@ -6,9 +6,10 @@ import { MetodoPago } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Pencil, CalendarDays, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Pencil, CalendarDays, X, ChevronDown, ChevronRight, FileDown, MessageCircle, Loader2 } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 import EditarPagoDialog, { VentaEditable } from '@/components/ventas/editar-pago-dialog'
+import { generarPDFComprobante, compartirPDFWhatsApp, type ComprobanteData } from '@/lib/etiquetas-pdf'
 
 interface VentaLista {
   id: string
@@ -18,7 +19,7 @@ interface VentaLista {
   descuento: number
   cliente_id?: string
   caja_id?: string
-  cliente?: { nombre: string }
+  cliente?: { nombre: string; telefono?: string }
   pagos?: { metodo: string; monto: number }[]
   caja?: { id: string; estado: string }
   venta_items?: { variante_id?: string; cantidad: number; precio_unitario?: number; variante?: { talle: string; producto?: { nombre_base: string } } }[]
@@ -99,7 +100,7 @@ export default function VentasPage() {
       .from('ventas')
       .select(`
         id, creado_en, subtotal, total, descuento, cliente_id, caja_id,
-        cliente:clientes(nombre),
+        cliente:clientes(nombre, telefono),
         pagos:venta_pagos(metodo, monto),
         caja:cajas(id, estado),
         venta_items(variante_id, cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base)))
@@ -162,6 +163,63 @@ export default function VentasPage() {
     devoluciones.forEach(dev => m.set(dev.venta_id, (m.get(dev.venta_id) || 0) + dev.total_devuelto))
     return m
   }, [devoluciones])
+
+  const [enviandoId, setEnviandoId] = useState<string | null>(null)
+
+  function buildComprobante(v: VentaLista): ComprobanteData {
+    const devMap = devPorVenta.get(v.id)
+    const totalDev = totalDevPorVenta.get(v.id) || 0
+    const items = (v.venta_items || []).map(it => ({
+      nombre: it.variante?.producto?.nombre_base || '—',
+      talle: it.variante?.talle || '',
+      cantidad: it.cantidad,
+      precio: it.precio_unitario || 0,
+      devuelto: devMap?.get(it.variante_id ?? '') || 0,
+    }))
+    const metodoPago = (v.pagos || []).map(p => METODO_LABELS[p.metodo] || p.metodo).join(' + ') || '—'
+    return {
+      items,
+      subtotal: v.subtotal,
+      descuento: v.descuento,
+      total: v.total,
+      metodoPago,
+      clienteNombre: v.cliente?.nombre,
+      fecha: new Date(v.creado_en).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' }),
+      devolucion: totalDev > 0 ? { totalDevuelto: totalDev } : undefined,
+    }
+  }
+
+  async function descargarPDF(v: VentaLista) {
+    setEnviandoId(v.id)
+    try {
+      const blob = await generarPDFComprobante(buildComprobante(v))
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `comprobante_${new Date(v.creado_en).toISOString().slice(0, 10)}.pdf`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Comprobante descargado')
+    } catch (err) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setEnviandoId(null)
+    }
+  }
+
+  async function enviarWhatsApp(v: VentaLista) {
+    if (!v.cliente?.telefono) return
+    setEnviandoId(v.id)
+    try {
+      const blob = await generarPDFComprobante(buildComprobante(v))
+      const resultado = await compartirPDFWhatsApp(blob, `comprobante_${new Date(v.creado_en).toISOString().slice(0, 10)}.pdf`, v.cliente.telefono)
+      toast.success(resultado === 'shared' ? 'Comprobante enviado' : 'PDF descargado — adjuntalo en el chat de WhatsApp')
+    } catch (err) {
+      toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setEnviandoId(null)
+    }
+  }
 
   return (
     <div className="p-4 max-w-3xl mx-auto pb-28">
@@ -382,6 +440,28 @@ export default function VentasPage() {
                         </div>
                       )
                     })}
+                  </div>
+
+                  {/* Enviar comprobante */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={e => { e.stopPropagation(); descargarPDF(v) }}
+                      disabled={enviandoId === v.id}
+                      className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-50"
+                    >
+                      {enviandoId === v.id ? <Loader2 size={15} className="animate-spin" /> : <FileDown size={15} />}
+                      PDF
+                    </button>
+                    {v.cliente?.telefono && (
+                      <button
+                        onClick={e => { e.stopPropagation(); enviarWhatsApp(v) }}
+                        disabled={enviandoId === v.id}
+                        className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50"
+                      >
+                        {enviandoId === v.id ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+                        WhatsApp
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
