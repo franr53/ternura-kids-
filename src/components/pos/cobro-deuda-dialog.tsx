@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Cliente, Proveedor } from '@/types'
+import { Banco, Cliente, Proveedor } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { X, Search, Banknote, Smartphone, CreditCard, CheckCircle, ArrowLeft } from 'lucide-react'
+import { X, Search, Banknote, Smartphone, CreditCard, CheckCircle, ArrowLeft, Loader2 } from 'lucide-react'
 import { formatPrecio, cn } from '@/lib/utils'
 
 function normalizar(s: string) {
@@ -37,17 +37,24 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
   const [notas, setNotas] = useState('')
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [proveedorTransferencia, setProveedorTransferencia] = useState<Proveedor | null>(null)
+  const [bancos, setBancos] = useState<Banco[]>([])
+  const [bancoTransferencia, setBancoTransferencia] = useState<Banco | null>(null)
+  const [agregandoBanco, setAgregandoBanco] = useState(false)
+  const [nombreBancoNuevo, setNombreBancoNuevo] = useState('')
+  const [guardandoBanco, setGuardandoBanco] = useState(false)
   const [procesando, setProcesando] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
 
   useEffect(() => {
     async function cargar() {
-      const [{ data: clientes }, { data: provs }] = await Promise.all([
+      const [{ data: clientes }, { data: provs }, { data: bcs }] = await Promise.all([
         supabase.from('clientes').select('id, nombre, telefono, deuda_total, activo, creado_en, direccion').eq('activo', true).order('nombre'),
-        supabase.from('proveedores').select('id, nombre, deuda_total, alias_cbu, activo, creado_en, notas, telefono, email, direccion').eq('activo', true).order('nombre'),
+        supabase.from('marcas').select('id, nombre, deuda_total, alias_cbu, activo, creado_en, notas, telefono, email, direccion').eq('activo', true).order('nombre'),
+        supabase.from('bancos').select('id, nombre, activo, creado_en').eq('activo', true).order('nombre'),
       ])
       setTodosClientes((clientes || []) as Cliente[])
       setProveedores((provs || []) as Proveedor[])
+      setBancos((bcs || []) as Banco[])
     }
     cargar()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -66,13 +73,18 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
       return
     }
 
+    // Destinos solo aplican con transferencia, y son mutuamente excluyentes
+    const proveedorDestino = metodo === 'transferencia' ? proveedorTransferencia : null
+    const bancoDestino = metodo === 'transferencia' && !proveedorDestino ? bancoTransferencia : null
+
     setProcesando(true)
     const { error } = await supabase.rpc('procesar_cobro_deuda', {
       p_cliente_id: clienteSeleccionado.id,
       p_monto: Math.round(montoNum),
       p_metodo: metodo,
       p_notas: notas || null,
-      p_proveedor_id: proveedorTransferencia?.id || null,
+      p_proveedor_id: proveedorDestino?.id || null,
+      p_banco_id: bancoDestino?.id || null,
     })
     setProcesando(false)
 
@@ -83,6 +95,22 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
     onCerrar()
   }
 
+  async function agregarBanco() {
+    const nombre = nombreBancoNuevo.trim()
+    if (!nombre) { toast.error('Ingresá el nombre del banco'); return }
+    setGuardandoBanco(true)
+    const { data, error } = await supabase.from('bancos').insert({ nombre }).select('id, nombre, activo, creado_en').single()
+    setGuardandoBanco(false)
+    if (error || !data) { toast.error('Error al agregar banco: ' + (error?.message || '')); return }
+    const nuevo = data as Banco
+    setBancos(prev => [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    setBancoTransferencia(nuevo)
+    setProveedorTransferencia(null)
+    setNombreBancoNuevo('')
+    setAgregandoBanco(false)
+    toast.success(`Banco "${nuevo.nombre}" agregado`)
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
@@ -91,7 +119,7 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
         <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3 shrink-0">
           {clienteSeleccionado && (
             <button
-              onClick={() => { setClienteSeleccionado(null); setMonto(''); setNotas(''); setProveedorTransferencia(null); setConfirmando(false) }}
+              onClick={() => { setClienteSeleccionado(null); setMonto(''); setNotas(''); setProveedorTransferencia(null); setBancoTransferencia(null); setAgregandoBanco(false); setNombreBancoNuevo(''); setConfirmando(false) }}
               className="text-gray-400 hover:text-gray-600"
             >
               <ArrowLeft size={18} />
@@ -180,7 +208,7 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   ] as const).map(m => (
                     <button
                       key={m.key}
-                      onClick={() => { setMetodo(m.key); if (m.key !== 'transferencia') setProveedorTransferencia(null) }}
+                      onClick={() => { setMetodo(m.key); if (m.key !== 'transferencia') { setProveedorTransferencia(null); setBancoTransferencia(null) } }}
                       className={cn(
                         'flex-1 flex items-center justify-center gap-1 py-2 rounded-xl border text-xs font-medium transition-colors',
                         metodo === m.key
@@ -193,7 +221,7 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   ))}
                 </div>
               </div>
-              {metodo === 'transferencia' && proveedores.length > 0 && (
+              {metodo === 'transferencia' && !bancoTransferencia && proveedores.length > 0 && (
                 <div>
                   {proveedorTransferencia ? (
                     <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
@@ -213,7 +241,7 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                       value=""
                       onChange={e => {
                         const prov = proveedores.find(p => p.id === e.target.value)
-                        if (prov) setProveedorTransferencia(prov)
+                        if (prov) { setProveedorTransferencia(prov); setBancoTransferencia(null) }
                       }}
                       className="w-full h-9 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs px-3 focus:outline-none focus:ring-1 focus:ring-blue-400"
                     >
@@ -223,6 +251,55 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                           {p.nombre}{p.deuda_total > 0 ? ` — debe ${formatPrecio(p.deuda_total)}` : ''}
                         </option>
                       ))}
+                    </select>
+                  )}
+                </div>
+              )}
+              {metodo === 'transferencia' && !proveedorTransferencia && (
+                <div>
+                  {bancoTransferencia ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-teal-50 border border-teal-200">
+                      <Banknote size={13} className="text-teal-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-teal-700 truncate">{bancoTransferencia.nombre}</p>
+                        <p className="text-xs text-teal-500">Transferencia registrada en esta cuenta</p>
+                      </div>
+                      <button onClick={() => setBancoTransferencia(null)} className="text-teal-300 hover:text-teal-600 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ) : agregandoBanco ? (
+                    <div className="flex gap-1.5">
+                      <Input
+                        value={nombreBancoNuevo}
+                        onChange={e => setNombreBancoNuevo(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); agregarBanco() } }}
+                        placeholder="Nombre del banco / cuenta"
+                        autoFocus
+                        className="flex-1 h-9 text-xs"
+                      />
+                      <Button onClick={agregarBanco} disabled={guardandoBanco} className="h-9 px-3 bg-teal-500 hover:bg-teal-600 text-xs">
+                        {guardandoBanco ? <Loader2 size={13} className="animate-spin" /> : 'Agregar'}
+                      </Button>
+                      <button onClick={() => { setAgregandoBanco(false); setNombreBancoNuevo('') }} className="text-gray-300 hover:text-gray-600 shrink-0">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value=""
+                      onChange={e => {
+                        if (e.target.value === '__add__') { setAgregandoBanco(true); return }
+                        const b = bancos.find(x => x.id === e.target.value)
+                        if (b) { setBancoTransferencia(b); setProveedorTransferencia(null) }
+                      }}
+                      className="w-full h-9 rounded-xl border border-teal-200 bg-teal-50 text-teal-700 text-xs px-3 focus:outline-none focus:ring-1 focus:ring-teal-400"
+                    >
+                      <option value="">🏦 ¿A qué banco te transfirió?</option>
+                      {bancos.map(b => (
+                        <option key={b.id} value={b.id}>{b.nombre}</option>
+                      ))}
+                      <option value="__add__">+ Agregar banco…</option>
                     </select>
                   )}
                 </div>
@@ -264,6 +341,12 @@ export default function CobroDeudaDialog({ onCerrar, onCobroCompletado }: Props)
                   <span className="text-gray-500">Método</span>
                   <span className="font-medium capitalize">{metodo}</span>
                 </div>
+                {metodo === 'transferencia' && (proveedorTransferencia || bancoTransferencia) && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Destino</span>
+                    <span className="font-medium">{proveedorTransferencia?.nombre || bancoTransferencia?.nombre}</span>
+                  </div>
+                )}
                 {notas && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Nota</span>
