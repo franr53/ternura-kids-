@@ -112,7 +112,7 @@ export default function DashboardPage() {
       supabase.from('venta_items').select('cantidad, venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
       supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
-      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').lte('stock', 3).order('stock', { ascending: true }).limit(5),
+      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').gte('stock', 0).lte('stock', 3).order('stock', { ascending: true }).limit(5),
     ])
 
     const kpis_result = kpisData as { ventas_hoy: number; ventas_ayer: number; ventas_mes: number; count_ventas_mes: number; clientes_deuda: number; variantes_sin_stock: number } | null
