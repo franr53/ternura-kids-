@@ -19,17 +19,9 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 
 interface DatosDia { fecha: string; ventas: number; unidades: number; ticket: number; countVentas: number }
-interface PagoMetodo { metodo: string; total: number }
 interface TopProducto { nombre: string; cantidad: number }
-
-const METODO_LABELS: Record<string, string> = {
-  efectivo: 'Efectivo', transferencia: 'Transferencia',
-  debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
-}
-const METODO_COLORS: Record<string, string> = {
-  Efectivo: '#10B981', Transferencia: '#93C5FD', Débito: '#FCD34D',
-  Crédito: '#A78BFA', Fiado: '#F9A8D4',
-}
+// Flujo de deuda de un mes: cargo = lo que se llevan fiado, abono = lo que entregan.
+interface FiadoMes { fiado: number; cobrado: number }
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre'
 type MetricaChart = 'ventas' | 'unidades' | 'ticket'
@@ -86,7 +78,7 @@ const cardVariants = {
 interface DashboardData {
   ventasHoy: number; ventasMes: number; clientesConDeuda: number; sinStock: number
   ventasAyer: number; ticketMesAnterior: number; ticketPromedio: number
-  datosPorDia: DatosDia[]; ventasPorMetodo: PagoMetodo[]
+  datosPorDia: DatosDia[]
   topProductos: TopProducto[]; topDeudores: Cliente[]
   stockCritico: { nombre: string; talle: string; stock: number }[]
   ventasPorTalle: { talle: string; unidades: number }[]
@@ -98,6 +90,7 @@ export default function DashboardPage() {
   const { mask } = usePrivacyMode()
   const [periodo, setPeriodo] = useState<Periodo>('mes')
   const [metricaChart, setMetricaChart] = useState<MetricaChart>('ventas')
+  const [mesFiado, setMesFiado] = useState(0) // 0 = este mes, 1 = mes pasado, 2 = hace 2 meses
 
   const { data: d, loading } = useCache<DashboardData>(`dash:${periodo}`, async () => {
     const hoy = new Date()
@@ -114,13 +107,12 @@ export default function DashboardPage() {
     const desdeStr = desde.toISOString().split('T')[0]
 
     const [
-      { data: kpisData }, { data: ventasDiaData }, { data: pagosData },
+      { data: kpisData }, { data: ventasDiaData },
       { data: topData }, { data: deudoresTop }, { data: unidadesData },
       { data: ventasMesAntData }, { data: ventasMesAntCount }, { data: stockCriticoData },
     ] = await Promise.all([
       supabase.rpc('dashboard_kpis', { p_fecha_hoy: inicioHoy, p_inicio_mes: inicioMes, p_inicio_ayer: inicioAyer }),
       supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
-      supabase.from('venta_pagos').select('metodo, monto, venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre_base)), venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('clientes').select('id, nombre, deuda_total').gt('deuda_total', 0).order('deuda_total', { ascending: false }).limit(5),
       supabase.from('venta_items').select('cantidad, variante:variantes(talle), venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
@@ -169,13 +161,6 @@ export default function DashboardPage() {
       diasArray.push({ fecha: key.slice(5), ventas, unidades: porDiaUnidades[key] || 0, ticket: count > 0 ? Math.round(ventas / count) : 0, countVentas: count })
     }
 
-    // Pagos por método
-    const porMetodo: Record<string, number> = {}
-    pagosData?.forEach((p: { metodo: string; monto: number }) => {
-      porMetodo[p.metodo] = (porMetodo[p.metodo] || 0) + p.monto
-    })
-    const ventasPorMetodoArr = Object.entries(porMetodo).map(([metodo, total]) => ({ metodo: METODO_LABELS[metodo] || metodo, total })).sort((a, b) => b.total - a.total)
-
     // Top productos
     const porProd: Record<string, number> = {}
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -195,12 +180,33 @@ export default function DashboardPage() {
       ticketMesAnterior: countMesAnt > 0 ? totalMesAnt / countMesAnt : 0,
       ticketPromedio: countMes > 0 ? totalMes / countMes : 0,
       datosPorDia: diasArray,
-      ventasPorMetodo: ventasPorMetodoArr,
       topProductos: topProductosArr,
       topDeudores: (deudoresTop || []) as Cliente[],
       stockCritico: scData,
       ventasPorTalle: ventasPorTalleArr,
     }
+  })
+
+  // Fiado del mes seleccionado: cargo (se llevan) vs abono (entregan). Query
+  // propia e independiente del período del gráfico — se refresca al cambiar el mes.
+  const { data: fiadoMes, loading: loadingFiado } = useCache<FiadoMes>(`fiado:${mesFiado}`, async () => {
+    const base = new Date()
+    const ini = new Date(base.getFullYear(), base.getMonth() - mesFiado, 1)
+    const fin = new Date(base.getFullYear(), base.getMonth() - mesFiado + 1, 0)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const iniStr = `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}-01`
+    const finStr = `${fin.getFullYear()}-${pad(fin.getMonth() + 1)}-${pad(fin.getDate())}`
+    const { data } = await supabase
+      .from('fiado_movimientos')
+      .select('tipo, monto, creado_en')
+      .gte('creado_en', `${iniStr}T00:00:00`)
+      .lte('creado_en', `${finStr}T23:59:59`)
+    let fiado = 0, cobrado = 0
+    ;(data || []).forEach((m: { tipo: string; monto: number }) => {
+      if (m.tipo === 'cargo') fiado += m.monto
+      else if (m.tipo === 'abono') cobrado += m.monto
+    })
+    return { fiado, cobrado }
   })
 
   const ventasHoy = d?.ventasHoy ?? 0
@@ -211,7 +217,6 @@ export default function DashboardPage() {
   const ticketMesAnterior = d?.ticketMesAnterior ?? 0
   const ticketPromedio = d?.ticketPromedio ?? 0
   const datosPorDia = d?.datosPorDia ?? []
-  const ventasPorMetodo = d?.ventasPorMetodo ?? []
   const topProductos = d?.topProductos ?? []
   const topDeudores = d?.topDeudores ?? []
   const stockCritico = d?.stockCritico ?? []
@@ -225,8 +230,17 @@ export default function DashboardPage() {
   // Total unidades en período
   const totalUnidades = useMemo(() => datosPorDia.reduce((s, d) => s + d.unidades, 0), [datosPorDia])
 
-  const totalMetodos = ventasPorMetodo.reduce((s, m) => s + m.total, 0)
   const mc = METRICA_CONFIG[metricaChart]
+
+  // Fiado vs cobrado del mes elegido + opciones del selector (nombres de mes).
+  const fiadoVal = fiadoMes?.fiado ?? 0
+  const cobradoVal = fiadoMes?.cobrado ?? 0
+  const netoFiado = fiadoVal - cobradoVal
+  const maxFiado = Math.max(fiadoVal, cobradoVal, 1)
+  const mesesOpts = [0, 1, 2].map(off => {
+    const dd = new Date(new Date().getFullYear(), new Date().getMonth() - off, 1)
+    return { off, label: dd.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '') }
+  })
 
   const kpis = [
     {
@@ -422,7 +436,7 @@ export default function DashboardPage() {
           )}
         </motion.div>
 
-        {/* Métodos de pago */}
+        {/* Fiado vs Cobrado — flujo de deuda del mes, con selector de mes */}
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: loading ? 0 : 1, x: 0 }}
@@ -430,39 +444,60 @@ export default function DashboardPage() {
           className="bg-white rounded-2xl p-5"
           style={{ boxShadow: 'var(--card-shadow)' }}
         >
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
-            Cobros del mes
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            Fiado vs Cobrado
           </h2>
-          {loading ? (
+          <p className="text-xs text-gray-400 mb-4">Lo que se llevaron fiado vs lo que entregaron</p>
+
+          {/* Selector de mes */}
+          <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1 mb-6">
+            {mesesOpts.map(m => (
+              <button
+                key={m.off}
+                onClick={() => setMesFiado(m.off)}
+                className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all capitalize"
+                style={{
+                  background: mesFiado === m.off ? 'white' : 'transparent',
+                  color: mesFiado === m.off ? '#10B981' : '#9ca3af',
+                  boxShadow: mesFiado === m.off ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {loadingFiado && !fiadoMes ? (
             <div className="space-y-4">
-              {[1,2,3].map(i => <Skeleton key={i} className="h-8 w-full" />)}
+              {[1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
             </div>
-          ) : ventasPorMetodo.length === 0 ? (
-            <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin datos</div>
           ) : (
-            <div className="space-y-4">
-              {ventasPorMetodo.map(({ metodo, total }) => {
-                const pct = totalMetodos > 0 ? (total / totalMetodos) * 100 : 0
-                const color = METODO_COLORS[metodo] || '#9ca3af'
-                return (
-                  <div key={metodo}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-                        <span className="text-xs text-gray-600 font-medium">{metodo}</span>
-                      </div>
-                      <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(total))}</span>
+            <div className="space-y-5">
+              {[
+                { label: 'Se llevaron (fiado)', val: fiadoVal, color: '#F9A8D4' },
+                { label: 'Entregaron (cobros)', val: cobradoVal, color: '#10B981' },
+              ].map(r => (
+                <div key={r.label}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: r.color }} />
+                      <span className="text-xs text-gray-600 font-medium">{r.label}</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
-                    </div>
+                    <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(r.val))}</span>
                   </div>
-                )
-              })}
-              <div className="pt-2 border-t border-gray-50">
+                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(r.val / maxFiado) * 100}%`, backgroundColor: r.color }} />
+                  </div>
+                </div>
+              ))}
+              <div className="pt-3 border-t border-gray-50">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">Total</span>
-                  <span className="text-sm font-bold text-gray-700">{mask(formatPrecio(totalMetodos))}</span>
+                  <span className="text-xs text-gray-400">
+                    {netoFiado > 0 ? 'La deuda creció' : netoFiado < 0 ? 'La deuda bajó' : 'Sin cambio de deuda'}
+                  </span>
+                  <span className={`text-sm font-bold ${netoFiado > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
+                    {netoFiado > 0 ? '+' : netoFiado < 0 ? '−' : ''}{mask(formatPrecio(Math.abs(netoFiado)))}
+                  </span>
                 </div>
               </div>
             </div>
