@@ -9,7 +9,7 @@ import {
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Users, Package, ShoppingCart,
-  ArrowUpRight, DollarSign, Receipt, AlertTriangle,
+  ArrowUpRight, DollarSign, Receipt, AlertTriangle, Coins,
 } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
@@ -73,6 +73,7 @@ const cardVariants = {
 interface DashboardData {
   ventasHoy: number; ventasMes: number; clientesConDeuda: number; sinStock: number
   ventasAyer: number; ticketMesAnterior: number; ticketPromedio: number
+  gananciaMes: number; margenPct: number; coberturaCosto: number
   datosPorDia: DatosDia[]
   topProductos: TopProducto[]; topDeudores: Cliente[]
   stockCritico: { nombre: string; talle: string; stock: number }[]
@@ -105,6 +106,7 @@ export default function DashboardPage() {
       { data: kpisData }, { data: ventasDiaData },
       { data: topData }, { data: deudoresTop }, { data: unidadesData },
       { data: ventasMesAntData }, { data: ventasMesAntCount }, { data: stockCriticoData },
+      { data: margenData },
     ] = await Promise.all([
       supabase.rpc('dashboard_kpis', { p_fecha_hoy: inicioHoy, p_inicio_mes: inicioMes, p_inicio_ayer: inicioAyer }),
       supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
@@ -114,6 +116,8 @@ export default function DashboardPage() {
       supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').gte('stock', 0).lte('stock', 3).order('stock', { ascending: true }).limit(5),
+      // Margen del mes: ingreso (subtotal) vs costo (cantidad × precio_costo).
+      supabase.from('venta_items').select('cantidad, subtotal, variante:variantes(precio_costo), venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${inicioMes}T00:00:00`),
     ])
 
     const kpis_result = kpisData as { ventas_hoy: number; ventas_ayer: number; ventas_mes: number; count_ventas_mes: number; clientes_deuda: number; variantes_sin_stock: number } | null
@@ -126,6 +130,24 @@ export default function DashboardPage() {
     const scData = (stockCriticoData || []).map((v: any) => ({
       nombre: v.producto?.nombre_base || 'Sin nombre', talle: v.talle || '', stock: v.stock,
     }))
+
+    // Ganancia del mes: solo sobre ítems con costo cargado (precio_costo > 0);
+    // los sin costo (productos sin cargar) inflarían el margen, así que no cuentan.
+    let ingresoConCosto = 0, costoMes = 0, ingresoTotalMes = 0
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(margenData || []).forEach((it: any) => {
+      const sub = it.subtotal || 0
+      ingresoTotalMes += sub
+      const costoU = it.variante?.precio_costo || 0
+      if (costoU > 0) {
+        ingresoConCosto += sub
+        costoMes += (it.cantidad || 0) * costoU
+      }
+    })
+    const gananciaMes = ingresoConCosto - costoMes
+    const margenPct = ingresoConCosto > 0 ? (gananciaMes / ingresoConCosto) * 100 : 0
+    // Cobertura: qué % del ingreso del mes tiene costo cargado (confiabilidad).
+    const coberturaCosto = ingresoTotalMes > 0 ? (ingresoConCosto / ingresoTotalMes) * 100 : 0
 
     // Datos por día
     const porDiaVentas: Record<string, number> = {}
@@ -176,6 +198,7 @@ export default function DashboardPage() {
       ventasAyer: kpis_result?.ventas_ayer || 0,
       ticketMesAnterior: countMesAnt > 0 ? totalMesAnt / countMesAnt : 0,
       ticketPromedio: countMes > 0 ? totalMes / countMes : 0,
+      gananciaMes, margenPct, coberturaCosto,
       datosPorDia: diasArray,
       topProductos: topProductosArr,
       topDeudores: (deudoresTop || []) as Cliente[],
@@ -213,6 +236,9 @@ export default function DashboardPage() {
   const ventasAyer = d?.ventasAyer ?? 0
   const ticketMesAnterior = d?.ticketMesAnterior ?? 0
   const ticketPromedio = d?.ticketPromedio ?? 0
+  const gananciaMes = d?.gananciaMes ?? 0
+  const margenPct = d?.margenPct ?? 0
+  const coberturaCosto = d?.coberturaCosto ?? 0
   const datosPorDia = d?.datosPorDia ?? []
   const topProductos = d?.topProductos ?? []
   const topDeudores = d?.topDeudores ?? []
@@ -249,6 +275,18 @@ export default function DashboardPage() {
       badge: ventasAyer > 0 ? <ComparativoBadge actual={ventasHoy} anterior={ventasAyer} /> : null,
       badgeLabel: 'vs ayer',
       href: null as string | null,
+    },
+    {
+      label: 'Ganancia (mes)',
+      value: mask(formatPrecio(gananciaMes)),
+      icon: Coins,
+      iconBg: 'bg-teal-50',
+      iconColor: 'text-teal-500',
+      badge: margenPct > 0 ? (
+        <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-teal-600">{margenPct.toFixed(0)}%</span>
+      ) : null,
+      badgeLabel: coberturaCosto < 90 ? `margen · ${coberturaCosto.toFixed(0)}% con costo` : 'de margen',
+      href: null,
     },
     {
       label: 'Ticket Promedio',
@@ -304,7 +342,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {kpis.map((kpi, i) => {
           const Icon = kpi.icon
           return (
