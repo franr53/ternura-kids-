@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Users, Package, ShoppingCart,
@@ -26,17 +26,12 @@ interface FiadoMes { fiado: number; cobrado: number }
 type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre'
 type MetricaChart = 'ventas' | 'unidades' | 'ticket'
 
-// Orden de talles: números primero (2, 4, 6…), después letras (S, M, L…).
-const TALLE_ORDEN_LETRA: Record<string, number> = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 }
-function ordenarTalles(a: string, b: string): number {
-  const na = parseFloat(a), nb = parseFloat(b)
-  const aNum = !isNaN(na), bNum = !isNaN(nb)
-  if (aNum && bNum) return na - nb
-  if (aNum) return -1
-  if (bNum) return 1
-  const la = TALLE_ORDEN_LETRA[a.toUpperCase()] ?? 99
-  const lb = TALLE_ORDEN_LETRA[b.toUpperCase()] ?? 99
-  return la !== lb ? la - lb : a.localeCompare(b)
+// Solo para el gráfico: U / Unico / Único son el mismo talle → "Único".
+// No modifica los datos (etiquetas ya impresas quedan como están).
+function normalizarTalleChart(talle: string | null | undefined): string | null {
+  if (!talle) return null
+  const t = talle.trim()
+  return ['u', 'unico', 'único'].includes(t.toLowerCase()) ? 'Único' : t
 }
 
 const METRICA_CONFIG: Record<MetricaChart, { label: string; color: string; dataKey: string; formatter: (v: number) => string }> = {
@@ -146,12 +141,14 @@ export default function DashboardPage() {
     ;(unidadesData || []).forEach((item: any) => {
       const fecha = item.venta?.creado_en?.split('T')[0]
       if (fecha) porDiaUnidades[fecha] = (porDiaUnidades[fecha] || 0) + item.cantidad
-      const talle = item.variante?.talle
+      const talle = normalizarTalleChart(item.variante?.talle)
       if (talle) porTalle[talle] = (porTalle[talle] || 0) + item.cantidad
     })
+    // Top talles por volumen (barras horizontales legibles, de mayor a menor).
     const ventasPorTalleArr = Object.entries(porTalle)
       .map(([talle, unidades]) => ({ talle, unidades }))
-      .sort((a, b) => ordenarTalles(a.talle, b.talle))
+      .sort((a, b) => b.unidades - a.unidades)
+      .slice(0, 14)
     const diasArray: DatosDia[] = []
     for (let i = diasAtras - 1; i >= 0; i--) {
       const dd = new Date(hoy); dd.setDate(dd.getDate() - i)
@@ -521,26 +518,27 @@ export default function DashboardPage() {
             {periodo === 'hoy' ? 'hoy' : `últimos ${periodo === 'semana' ? '7d' : periodo === 'mes' ? '30d' : '90d'}`}
           </span>
         </div>
-        <p className="text-xs text-gray-400 mb-4">Unidades vendidas por talle — para decidir qué reponer</p>
+        <p className="text-xs text-gray-400 mb-4">Talles más vendidos — para decidir qué reponer</p>
         {loading ? (
-          <Skeleton className="h-52 w-full rounded-xl" />
+          <Skeleton className="h-64 w-full rounded-xl" />
         ) : ventasPorTalle.length === 0 ? (
           <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin ventas</div>
         ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={ventasPorTalle} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
-              <XAxis dataKey="talle" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} interval={0} />
-              <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+          <ResponsiveContainer width="100%" height={Math.max(200, ventasPorTalle.length * 30)}>
+            <BarChart data={ventasPorTalle} layout="vertical" margin={{ top: 0, right: 44, left: 8, bottom: 0 }}>
+              <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="talle" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={70} interval={0} />
               <Tooltip
                 cursor={{ fill: 'rgba(16,185,129,0.06)' }}
                 formatter={(v) => [`${v} uds`, 'Vendidas']}
                 labelFormatter={(l) => `Talle ${l}`}
                 contentStyle={{ borderRadius: '12px', border: 'none', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
               />
-              <Bar dataKey="unidades" radius={[6, 6, 0, 0]}>
+              <Bar dataKey="unidades" radius={[0, 6, 6, 0]} barSize={16}>
                 {ventasPorTalle.map((e, i) => (
                   <Cell key={i} fill={e.unidades === maxTalle ? '#10B981' : '#A7F3D0'} />
                 ))}
+                <LabelList dataKey="unidades" position="right" style={{ fontSize: 10, fill: '#6b7280', fontWeight: 600 }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
