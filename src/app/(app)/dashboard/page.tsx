@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Users, Package, ShoppingCart,
@@ -33,6 +33,19 @@ const METODO_COLORS: Record<string, string> = {
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre'
 type MetricaChart = 'ventas' | 'unidades' | 'ticket'
+
+// Orden de talles: números primero (2, 4, 6…), después letras (S, M, L…).
+const TALLE_ORDEN_LETRA: Record<string, number> = { XS: 1, S: 2, M: 3, L: 4, XL: 5, XXL: 6 }
+function ordenarTalles(a: string, b: string): number {
+  const na = parseFloat(a), nb = parseFloat(b)
+  const aNum = !isNaN(na), bNum = !isNaN(nb)
+  if (aNum && bNum) return na - nb
+  if (aNum) return -1
+  if (bNum) return 1
+  const la = TALLE_ORDEN_LETRA[a.toUpperCase()] ?? 99
+  const lb = TALLE_ORDEN_LETRA[b.toUpperCase()] ?? 99
+  return la !== lb ? la - lb : a.localeCompare(b)
+}
 
 const METRICA_CONFIG: Record<MetricaChart, { label: string; color: string; dataKey: string; formatter: (v: number) => string }> = {
   ventas: { label: 'Ventas ($)', color: '#10B981', dataKey: 'ventas', formatter: v => formatPrecio(v) },
@@ -76,6 +89,7 @@ interface DashboardData {
   datosPorDia: DatosDia[]; ventasPorMetodo: PagoMetodo[]
   topProductos: TopProducto[]; topDeudores: Cliente[]
   stockCritico: { nombre: string; talle: string; stock: number }[]
+  ventasPorTalle: { talle: string; unidades: number }[]
 }
 
 export default function DashboardPage() {
@@ -109,7 +123,7 @@ export default function DashboardPage() {
       supabase.from('venta_pagos').select('metodo, monto, venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre_base)), venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('clientes').select('id, nombre, deuda_total').gt('deuda_total', 0).order('deuda_total', { ascending: false }).limit(5),
-      supabase.from('venta_items').select('cantidad, venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
+      supabase.from('venta_items').select('cantidad, variante:variantes(talle), venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
       supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').gte('stock', 0).lte('stock', 3).order('stock', { ascending: true }).limit(5),
@@ -135,11 +149,17 @@ export default function DashboardPage() {
       porDiaCount[fecha] = (porDiaCount[fecha] || 0) + 1
     })
     const porDiaUnidades: Record<string, number> = {}
+    const porTalle: Record<string, number> = {}
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(unidadesData || []).forEach((item: any) => {
       const fecha = item.venta?.creado_en?.split('T')[0]
       if (fecha) porDiaUnidades[fecha] = (porDiaUnidades[fecha] || 0) + item.cantidad
+      const talle = item.variante?.talle
+      if (talle) porTalle[talle] = (porTalle[talle] || 0) + item.cantidad
     })
+    const ventasPorTalleArr = Object.entries(porTalle)
+      .map(([talle, unidades]) => ({ talle, unidades }))
+      .sort((a, b) => ordenarTalles(a.talle, b.talle))
     const diasArray: DatosDia[] = []
     for (let i = diasAtras - 1; i >= 0; i--) {
       const dd = new Date(hoy); dd.setDate(dd.getDate() - i)
@@ -179,6 +199,7 @@ export default function DashboardPage() {
       topProductos: topProductosArr,
       topDeudores: (deudoresTop || []) as Cliente[],
       stockCritico: scData,
+      ventasPorTalle: ventasPorTalleArr,
     }
   })
 
@@ -194,6 +215,8 @@ export default function DashboardPage() {
   const topProductos = d?.topProductos ?? []
   const topDeudores = d?.topDeudores ?? []
   const stockCritico = d?.stockCritico ?? []
+  const ventasPorTalle = d?.ventasPorTalle ?? []
+  const maxTalle = useMemo(() => Math.max(0, ...ventasPorTalle.map(t => t.unidades)), [ventasPorTalle])
 
   const hora = new Date().getHours()
   const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches'
@@ -446,6 +469,48 @@ export default function DashboardPage() {
           )}
         </motion.div>
       </div>
+
+      {/* Ventas por talle — decisión de reposición */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: loading ? 0 : 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.45 }}
+        className="bg-white rounded-2xl p-5"
+        style={{ boxShadow: 'var(--card-shadow)' }}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Ventas por talle
+          </h2>
+          <span className="text-xs text-gray-400">
+            {periodo === 'hoy' ? 'hoy' : `últimos ${periodo === 'semana' ? '7d' : periodo === 'mes' ? '30d' : '90d'}`}
+          </span>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">Unidades vendidas por talle — para decidir qué reponer</p>
+        {loading ? (
+          <Skeleton className="h-52 w-full rounded-xl" />
+        ) : ventasPorTalle.length === 0 ? (
+          <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin ventas</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={ventasPorTalle} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+              <XAxis dataKey="talle" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} interval={0} />
+              <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+              <Tooltip
+                cursor={{ fill: 'rgba(16,185,129,0.06)' }}
+                formatter={(v) => [`${v} uds`, 'Vendidas']}
+                labelFormatter={(l) => `Talle ${l}`}
+                contentStyle={{ borderRadius: '12px', border: 'none', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              />
+              <Bar dataKey="unidades" radius={[6, 6, 0, 0]}>
+                {ventasPorTalle.map((e, i) => (
+                  <Cell key={i} fill={e.unidades === maxTalle ? '#10B981' : '#A7F3D0'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </motion.div>
 
       {/* Bottom row: Stock Crítico + Top Productos + Top Deudores */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 pb-4">
