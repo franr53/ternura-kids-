@@ -9,7 +9,7 @@ import {
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Users, Package, ShoppingCart,
-  ArrowUpRight, DollarSign, Receipt, AlertTriangle, Coins,
+  ArrowUpRight, DollarSign, Receipt, AlertTriangle,
 } from 'lucide-react'
 import { formatPrecio, formatNombreConTalle } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
@@ -22,6 +22,23 @@ interface DatosDia { fecha: string; ventas: number; unidades: number; ticket: nu
 interface TopProducto { nombre: string; cantidad: number }
 // Flujo de deuda de un mes: cargo = lo que se llevan fiado, abono = lo que entregan.
 interface FiadoMes { fiado: number; cobrado: number }
+// Vendido vs ganancia de un mes. La ganancia solo cuenta ítems con costo cargado;
+// sinCosto lista los productos vendidos sin precio_costo (para alertar y corregir).
+// formasPago detalla en qué se cobró lo vendido (efectivo, transferencia, etc.).
+interface GananciaMes {
+  vendido: number; vendidoConCosto: number; ganancia: number
+  sinCosto: { id: string; nombre: string }[]
+  formasPago: { metodo: string; monto: number }[]
+}
+
+const METODO_LABELS: Record<string, string> = {
+  efectivo: 'Efectivo', transferencia: 'Transferencia',
+  debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
+}
+const METODO_COLORS: Record<string, string> = {
+  Efectivo: '#10B981', Transferencia: '#93C5FD', Débito: '#FCD34D',
+  Crédito: '#A78BFA', Fiado: '#F9A8D4',
+}
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre'
 type MetricaChart = 'ventas' | 'unidades' | 'ticket'
@@ -73,7 +90,6 @@ const cardVariants = {
 interface DashboardData {
   ventasHoy: number; ventasMes: number; clientesConDeuda: number; sinStock: number
   ventasAyer: number; ticketMesAnterior: number; ticketPromedio: number
-  gananciaMes: number; margenPct: number; coberturaCosto: number
   datosPorDia: DatosDia[]
   topProductos: TopProducto[]; topDeudores: Cliente[]
   stockCritico: { nombre: string; talle: string; stock: number }[]
@@ -86,7 +102,8 @@ export default function DashboardPage() {
   const { mask } = usePrivacyMode()
   const [periodo, setPeriodo] = useState<Periodo>('mes')
   const [metricaChart, setMetricaChart] = useState<MetricaChart>('ventas')
-  const [mesFiado, setMesFiado] = useState(0) // 0 = este mes, 1 = mes pasado, 2 = hace 2 meses
+  const [mesFiado, setMesFiado] = useState(0) // selector propio de Fiado vs Cobrado
+  const [mesGanancia, setMesGanancia] = useState(0) // selector propio de Vendido vs Ganancia
 
   const { data: d, loading } = useCache<DashboardData>(`dash:${periodo}`, async () => {
     const hoy = new Date()
@@ -106,7 +123,6 @@ export default function DashboardPage() {
       { data: kpisData }, { data: ventasDiaData },
       { data: topData }, { data: deudoresTop }, { data: unidadesData },
       { data: ventasMesAntData }, { data: ventasMesAntCount }, { data: stockCriticoData },
-      { data: margenData },
     ] = await Promise.all([
       supabase.rpc('dashboard_kpis', { p_fecha_hoy: inicioHoy, p_inicio_mes: inicioMes, p_inicio_ayer: inicioAyer }),
       supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
@@ -116,8 +132,6 @@ export default function DashboardPage() {
       supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').gte('stock', 0).lte('stock', 3).order('stock', { ascending: true }).limit(5),
-      // Margen del mes: ingreso (subtotal) vs costo (cantidad × precio_costo).
-      supabase.from('venta_items').select('cantidad, subtotal, variante:variantes(precio_costo), venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${inicioMes}T00:00:00`),
     ])
 
     const kpis_result = kpisData as { ventas_hoy: number; ventas_ayer: number; ventas_mes: number; count_ventas_mes: number; clientes_deuda: number; variantes_sin_stock: number } | null
@@ -130,24 +144,6 @@ export default function DashboardPage() {
     const scData = (stockCriticoData || []).map((v: any) => ({
       nombre: v.producto?.nombre_base || 'Sin nombre', talle: v.talle || '', stock: v.stock,
     }))
-
-    // Ganancia del mes: solo sobre ítems con costo cargado (precio_costo > 0);
-    // los sin costo (productos sin cargar) inflarían el margen, así que no cuentan.
-    let ingresoConCosto = 0, costoMes = 0, ingresoTotalMes = 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(margenData || []).forEach((it: any) => {
-      const sub = it.subtotal || 0
-      ingresoTotalMes += sub
-      const costoU = it.variante?.precio_costo || 0
-      if (costoU > 0) {
-        ingresoConCosto += sub
-        costoMes += (it.cantidad || 0) * costoU
-      }
-    })
-    const gananciaMes = ingresoConCosto - costoMes
-    const margenPct = ingresoConCosto > 0 ? (gananciaMes / ingresoConCosto) * 100 : 0
-    // Cobertura: qué % del ingreso del mes tiene costo cargado (confiabilidad).
-    const coberturaCosto = ingresoTotalMes > 0 ? (ingresoConCosto / ingresoTotalMes) * 100 : 0
 
     // Datos por día
     const porDiaVentas: Record<string, number> = {}
@@ -198,7 +194,6 @@ export default function DashboardPage() {
       ventasAyer: kpis_result?.ventas_ayer || 0,
       ticketMesAnterior: countMesAnt > 0 ? totalMesAnt / countMesAnt : 0,
       ticketPromedio: countMes > 0 ? totalMes / countMes : 0,
-      gananciaMes, margenPct, coberturaCosto,
       datosPorDia: diasArray,
       topProductos: topProductosArr,
       topDeudores: (deudoresTop || []) as Cliente[],
@@ -229,6 +224,57 @@ export default function DashboardPage() {
     return { fiado, cobrado }
   })
 
+  // Vendido vs ganancia del mes seleccionado. Ganancia = ingreso − costo, solo
+  // sobre ítems con precio_costo cargado; los sin costo se listan (sinCosto)
+  // para alertar y corregir. formasPago detalla en qué se cobró lo vendido.
+  const { data: gananciaMes, loading: loadingGanancia } = useCache<GananciaMes>(`ganancia:${mesGanancia}`, async () => {
+    const base = new Date()
+    const ini = new Date(base.getFullYear(), base.getMonth() - mesGanancia, 1)
+    const fin = new Date(base.getFullYear(), base.getMonth() - mesGanancia + 1, 0)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const iniStr = `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}-01`
+    const finStr = `${fin.getFullYear()}-${pad(fin.getMonth() + 1)}-${pad(fin.getDate())}`
+    const [{ data }, { data: pagosData }] = await Promise.all([
+      supabase
+        .from('venta_items')
+        .select('cantidad, subtotal, variante:variantes(precio_costo, producto:productos(id, nombre_base)), venta:ventas!inner(estado, creado_en)')
+        .eq('venta.estado', 'completada')
+        .gte('venta.creado_en', `${iniStr}T00:00:00`)
+        .lte('venta.creado_en', `${finStr}T23:59:59`),
+      supabase
+        .from('venta_pagos')
+        .select('metodo, monto, venta:ventas!inner(estado, creado_en)')
+        .eq('venta.estado', 'completada')
+        .gte('venta.creado_en', `${iniStr}T00:00:00`)
+        .lte('venta.creado_en', `${finStr}T23:59:59`),
+    ])
+    let vendido = 0, vendidoConCosto = 0, costo = 0
+    const sinCostoMap = new Map<string, string>()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(data || []).forEach((it: any) => {
+      const sub = it.subtotal || 0
+      vendido += sub
+      const cu = it.variante?.precio_costo || 0
+      if (cu > 0) {
+        vendidoConCosto += sub
+        costo += (it.cantidad || 0) * cu
+      } else {
+        const p = it.variante?.producto
+        if (p?.id) sinCostoMap.set(p.id, p.nombre_base || 'Sin nombre')
+      }
+    })
+    const sinCosto = Array.from(sinCostoMap, ([id, nombre]) => ({ id, nombre }))
+    // Formas de pago: en qué se cobró lo vendido este mes.
+    const porMetodo: Record<string, number> = {}
+    ;(pagosData || []).forEach((p: { metodo: string; monto: number }) => {
+      porMetodo[p.metodo] = (porMetodo[p.metodo] || 0) + p.monto
+    })
+    const formasPago = Object.entries(porMetodo)
+      .map(([metodo, monto]) => ({ metodo: METODO_LABELS[metodo] || metodo, monto }))
+      .sort((a, b) => b.monto - a.monto)
+    return { vendido, vendidoConCosto, ganancia: vendidoConCosto - costo, sinCosto, formasPago }
+  })
+
   const ventasHoy = d?.ventasHoy ?? 0
   const ventasMes = d?.ventasMes ?? 0
   const clientesConDeuda = d?.clientesConDeuda ?? 0
@@ -236,9 +282,6 @@ export default function DashboardPage() {
   const ventasAyer = d?.ventasAyer ?? 0
   const ticketMesAnterior = d?.ticketMesAnterior ?? 0
   const ticketPromedio = d?.ticketPromedio ?? 0
-  const gananciaMes = d?.gananciaMes ?? 0
-  const margenPct = d?.margenPct ?? 0
-  const coberturaCosto = d?.coberturaCosto ?? 0
   const datosPorDia = d?.datosPorDia ?? []
   const topProductos = d?.topProductos ?? []
   const topDeudores = d?.topDeudores ?? []
@@ -265,6 +308,16 @@ export default function DashboardPage() {
     return { off, label: dd.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '') }
   })
 
+  // Vendido vs ganancia del mes elegido.
+  const vendidoVal = gananciaMes?.vendido ?? 0
+  const gananciaVal = gananciaMes?.ganancia ?? 0
+  const vendidoConCostoVal = gananciaMes?.vendidoConCosto ?? 0
+  const margenPct = vendidoConCostoVal > 0 ? (gananciaVal / vendidoConCostoVal) * 100 : 0
+  const maxVenta = Math.max(vendidoVal, gananciaVal, 1)
+  const sinCosto = gananciaMes?.sinCosto ?? []
+  const formasPago = gananciaMes?.formasPago ?? []
+  const totalFormasPago = formasPago.reduce((s, f) => s + f.monto, 0)
+
   const kpis = [
     {
       label: 'Ventas Hoy',
@@ -275,18 +328,6 @@ export default function DashboardPage() {
       badge: ventasAyer > 0 ? <ComparativoBadge actual={ventasHoy} anterior={ventasAyer} /> : null,
       badgeLabel: 'vs ayer',
       href: null as string | null,
-    },
-    {
-      label: 'Ganancia (mes)',
-      value: mask(formatPrecio(gananciaMes)),
-      icon: Coins,
-      iconBg: 'bg-teal-50',
-      iconColor: 'text-teal-500',
-      badge: margenPct > 0 ? (
-        <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-teal-600">{margenPct.toFixed(0)}%</span>
-      ) : null,
-      badgeLabel: coberturaCosto < 90 ? `margen · ${coberturaCosto.toFixed(0)}% con costo` : 'de margen',
-      href: null,
     },
     {
       label: 'Ticket Promedio',
@@ -342,7 +383,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((kpi, i) => {
           const Icon = kpi.icon
           return (
@@ -385,16 +426,13 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* Chart + Métodos de pago */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-        {/* Chart principal */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: loading ? 0 : 1 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="lg:col-span-2 bg-white rounded-2xl p-5"
-          style={{ boxShadow: 'var(--card-shadow)' }}
+      {/* Gráfico de ventas — ancho completo */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: loading ? 0 : 1 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+        className="bg-white rounded-2xl p-5"
+        style={{ boxShadow: 'var(--card-shadow)' }}
         >
           <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
             <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1">
@@ -468,6 +506,128 @@ export default function DashboardPage() {
                 />
               </AreaChart>
             </ResponsiveContainer>
+          )}
+        </motion.div>
+
+      {/* Comparaciones del mes: Vendido vs Ganancia + Fiado vs Cobrado */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+        {/* Vendido vs Ganancia — con alerta de prendas sin costo cargado */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: loading ? 0 : 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.35 }}
+          className="bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            Vendido vs Ganancia
+          </h2>
+          <p className="text-xs text-gray-400 mb-4">Lo que facturaste vs lo que te quedó</p>
+
+          <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1 mb-6">
+            {mesesOpts.map(m => (
+              <button
+                key={m.off}
+                onClick={() => setMesGanancia(m.off)}
+                className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all capitalize"
+                style={{
+                  background: mesGanancia === m.off ? 'white' : 'transparent',
+                  color: mesGanancia === m.off ? '#10B981' : '#9ca3af',
+                  boxShadow: mesGanancia === m.off ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {loadingGanancia && !gananciaMes ? (
+            <div className="space-y-4">
+              {[1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Vendido — barra segmentada por forma de pago */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#93C5FD' }} />
+                    <span className="text-xs text-gray-600 font-medium">Vendido</span>
+                  </div>
+                  <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(vendidoVal))}</span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-100 overflow-hidden flex">
+                  {totalFormasPago > 0 ? formasPago.map(f => (
+                    <div
+                      key={f.metodo}
+                      className="h-full transition-all duration-700"
+                      style={{ width: `${(f.monto / totalFormasPago) * 100}%`, backgroundColor: METODO_COLORS[f.metodo] || '#9ca3af' }}
+                      title={`${f.metodo}: ${formatPrecio(f.monto)}`}
+                    />
+                  )) : <div className="h-full w-full" style={{ backgroundColor: '#93C5FD' }} />}
+                </div>
+                {formasPago.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+                    {formasPago.map(f => (
+                      <div key={f.metodo} className="flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: METODO_COLORS[f.metodo] || '#9ca3af' }} />
+                        <span className="text-[11px] text-gray-500">{f.metodo}</span>
+                        <span className="text-[11px] font-semibold text-gray-600">{mask(formatPrecio(f.monto))}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Ganancia */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#10B981' }} />
+                    <span className="text-xs text-gray-600 font-medium">Ganancia</span>
+                  </div>
+                  <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(gananciaVal))}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(gananciaVal / maxVenta) * 100}%`, backgroundColor: '#10B981' }} />
+                </div>
+              </div>
+              <div className="pt-3 border-t border-gray-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Margen</span>
+                  <span className="text-sm font-bold text-emerald-600">{margenPct.toFixed(0)}%</span>
+                </div>
+              </div>
+
+              {sinCosto.length > 0 && (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-amber-700">
+                        {sinCosto.length} {sinCosto.length === 1 ? 'prenda vendida sin costo' : 'prendas vendidas sin costo'}
+                      </p>
+                      <p className="text-[11px] text-amber-600 mb-2">No entran en la ganancia. Cargá el costo para que el margen sea exacto.</p>
+                      <div className="flex flex-col gap-1">
+                        {sinCosto.slice(0, 3).map(p => (
+                          <Link
+                            key={p.id}
+                            href={`/inventario/${p.id}`}
+                            className="text-xs text-amber-700 hover:text-amber-900 font-medium underline decoration-amber-300 truncate"
+                          >
+                            {p.nombre}
+                          </Link>
+                        ))}
+                        {sinCosto.length > 3 && (
+                          <span className="text-[11px] text-amber-500">y {sinCosto.length - 3} más…</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </motion.div>
 
