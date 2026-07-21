@@ -119,7 +119,10 @@ async function batchInsert<T extends Record<string, unknown>>(
   const errores: string[] = []
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize)
-    const { error } = await supabase.from(tabla).insert(batch)
+    // `tabla` es un string genérico, así que supabase-js no puede inferir el
+    // tipo de la fila y tipa el insert como `never`. El cast es solo de tipos:
+    // no cambia nada en runtime. Sin esto el build de producción no compila.
+    const { error } = await supabase.from(tabla).insert(batch as never)
     if (error) errores.push(`Batch ${i / batchSize + 1}: ${error.message}`)
   }
   return errores

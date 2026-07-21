@@ -754,6 +754,9 @@ export default function NuevoProductoPage() {
     type ProductoCargadoLocal = { nombre: string; marca: string; talles: { talle: string; cantidad: number; codigoBarras?: string; precioVenta: number }[] }
     const cargados: ProductoCargadoLocal[] = []
     const fallidos: ItemLote[] = []
+    // Detalle de lo que realmente entró, para dejar el ingreso registrado al
+    // final del lote. Se agrupa por marca porque un lote puede tener varias.
+    const entradas: { marcaId: string | null; varianteId: string; cantidad: number; costo: number }[] = []
 
     for (let i = 0; i < loteActual.length; i++) {
       const item = loteActual[i]
@@ -777,14 +780,20 @@ export default function NuevoProductoPage() {
           const talleCosto = parseFloat(sel.precioCosto) || null
           const talleVenta = parseFloat(sel.precioVenta) || null
           if (item.esProductoNuevo || sel.esNueva || !sel.varianteId) {
-            const { error } = await supabase.from('variantes').insert({
+            const { data: nuevaVar, error } = await supabase.from('variantes').insert({
               producto_id: productoId!, talle, codigo_barras: sel.barcode || null, stock: sel.cantidad, stock_minimo: 2,
               precio_costo: talleCosto, precio_venta: talleVenta,
-            })
+            }).select('id').single()
             if (error) throw new Error(error.message)
+            if (nuevaVar && sel.cantidad > 0) {
+              entradas.push({ marcaId: item.marcaId, varianteId: (nuevaVar as { id: string }).id, cantidad: sel.cantidad, costo: talleCosto || 0 })
+            }
           } else {
             const { error } = await supabase.rpc('incrementar_stock', { p_variante_id: sel.varianteId, p_cantidad: sel.cantidad })
             if (error) throw new Error(error.message)
+            if (sel.cantidad > 0) {
+              entradas.push({ marcaId: item.marcaId, varianteId: sel.varianteId, cantidad: sel.cantidad, costo: talleCosto || 0 })
+            }
             const updateData: Record<string, unknown> = {}
             if (talleCosto != null) updateData.precio_costo = talleCosto
             if (talleVenta != null) updateData.precio_venta = talleVenta
@@ -808,6 +817,42 @@ export default function NuevoProductoPage() {
       } catch (e: unknown) {
         toast.error(`Error en "${item.nombreProducto}": ${e instanceof Error ? e.message : String(e)}`)
         fallidos.push(item)
+      }
+    }
+
+    // ── Registrar la entrada de mercadería ────────────────────────────────
+    // Deja constancia de QUÉ entró (producto, talle, cantidad, costo) agrupado
+    // por marca. NO toca la deuda del proveedor: eso se sigue cargando a mano
+    // desde su ficha, como hasta ahora (por eso afecta_deuda = false). Sin esto
+    // el detalle de cada compra se perdía y `precio_costo` se pisaba sin dejar
+    // historial. Si falla, no corta el alta: el stock ya quedó bien guardado.
+    if (entradas.length > 0) {
+      const porMarca = new Map<string, typeof entradas>()
+      for (const e of entradas) {
+        const k = e.marcaId ?? 'sin-marca'
+        porMarca.set(k, [...(porMarca.get(k) ?? []), e])
+      }
+      for (const [marcaKey, items] of porMarca) {
+        try {
+          const total = items.reduce((s, x) => s + x.cantidad * x.costo, 0)
+          const { data: ing, error: errIng } = await supabase.from('ingresos_mercaderia').insert({
+            proveedor_id: marcaKey === 'sin-marca' ? null : marcaKey,
+            total,
+            origen: 'inventario',
+            afecta_deuda: false,
+            notas: `Alta de stock — ${items.length} ${items.length === 1 ? 'variante' : 'variantes'}`,
+          }).select('id').single()
+          if (errIng || !ing) continue
+          await supabase.from('ingreso_items').insert(
+            items.map(x => ({
+              ingreso_id: (ing as { id: string }).id,
+              variante_id: x.varianteId,
+              cantidad: x.cantidad,
+              precio_costo: x.costo,
+              subtotal: x.cantidad * x.costo,
+            }))
+          )
+        } catch { /* el registro es complementario: nunca frena el alta */ }
       }
     }
 

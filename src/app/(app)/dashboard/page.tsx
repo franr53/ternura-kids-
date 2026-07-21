@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import {
   TrendingUp, TrendingDown, Users, Package, ShoppingCart,
@@ -19,20 +19,18 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 
 interface DatosDia { fecha: string; ventas: number; unidades: number; ticket: number; countVentas: number }
-interface PagoMetodo { metodo: string; total: number }
 interface TopProducto { nombre: string; cantidad: number }
-
-const METODO_LABELS: Record<string, string> = {
-  efectivo: 'Efectivo', transferencia: 'Transferencia',
-  debito: 'Débito', credito: 'Crédito', fiado: 'Fiado',
-}
-const METODO_COLORS: Record<string, string> = {
-  Efectivo: '#10B981', Transferencia: '#93C5FD', Débito: '#FCD34D',
-  Crédito: '#A78BFA', Fiado: '#F9A8D4',
-}
 
 type Periodo = 'hoy' | 'semana' | 'mes' | 'trimestre'
 type MetricaChart = 'ventas' | 'unidades' | 'ticket'
+
+// Solo para el gráfico: U / Unico / Único son el mismo talle → "Único".
+// No modifica los datos (etiquetas ya impresas quedan como están).
+function normalizarTalleChart(talle: string | null | undefined): string | null {
+  if (!talle) return null
+  const t = talle.trim()
+  return ['u', 'unico', 'único'].includes(t.toLowerCase()) ? 'Único' : t
+}
 
 const METRICA_CONFIG: Record<MetricaChart, { label: string; color: string; dataKey: string; formatter: (v: number) => string }> = {
   ventas: { label: 'Ventas ($)', color: '#10B981', dataKey: 'ventas', formatter: v => formatPrecio(v) },
@@ -73,9 +71,10 @@ const cardVariants = {
 interface DashboardData {
   ventasHoy: number; ventasMes: number; clientesConDeuda: number; sinStock: number
   ventasAyer: number; ticketMesAnterior: number; ticketPromedio: number
-  datosPorDia: DatosDia[]; ventasPorMetodo: PagoMetodo[]
+  datosPorDia: DatosDia[]
   topProductos: TopProducto[]; topDeudores: Cliente[]
   stockCritico: { nombre: string; talle: string; stock: number }[]
+  ventasPorTalle: { talle: string; unidades: number }[]
 }
 
 export default function DashboardPage() {
@@ -100,19 +99,18 @@ export default function DashboardPage() {
     const desdeStr = desde.toISOString().split('T')[0]
 
     const [
-      { data: kpisData }, { data: ventasDiaData }, { data: pagosData },
+      { data: kpisData }, { data: ventasDiaData },
       { data: topData }, { data: deudoresTop }, { data: unidadesData },
       { data: ventasMesAntData }, { data: ventasMesAntCount }, { data: stockCriticoData },
     ] = await Promise.all([
       supabase.rpc('dashboard_kpis', { p_fecha_hoy: inicioHoy, p_inicio_mes: inicioMes, p_inicio_ayer: inicioAyer }),
       supabase.from('ventas').select('creado_en, total').eq('estado', 'completada').gte('creado_en', `${desdeStr}T00:00:00`).order('creado_en'),
-      supabase.from('venta_pagos').select('metodo, monto, venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('venta_items').select('cantidad, variante:variantes(producto:productos(nombre_base)), venta:ventas!inner(creado_en)').gte('venta.creado_en', `${inicioMes}T00:00:00`),
       supabase.from('clientes').select('id, nombre, deuda_total').gt('deuda_total', 0).order('deuda_total', { ascending: false }).limit(5),
-      supabase.from('venta_items').select('cantidad, venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
+      supabase.from('venta_items').select('cantidad, variante:variantes(talle), venta:ventas!inner(estado, creado_en)').eq('venta.estado', 'completada').gte('venta.creado_en', `${desdeStr}T00:00:00`),
       supabase.from('ventas').select('total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
       supabase.from('ventas').select('id, total').eq('estado', 'completada').gte('creado_en', `${inicioMesAnterior}T00:00:00`).lte('creado_en', `${finMesAnteriorStr}T23:59:59`),
-      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').lte('stock', 3).order('stock', { ascending: true }).limit(5),
+      supabase.from('variantes').select('id, talle, stock, producto:productos(nombre_base)').gte('stock', 0).lte('stock', 3).order('stock', { ascending: true }).limit(5),
     ])
 
     const kpis_result = kpisData as { ventas_hoy: number; ventas_ayer: number; ventas_mes: number; count_ventas_mes: number; clientes_deuda: number; variantes_sin_stock: number } | null
@@ -135,11 +133,19 @@ export default function DashboardPage() {
       porDiaCount[fecha] = (porDiaCount[fecha] || 0) + 1
     })
     const porDiaUnidades: Record<string, number> = {}
+    const porTalle: Record<string, number> = {}
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(unidadesData || []).forEach((item: any) => {
       const fecha = item.venta?.creado_en?.split('T')[0]
       if (fecha) porDiaUnidades[fecha] = (porDiaUnidades[fecha] || 0) + item.cantidad
+      const talle = normalizarTalleChart(item.variante?.talle)
+      if (talle) porTalle[talle] = (porTalle[talle] || 0) + item.cantidad
     })
+    // Top talles por volumen (barras horizontales legibles, de mayor a menor).
+    const ventasPorTalleArr = Object.entries(porTalle)
+      .map(([talle, unidades]) => ({ talle, unidades }))
+      .sort((a, b) => b.unidades - a.unidades)
+      .slice(0, 14)
     const diasArray: DatosDia[] = []
     for (let i = diasAtras - 1; i >= 0; i--) {
       const dd = new Date(hoy); dd.setDate(dd.getDate() - i)
@@ -148,13 +154,6 @@ export default function DashboardPage() {
       const count = porDiaCount[key] || 0
       diasArray.push({ fecha: key.slice(5), ventas, unidades: porDiaUnidades[key] || 0, ticket: count > 0 ? Math.round(ventas / count) : 0, countVentas: count })
     }
-
-    // Pagos por método
-    const porMetodo: Record<string, number> = {}
-    pagosData?.forEach((p: { metodo: string; monto: number }) => {
-      porMetodo[p.metodo] = (porMetodo[p.metodo] || 0) + p.monto
-    })
-    const ventasPorMetodoArr = Object.entries(porMetodo).map(([metodo, total]) => ({ metodo: METODO_LABELS[metodo] || metodo, total })).sort((a, b) => b.total - a.total)
 
     // Top productos
     const porProd: Record<string, number> = {}
@@ -175,12 +174,13 @@ export default function DashboardPage() {
       ticketMesAnterior: countMesAnt > 0 ? totalMesAnt / countMesAnt : 0,
       ticketPromedio: countMes > 0 ? totalMes / countMes : 0,
       datosPorDia: diasArray,
-      ventasPorMetodo: ventasPorMetodoArr,
       topProductos: topProductosArr,
       topDeudores: (deudoresTop || []) as Cliente[],
       stockCritico: scData,
+      ventasPorTalle: ventasPorTalleArr,
     }
   })
+
 
   const ventasHoy = d?.ventasHoy ?? 0
   const ventasMes = d?.ventasMes ?? 0
@@ -190,10 +190,11 @@ export default function DashboardPage() {
   const ticketMesAnterior = d?.ticketMesAnterior ?? 0
   const ticketPromedio = d?.ticketPromedio ?? 0
   const datosPorDia = d?.datosPorDia ?? []
-  const ventasPorMetodo = d?.ventasPorMetodo ?? []
   const topProductos = d?.topProductos ?? []
   const topDeudores = d?.topDeudores ?? []
   const stockCritico = d?.stockCritico ?? []
+  const ventasPorTalle = d?.ventasPorTalle ?? []
+  const maxTalle = useMemo(() => Math.max(0, ...ventasPorTalle.map(t => t.unidades)), [ventasPorTalle])
 
   const hora = new Date().getHours()
   const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches'
@@ -202,8 +203,8 @@ export default function DashboardPage() {
   // Total unidades en período
   const totalUnidades = useMemo(() => datosPorDia.reduce((s, d) => s + d.unidades, 0), [datosPorDia])
 
-  const totalMetodos = ventasPorMetodo.reduce((s, m) => s + m.total, 0)
   const mc = METRICA_CONFIG[metricaChart]
+
 
   const kpis = [
     {
@@ -313,16 +314,13 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* Chart + Métodos de pago */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
-        {/* Chart principal */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: loading ? 0 : 1 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="lg:col-span-2 bg-white rounded-2xl p-5"
-          style={{ boxShadow: 'var(--card-shadow)' }}
+      {/* Gráfico de ventas — ancho completo */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: loading ? 0 : 1 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+        className="bg-white rounded-2xl p-5"
+        style={{ boxShadow: 'var(--card-shadow)' }}
         >
           <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
             <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1">
@@ -399,53 +397,50 @@ export default function DashboardPage() {
           )}
         </motion.div>
 
-        {/* Métodos de pago */}
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: loading ? 0 : 1, x: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-          className="bg-white rounded-2xl p-5"
-          style={{ boxShadow: 'var(--card-shadow)' }}
-        >
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
-            Cobros del mes
+
+      {/* Ventas por talle — decisión de reposición */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: loading ? 0 : 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.45 }}
+        className="bg-white rounded-2xl p-5"
+        style={{ boxShadow: 'var(--card-shadow)' }}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Ventas por talle
           </h2>
-          {loading ? (
-            <div className="space-y-4">
-              {[1,2,3].map(i => <Skeleton key={i} className="h-8 w-full" />)}
-            </div>
-          ) : ventasPorMetodo.length === 0 ? (
-            <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin datos</div>
-          ) : (
-            <div className="space-y-4">
-              {ventasPorMetodo.map(({ metodo, total }) => {
-                const pct = totalMetodos > 0 ? (total / totalMetodos) * 100 : 0
-                const color = METODO_COLORS[metodo] || '#9ca3af'
-                return (
-                  <div key={metodo}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-                        <span className="text-xs text-gray-600 font-medium">{metodo}</span>
-                      </div>
-                      <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(total))}</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
-                    </div>
-                  </div>
-                )
-              })}
-              <div className="pt-2 border-t border-gray-50">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">Total</span>
-                  <span className="text-sm font-bold text-gray-700">{mask(formatPrecio(totalMetodos))}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </motion.div>
-      </div>
+          <span className="text-xs text-gray-400">
+            {periodo === 'hoy' ? 'hoy' : `últimos ${periodo === 'semana' ? '7d' : periodo === 'mes' ? '30d' : '90d'}`}
+          </span>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">Talles más vendidos — para decidir qué reponer</p>
+        {loading ? (
+          <Skeleton className="h-64 w-full rounded-xl" />
+        ) : ventasPorTalle.length === 0 ? (
+          <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin ventas</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(200, ventasPorTalle.length * 30)}>
+            <BarChart data={ventasPorTalle} layout="vertical" margin={{ top: 0, right: 44, left: 8, bottom: 0 }}>
+              <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="talle" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={70} interval={0} />
+              <Tooltip
+                cursor={{ fill: 'rgba(16,185,129,0.06)' }}
+                formatter={(v) => [`${v} uds`, 'Vendidas']}
+                labelFormatter={(l) => `Talle ${l}`}
+                contentStyle={{ borderRadius: '12px', border: 'none', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              />
+              <Bar dataKey="unidades" radius={[0, 6, 6, 0]} barSize={16}>
+                {ventasPorTalle.map((e, i) => (
+                  <Cell key={i} fill={e.unidades === maxTalle ? '#10B981' : '#A7F3D0'} />
+                ))}
+                <LabelList dataKey="unidades" position="right" style={{ fontSize: 10, fill: '#6b7280', fontWeight: 600 }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </motion.div>
+
 
       {/* Bottom row: Stock Crítico + Top Productos + Top Deudores */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 pb-4">

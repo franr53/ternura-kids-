@@ -11,8 +11,9 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import {
   Plus, X, Settings2, Trash2, Banknote, Smartphone,
-  CreditCard, TrendingUp, TrendingDown, ChevronRight, ChevronDown,
+  CreditCard, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Truck,
 } from 'lucide-react'
+import Link from 'next/link'
 import { formatPrecio, cn, calcularRango, Periodo } from '@/lib/utils'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -33,7 +34,7 @@ function normalizarMetodo(m: string): Gasto['metodo_pago'] {
 }
 
 const periodoLabel: Record<Periodo, string> = {
-  hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', fecha: 'Fecha'
+  hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', mesDe: 'Otro mes', fecha: 'Día'
 }
 
 type PeriodoCorto = 'hoy' | 'semana' | 'mes'
@@ -70,6 +71,11 @@ export default function GastosPage() {
   // Filtros del listado
   const [periodo, setPeriodo] = useState<Periodo>('mes')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
+  // 'YYYY-MM' para el filtro "Otro mes" (arranca en el mes pasado, que es el caso de uso)
+  const [mesCustom, setMesCustom] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
 
   // Filtros independientes de gráficos
   const [periodoBar, setPeriodoBar] = useState<PeriodoCorto>('mes')
@@ -157,14 +163,18 @@ export default function GastosPage() {
   }, [categorias])
 
   // Cargar listado principal
-  const gastosKey = periodo === 'fecha' ? `gastos:${periodo}:${fechaCustom}` : `gastos:${periodo}`
+  // el rango depende de fechaCustom (día) o mesCustom (mes elegido) según el período
+  const valorCustom = periodo === 'mesDe' ? mesCustom : fechaCustom
+  const gastosKey = periodo === 'fecha' || periodo === 'mesDe'
+    ? `gastos:${periodo}:${valorCustom}`
+    : `gastos:${periodo}`
   const { data: gastosCache, loading: loadingGastos, refresh: cargar } = useCache<{ gastos: Gasto[]; totalVentas: number }>(gastosKey, async () => {
-    const { desde, hasta } = calcularRango(periodo, fechaCustom)
+    const { desde, hasta } = calcularRango(periodo, valorCustom)
 
-    const [{ data: gastosData }, { data: ventasData }] = await Promise.all([
+    const [{ data: gastosData }, { data: ventasData }, { data: pagosSueltos }] = await Promise.all([
       supabase
         .from('gastos')
-        .select('*, categoria:categorias_gastos(*)')
+        .select('*, categoria:categorias_gastos(*), proveedor:marcas(id, nombre)')
         .gte('fecha', desde.toISOString().split('T')[0])
         .lte('fecha', hasta.toISOString().split('T')[0])
         .order('creado_en', { ascending: false }),
@@ -174,10 +184,36 @@ export default function GastosPage() {
         .eq('estado', 'completada')
         .gte('creado_en', desde.toISOString())
         .lte('creado_en', hasta.toISOString()),
+      // Pagos a proveedores SIN gasto asociado: son egresos reales cargados
+      // desde la ficha del proveedor (o transferidos por un cliente). Se
+      // muestran acá para que la pestaña refleje todo lo que salió, aunque no
+      // exista una fila en `gastos`. Solo lectura: no se crea ningún registro.
+      supabase
+        .from('pagos_proveedores')
+        .select('id, monto, metodo, notas, creado_en, proveedor:marcas(id, nombre)')
+        .is('gasto_id', null)
+        .gte('creado_en', desde.toISOString())
+        .lte('creado_en', hasta.toISOString()),
     ])
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sinteticos: Gasto[] = ((pagosSueltos as any[]) || []).map(p => ({
+      id: `pp:${p.id}`,
+      fecha: p.creado_en.split('T')[0],
+      concepto: p.proveedor?.nombre ? `Pago a ${p.proveedor.nombre}` : 'Pago a proveedor',
+      monto: Number(p.monto),
+      metodo_pago: (p.metodo === 'efectivo' || p.metodo === 'transferencia' ? p.metodo : 'transferencia') as Gasto['metodo_pago'],
+      notas: p.notas || undefined,
+      creado_en: p.creado_en,
+      proveedor: p.proveedor || undefined,
+      esPagoProveedor: true,
+    })) as Gasto[]
+
+    const todos = [...(((gastosData as unknown as Gasto[]) || [])), ...sinteticos]
+      .sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''))
+
     return {
-      gastos: (gastosData as unknown as Gasto[]) || [],
+      gastos: todos,
       totalVentas: (ventasData || []).reduce((s: number, v: { total: number }) => s + v.total, 0),
     }
   })
@@ -250,9 +286,15 @@ export default function GastosPage() {
         notas: concepto.trim(),
       })
 
-      // Reducir deuda del proveedor (ajuste atómico vía RPC)
-      const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: proveedorGastoId, p_delta: -montoNum })
-      setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda ?? Math.max(0, (m.deuda_total || 0) - montoNum) } : m))
+      // La deuda solo baja si realmente hay deuda pendiente con esa marca.
+      // Antes se restaba siempre: una compra al contado borraba el saldo de un
+      // remito anterior (y el GREATEST(0,…) del RPC lo tapaba en silencio).
+      const deudaActual = marcas.find(m => m.id === proveedorGastoId)?.deuda_total || 0
+      const aplica = Math.min(montoNum, deudaActual)
+      if (aplica > 0) {
+        const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: proveedorGastoId, p_delta: -aplica })
+        setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda ?? Math.max(0, deudaActual - aplica) } : m))
+      }
     }
 
     setGastos(prev => [data as unknown as Gasto, ...prev])
@@ -363,6 +405,28 @@ export default function GastosPage() {
 
   const PIE_COLORS = ['#4EC3BD', '#60a5fa', '#8b5cf6', '#fb923c']
 
+  // Gastos por proveedor (a quién le estoy pagando) — del período elegido
+  const proveedorData = useMemo(() => {
+    const m = new Map<string, { id: string; nombre: string; monto: number; ops: number }>()
+    let sinProveedor = 0
+    for (const g of gastos) {
+      if (g.proveedor?.id) {
+        const p = m.get(g.proveedor.id) ?? { id: g.proveedor.id, nombre: g.proveedor.nombre, monto: 0, ops: 0 }
+        p.monto += g.monto; p.ops += 1
+        m.set(g.proveedor.id, p)
+      } else {
+        sinProveedor += g.monto
+      }
+    }
+    const lista = Array.from(m.values()).sort((a, b) => b.monto - a.monto)
+    return {
+      lista,
+      sinProveedor,
+      total: lista.reduce((s, p) => s + p.monto, 0),
+      max: Math.max(...lista.map(p => p.monto), 1),
+    }
+  }, [gastos])
+
   // Desglose por categoría con agrupación por padre
   const desgloseData = useMemo(() => {
     const totalesPorCat = new Map<string, number>()
@@ -408,7 +472,7 @@ export default function GastosPage() {
         <h1 className="text-lg font-bold text-gray-800">Gastos</h1>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
-            {(['hoy', 'semana', 'mes', 'fecha'] as Periodo[]).map(p => (
+            {(['hoy', 'semana', 'mes', 'mesDe', 'fecha'] as Periodo[]).map(p => (
               <button
                 key={p}
                 onClick={() => setPeriodo(p)}
@@ -420,6 +484,10 @@ export default function GastosPage() {
                 {periodoLabel[p]}
               </button>
             ))}
+            {periodo === 'mesDe' && (
+              <Input type="month" value={mesCustom} onChange={e => setMesCustom(e.target.value)}
+                className="h-7 text-xs w-36" />
+            )}
             {periodo === 'fecha' && (
               <Input type="date" value={fechaCustom} onChange={e => setFechaCustom(e.target.value)}
                 className="h-7 text-xs w-36" />
@@ -655,6 +723,48 @@ export default function GastosPage() {
             </div>
           </div>
 
+          {/* Gastos por proveedor — a quién le pagué en el período */}
+          {proveedorData.lista.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-bold text-gray-700">Por proveedor</p>
+                <span className="text-xs text-gray-400">{formatPrecio(proveedorData.total)}</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-4">A quién le pagaste en el período</p>
+              <div className="space-y-2.5">
+                {proveedorData.lista.map(p => (
+                  <Link key={p.id} href={`/proveedores/${p.id}`} className="block group">
+                    <div className="flex items-center justify-between mb-1 gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Truck size={12} className="text-gray-300 shrink-0" />
+                        <span className="text-xs font-medium text-gray-600 group-hover:text-gray-900 truncate">{p.nombre}</span>
+                        <span className="text-[10px] text-gray-300 shrink-0">
+                          {p.ops} {p.ops === 1 ? 'pago' : 'pagos'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] text-gray-300">
+                          {proveedorData.total > 0 ? `${((p.monto / proveedorData.total) * 100).toFixed(0)}%` : ''}
+                        </span>
+                        <span className="text-xs font-bold text-gray-700">{formatPrecio(p.monto)}</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full rounded-full bg-teal-400 transition-all duration-700"
+                        style={{ width: `${(p.monto / proveedorData.max) * 100}%` }} />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+              {proveedorData.sinProveedor > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Gastos sin proveedor asignado</span>
+                  <span className="text-xs font-semibold text-gray-500">{formatPrecio(proveedorData.sinProveedor)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Desglose por categoría */}
           {(desgloseData.gruposConTotal.length > 0 || desgloseData.sinCategoria > 0) && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -740,6 +850,21 @@ export default function GastosPage() {
                               {gasto.categoria.nombre}
                             </span>
                           )}
+                          {gasto.esPagoProveedor && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-100"
+                              title="Cargado desde la ficha del proveedor — no figura como gasto">
+                              desde proveedor
+                            </span>
+                          )}
+                          {gasto.proveedor && (
+                            <Link
+                              href={`/proveedores/${gasto.proveedor.id}`}
+                              className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors inline-flex items-center gap-1"
+                              title="Ver proveedor"
+                            >
+                              <Truck size={10} /> {gasto.proveedor.nombre}
+                            </Link>
+                          )}
                           {gasto.notas && (
                             <span className="text-xs text-gray-400 truncate max-w-[120px]">{gasto.notas}</span>
                           )}
@@ -751,7 +876,7 @@ export default function GastosPage() {
                         </span>
                       )}
                       <p className="font-bold text-gray-800 shrink-0 w-24 text-right">{formatPrecio(gasto.monto)}</p>
-                      {esAdmin && (
+                      {esAdmin && !gasto.esPagoProveedor && (
                         <button
                           onClick={() => eliminarGasto(gasto.id)}
                           className="text-gray-200 hover:text-red-400 transition-colors shrink-0"
