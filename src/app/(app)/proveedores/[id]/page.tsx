@@ -153,18 +153,52 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
     if (!proveedor) return
 
     setRegistrandoPago(true)
+
+    // Un pago a un proveedor ES un gasto: se crea también acá para que aparezca
+    // en la pestaña Gastos igual que si se hubiera cargado desde allá. Antes
+    // este camino solo escribía en pagos_proveedores y el egreso quedaba
+    // invisible en el análisis de gastos.
+    const { data: catInsumos } = await supabase
+      .from('categorias_gastos').select('id').ilike('nombre', 'Insumos').limit(1).maybeSingle()
+
+    const metodoGasto = metodoPago === 'efectivo' || metodoPago === 'transferencia' ? metodoPago : 'transferencia'
+    const { data: gasto } = await supabase.from('gastos').insert({
+      concepto: `Pago a ${proveedor.nombre}`,
+      monto,
+      categoria_id: (catInsumos as { id: string } | null)?.id ?? null,
+      metodo_pago: metodoGasto,
+      fuente_pago: 'caja_hoy',
+      proveedor_id: id,
+      fecha: new Date().toISOString().split('T')[0],
+    }).select('id').single()
+
     const { data: nuevoPago, error } = await supabase.from('pagos_proveedores').insert({
       proveedor_id: id,
       monto,
       metodo: metodoPago,
+      gasto_id: (gasto as { id: string } | null)?.id ?? null,
     }).select().single()
-    if (error) { toast.error('Error al registrar pago: ' + error.message); setRegistrandoPago(false); return }
+    if (error) {
+      // si falló el pago, no dejar el gasto huérfano
+      if (gasto) await supabase.from('gastos').delete().eq('id', (gasto as { id: string }).id)
+      toast.error('Error al registrar pago: ' + error.message); setRegistrandoPago(false); return
+    }
 
-    const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: id, p_delta: -monto })
-    setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda ?? Math.max(0, (prev.deuda_total || 0) - monto) } : null)
+    // La deuda solo baja si realmente hay deuda: pagar una compra al contado no
+    // debe borrar el saldo de otro remito pendiente.
+    const deudaActual = proveedor.deuda_total || 0
+    const aplicaADeuda = Math.min(monto, deudaActual)
+    if (aplicaADeuda > 0) {
+      const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: id, p_delta: -aplicaADeuda })
+      setProveedor(prev => prev ? { ...prev, deuda_total: nuevaDeuda ?? Math.max(0, deudaActual - aplicaADeuda) } : null)
+    }
     setPagos(prev => [nuevoPago as PagoProveedor, ...prev])
     setMontoPago('')
-    toast.success(`Pago de ${formatPrecio(monto)} registrado`)
+    toast.success(
+      aplicaADeuda > 0
+        ? `Pago de ${formatPrecio(monto)} registrado${monto > aplicaADeuda ? ` (${formatPrecio(aplicaADeuda)} a cuenta de la deuda)` : ''}`
+        : `Pago de ${formatPrecio(monto)} registrado como compra al contado`
+    )
     setRegistrandoPago(false)
   }
 

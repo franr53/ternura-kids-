@@ -171,7 +171,7 @@ export default function GastosPage() {
   const { data: gastosCache, loading: loadingGastos, refresh: cargar } = useCache<{ gastos: Gasto[]; totalVentas: number }>(gastosKey, async () => {
     const { desde, hasta } = calcularRango(periodo, valorCustom)
 
-    const [{ data: gastosData }, { data: ventasData }] = await Promise.all([
+    const [{ data: gastosData }, { data: ventasData }, { data: pagosSueltos }] = await Promise.all([
       supabase
         .from('gastos')
         .select('*, categoria:categorias_gastos(*), proveedor:marcas(id, nombre)')
@@ -184,10 +184,36 @@ export default function GastosPage() {
         .eq('estado', 'completada')
         .gte('creado_en', desde.toISOString())
         .lte('creado_en', hasta.toISOString()),
+      // Pagos a proveedores SIN gasto asociado: son egresos reales cargados
+      // desde la ficha del proveedor (o transferidos por un cliente). Se
+      // muestran acá para que la pestaña refleje todo lo que salió, aunque no
+      // exista una fila en `gastos`. Solo lectura: no se crea ningún registro.
+      supabase
+        .from('pagos_proveedores')
+        .select('id, monto, metodo, notas, creado_en, proveedor:marcas(id, nombre)')
+        .is('gasto_id', null)
+        .gte('creado_en', desde.toISOString())
+        .lte('creado_en', hasta.toISOString()),
     ])
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sinteticos: Gasto[] = ((pagosSueltos as any[]) || []).map(p => ({
+      id: `pp:${p.id}`,
+      fecha: p.creado_en.split('T')[0],
+      concepto: p.proveedor?.nombre ? `Pago a ${p.proveedor.nombre}` : 'Pago a proveedor',
+      monto: Number(p.monto),
+      metodo_pago: (p.metodo === 'efectivo' || p.metodo === 'transferencia' ? p.metodo : 'transferencia') as Gasto['metodo_pago'],
+      notas: p.notas || undefined,
+      creado_en: p.creado_en,
+      proveedor: p.proveedor || undefined,
+      esPagoProveedor: true,
+    })) as Gasto[]
+
+    const todos = [...(((gastosData as unknown as Gasto[]) || [])), ...sinteticos]
+      .sort((a, b) => (b.creado_en || '').localeCompare(a.creado_en || ''))
+
     return {
-      gastos: (gastosData as unknown as Gasto[]) || [],
+      gastos: todos,
       totalVentas: (ventasData || []).reduce((s: number, v: { total: number }) => s + v.total, 0),
     }
   })
@@ -260,9 +286,15 @@ export default function GastosPage() {
         notas: concepto.trim(),
       })
 
-      // Reducir deuda del proveedor (ajuste atómico vía RPC)
-      const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: proveedorGastoId, p_delta: -montoNum })
-      setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda ?? Math.max(0, (m.deuda_total || 0) - montoNum) } : m))
+      // La deuda solo baja si realmente hay deuda pendiente con esa marca.
+      // Antes se restaba siempre: una compra al contado borraba el saldo de un
+      // remito anterior (y el GREATEST(0,…) del RPC lo tapaba en silencio).
+      const deudaActual = marcas.find(m => m.id === proveedorGastoId)?.deuda_total || 0
+      const aplica = Math.min(montoNum, deudaActual)
+      if (aplica > 0) {
+        const { data: nuevaDeuda } = await supabase.rpc('ajustar_deuda_marca', { p_marca_id: proveedorGastoId, p_delta: -aplica })
+        setMarcas(prev => prev.map(m => m.id === proveedorGastoId ? { ...m, deuda_total: nuevaDeuda ?? Math.max(0, deudaActual - aplica) } : m))
+      }
     }
 
     setGastos(prev => [data as unknown as Gasto, ...prev])
@@ -818,6 +850,12 @@ export default function GastosPage() {
                               {gasto.categoria.nombre}
                             </span>
                           )}
+                          {gasto.esPagoProveedor && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-100"
+                              title="Cargado desde la ficha del proveedor — no figura como gasto">
+                              desde proveedor
+                            </span>
+                          )}
                           {gasto.proveedor && (
                             <Link
                               href={`/proveedores/${gasto.proveedor.id}`}
@@ -838,7 +876,7 @@ export default function GastosPage() {
                         </span>
                       )}
                       <p className="font-bold text-gray-800 shrink-0 w-24 text-right">{formatPrecio(gasto.monto)}</p>
-                      {esAdmin && (
+                      {esAdmin && !gasto.esPagoProveedor && (
                         <button
                           onClick={() => eliminarGasto(gasto.id)}
                           className="text-gray-200 hover:text-red-400 transition-colors shrink-0"

@@ -206,6 +206,10 @@ export interface Gasto {
   creado_en: string
   categoria?: CategoriaGasto
   proveedor?: Marca
+  /** true = no es una fila de `gastos`, sino un pago a proveedor cargado desde
+   *  su ficha (pagos_proveedores sin gasto_id). Se muestra en el listado para
+   *  que los egresos estén completos, pero no se puede editar ni borrar acá. */
+  esPagoProveedor?: boolean
 }
 
 export interface PagoProveedor {
