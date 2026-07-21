@@ -11,8 +11,9 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import {
   Plus, X, Settings2, Trash2, Banknote, Smartphone,
-  CreditCard, TrendingUp, TrendingDown, ChevronRight, ChevronDown,
+  CreditCard, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Truck,
 } from 'lucide-react'
+import Link from 'next/link'
 import { formatPrecio, cn, calcularRango, Periodo } from '@/lib/utils'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -173,7 +174,7 @@ export default function GastosPage() {
     const [{ data: gastosData }, { data: ventasData }] = await Promise.all([
       supabase
         .from('gastos')
-        .select('*, categoria:categorias_gastos(*)')
+        .select('*, categoria:categorias_gastos(*), proveedor:marcas(id, nombre)')
         .gte('fecha', desde.toISOString().split('T')[0])
         .lte('fecha', hasta.toISOString().split('T')[0])
         .order('creado_en', { ascending: false }),
@@ -371,6 +372,28 @@ export default function GastosPage() {
   }, [gastosPieData])
 
   const PIE_COLORS = ['#4EC3BD', '#60a5fa', '#8b5cf6', '#fb923c']
+
+  // Gastos por proveedor (a quién le estoy pagando) — del período elegido
+  const proveedorData = useMemo(() => {
+    const m = new Map<string, { id: string; nombre: string; monto: number; ops: number }>()
+    let sinProveedor = 0
+    for (const g of gastos) {
+      if (g.proveedor?.id) {
+        const p = m.get(g.proveedor.id) ?? { id: g.proveedor.id, nombre: g.proveedor.nombre, monto: 0, ops: 0 }
+        p.monto += g.monto; p.ops += 1
+        m.set(g.proveedor.id, p)
+      } else {
+        sinProveedor += g.monto
+      }
+    }
+    const lista = Array.from(m.values()).sort((a, b) => b.monto - a.monto)
+    return {
+      lista,
+      sinProveedor,
+      total: lista.reduce((s, p) => s + p.monto, 0),
+      max: Math.max(...lista.map(p => p.monto), 1),
+    }
+  }, [gastos])
 
   // Desglose por categoría con agrupación por padre
   const desgloseData = useMemo(() => {
@@ -668,6 +691,48 @@ export default function GastosPage() {
             </div>
           </div>
 
+          {/* Gastos por proveedor — a quién le pagué en el período */}
+          {proveedorData.lista.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-bold text-gray-700">Por proveedor</p>
+                <span className="text-xs text-gray-400">{formatPrecio(proveedorData.total)}</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-4">A quién le pagaste en el período</p>
+              <div className="space-y-2.5">
+                {proveedorData.lista.map(p => (
+                  <Link key={p.id} href={`/proveedores/${p.id}`} className="block group">
+                    <div className="flex items-center justify-between mb-1 gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Truck size={12} className="text-gray-300 shrink-0" />
+                        <span className="text-xs font-medium text-gray-600 group-hover:text-gray-900 truncate">{p.nombre}</span>
+                        <span className="text-[10px] text-gray-300 shrink-0">
+                          {p.ops} {p.ops === 1 ? 'pago' : 'pagos'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] text-gray-300">
+                          {proveedorData.total > 0 ? `${((p.monto / proveedorData.total) * 100).toFixed(0)}%` : ''}
+                        </span>
+                        <span className="text-xs font-bold text-gray-700">{formatPrecio(p.monto)}</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full rounded-full bg-teal-400 transition-all duration-700"
+                        style={{ width: `${(p.monto / proveedorData.max) * 100}%` }} />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+              {proveedorData.sinProveedor > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Gastos sin proveedor asignado</span>
+                  <span className="text-xs font-semibold text-gray-500">{formatPrecio(proveedorData.sinProveedor)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Desglose por categoría */}
           {(desgloseData.gruposConTotal.length > 0 || desgloseData.sinCategoria > 0) && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -752,6 +817,15 @@ export default function GastosPage() {
                               style={{ backgroundColor: gasto.categoria.color + '20', color: gasto.categoria.color }}>
                               {gasto.categoria.nombre}
                             </span>
+                          )}
+                          {gasto.proveedor && (
+                            <Link
+                              href={`/proveedores/${gasto.proveedor.id}`}
+                              className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors inline-flex items-center gap-1"
+                              title="Ver proveedor"
+                            >
+                              <Truck size={10} /> {gasto.proveedor.nombre}
+                            </Link>
                           )}
                           {gasto.notas && (
                             <span className="text-xs text-gray-400 truncate max-w-[120px]">{gasto.notas}</span>
