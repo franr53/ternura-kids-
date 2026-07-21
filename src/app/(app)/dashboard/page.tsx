@@ -26,10 +26,21 @@ interface FiadoMes { fiado: number; cobrado: number }
 // sinCosto lista los productos vendidos sin precio_costo (para alertar y corregir).
 // formasPago detalla en qué se cobró lo vendido (efectivo, transferencia, etc.).
 interface GananciaMes {
-  vendido: number; vendidoConCosto: number; ganancia: number
+  vendido: number; vendidoConCosto: number; ganancia: number; gastosLocal: number
   sinCosto: { id: string; nombre: string }[]
   formasPago: { metodo: string; monto: number }[]
 }
+
+// Gastos de un mes agrupados por categoría padre (Local / Personal).
+// `mercaderia` (compra de stock para revender) se separa: NO es gasto operativo
+// y su costo ya está contado en la ganancia bruta (vía precio_costo).
+interface GastosMes {
+  local: number; personal: number; mercaderia: number; otros: number
+  subs: { nombre: string; monto: number; grupo: string }[]
+}
+
+// Subcategorías de "Local" que en realidad son compra de mercadería para reventa.
+const SUBCAT_MERCADERIA = ['insumos']
 
 const METODO_LABELS: Record<string, string> = {
   efectivo: 'Efectivo', transferencia: 'Transferencia',
@@ -104,6 +115,7 @@ export default function DashboardPage() {
   const [metricaChart, setMetricaChart] = useState<MetricaChart>('ventas')
   const [mesFiado, setMesFiado] = useState(0) // selector propio de Fiado vs Cobrado
   const [mesGanancia, setMesGanancia] = useState(0) // selector propio de Vendido vs Ganancia
+  const [mesGasto, setMesGasto] = useState(0) // selector propio de Gastos del mes
 
   const { data: d, loading } = useCache<DashboardData>(`dash:${periodo}`, async () => {
     const hoy = new Date()
@@ -234,7 +246,7 @@ export default function DashboardPage() {
     const pad = (n: number) => String(n).padStart(2, '0')
     const iniStr = `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}-01`
     const finStr = `${fin.getFullYear()}-${pad(fin.getMonth() + 1)}-${pad(fin.getDate())}`
-    const [{ data }, { data: pagosData }] = await Promise.all([
+    const [{ data }, { data: pagosData }, { data: gsOp }, { data: catsOp }] = await Promise.all([
       supabase
         .from('venta_items')
         .select('cantidad, subtotal, variante:variantes(precio_costo, producto:productos(id, nombre_base)), venta:ventas!inner(estado, creado_en)')
@@ -247,6 +259,8 @@ export default function DashboardPage() {
         .eq('venta.estado', 'completada')
         .gte('venta.creado_en', `${iniStr}T00:00:00`)
         .lte('venta.creado_en', `${finStr}T23:59:59`),
+      supabase.from('gastos').select('monto, categoria_id').gte('fecha', iniStr).lte('fecha', finStr),
+      supabase.from('categorias_gastos').select('id, nombre, padre_id'),
     ])
     let vendido = 0, vendidoConCosto = 0, costo = 0
     const sinCostoMap = new Map<string, string>()
@@ -272,7 +286,54 @@ export default function DashboardPage() {
     const formasPago = Object.entries(porMetodo)
       .map(([metodo, monto]) => ({ metodo: METODO_LABELS[metodo] || metodo, monto }))
       .sort((a, b) => b.monto - a.monto)
-    return { vendido, vendidoConCosto, ganancia: vendidoConCosto - costo, sinCosto, formasPago }
+    // Gastos OPERATIVOS del local del mismo mes (sin mercadería ni personales):
+    // es lo único que descuenta de la ganancia bruta para el resultado del negocio.
+    type CatOp = { id: string; nombre: string; padre_id: string | null }
+    const catsById = new Map<string, CatOp>((catsOp || []).map((c: CatOp) => [c.id, c]))
+    let gastosLocal = 0
+    ;(gsOp || []).forEach((g: { monto: number; categoria_id: string | null }) => {
+      const c = g.categoria_id ? catsById.get(g.categoria_id) : undefined
+      if (!c) return
+      const padre = c.padre_id ? catsById.get(c.padre_id)?.nombre ?? c.nombre : c.nombre
+      if (padre === 'Local' && !SUBCAT_MERCADERIA.includes(c.nombre.toLowerCase())) gastosLocal += g.monto || 0
+    })
+    return { vendido, vendidoConCosto, ganancia: vendidoConCosto - costo, gastosLocal, sinCosto, formasPago }
+  })
+
+  // Gastos del mes, agrupados por categoría padre (Local / Personal) y separando
+  // la compra de mercadería (no es gasto operativo: su costo ya está en la ganancia).
+  const { data: gastosMes, loading: loadingGastos } = useCache<GastosMes>(`gastos:${mesGasto}`, async () => {
+    const base = new Date()
+    const ini = new Date(base.getFullYear(), base.getMonth() - mesGasto, 1)
+    const fin = new Date(base.getFullYear(), base.getMonth() - mesGasto + 1, 0)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const iniStr = `${ini.getFullYear()}-${pad(ini.getMonth() + 1)}-01`
+    const finStr = `${fin.getFullYear()}-${pad(fin.getMonth() + 1)}-${pad(fin.getDate())}`
+    const [{ data: gs }, { data: cats }] = await Promise.all([
+      supabase.from('gastos').select('monto, categoria_id, fecha').gte('fecha', iniStr).lte('fecha', finStr),
+      supabase.from('categorias_gastos').select('id, nombre, padre_id'),
+    ])
+    type Cat = { id: string; nombre: string; padre_id: string | null }
+    const byId = new Map<string, Cat>((cats || []).map((c: Cat) => [c.id, c]))
+    let local = 0, personal = 0, mercaderia = 0, otros = 0
+    const subsMap = new Map<string, { monto: number; grupo: string }>()
+    ;(gs || []).forEach((g: { monto: number; categoria_id: string | null }) => {
+      const m = g.monto || 0
+      const c = g.categoria_id ? byId.get(g.categoria_id) : undefined
+      const padre = c?.padre_id ? byId.get(c.padre_id)?.nombre ?? c.nombre : c?.nombre ?? 'Sin categoría'
+      const sub = c?.nombre ?? 'Sin categoría'
+      const esMercaderia = SUBCAT_MERCADERIA.includes(sub.toLowerCase())
+      const grupo = esMercaderia ? 'Mercadería' : padre === 'Local' || padre === 'Personal' ? padre : 'Otros'
+      if (esMercaderia) mercaderia += m
+      else if (padre === 'Local') local += m
+      else if (padre === 'Personal') personal += m
+      else otros += m
+      const prev = subsMap.get(sub)
+      subsMap.set(sub, { monto: (prev?.monto ?? 0) + m, grupo })
+    })
+    const subs = Array.from(subsMap, ([nombre, v]) => ({ nombre, monto: v.monto, grupo: v.grupo }))
+      .sort((a, b) => b.monto - a.monto)
+    return { local, personal, mercaderia, otros, subs }
   })
 
   const ventasHoy = d?.ventasHoy ?? 0
@@ -317,6 +378,20 @@ export default function DashboardPage() {
   const sinCosto = gananciaMes?.sinCosto ?? []
   const formasPago = gananciaMes?.formasPago ?? []
   const totalFormasPago = formasPago.reduce((s, f) => s + f.monto, 0)
+  // Gastos: solo los OPERATIVOS del local afectan el resultado del negocio.
+  // La mercadería ya está contada en la ganancia bruta (costo) y los gastos
+  // personales de la familia no son del local.
+  const gLocal = gastosMes?.local ?? 0
+  const gPersonal = gastosMes?.personal ?? 0
+  const gMercaderia = gastosMes?.mercaderia ?? 0
+  const gOtros = gastosMes?.otros ?? 0
+  const gastosSubs = gastosMes?.subs ?? []
+  const totalGastos = gLocal + gPersonal + gMercaderia + gOtros
+  const maxGasto = Math.max(gLocal, gPersonal, gMercaderia, gOtros, 1)
+  // El neto usa los gastos operativos DEL MISMO MES que la ganancia (no del
+  // selector de la card de gastos, que es independiente).
+  const gastosOperativos = gananciaMes?.gastosLocal ?? 0
+  const resultadoNeto = gananciaVal - gastosOperativos
 
   const kpis = [
     {
@@ -509,10 +584,10 @@ export default function DashboardPage() {
           )}
         </motion.div>
 
-      {/* Comparaciones del mes: Vendido vs Ganancia + Fiado vs Cobrado */}
+      {/* Comparaciones del mes: Gastos + Fiado vs Cobrado */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
-        {/* Vendido vs Ganancia — con alerta de prendas sin costo cargado */}
+        {/* Gastos del mes — Local vs Personal vs Mercadería + desglose por rubro */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: loading ? 0 : 1, y: 0 }}
@@ -521,20 +596,20 @@ export default function DashboardPage() {
           style={{ boxShadow: 'var(--card-shadow)' }}
         >
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-            Vendido vs Ganancia
+            Gastos del mes
           </h2>
-          <p className="text-xs text-gray-400 mb-4">Lo que facturaste vs lo que te quedó</p>
+          <p className="text-xs text-gray-400 mb-4">En qué se va la plata — local, personal y mercadería</p>
 
           <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1 mb-6">
             {mesesOpts.map(m => (
               <button
                 key={m.off}
-                onClick={() => setMesGanancia(m.off)}
+                onClick={() => setMesGasto(m.off)}
                 className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all capitalize"
                 style={{
-                  background: mesGanancia === m.off ? 'white' : 'transparent',
-                  color: mesGanancia === m.off ? '#10B981' : '#9ca3af',
-                  boxShadow: mesGanancia === m.off ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                  background: mesGasto === m.off ? 'white' : 'transparent',
+                  color: mesGasto === m.off ? '#10B981' : '#9ca3af',
+                  boxShadow: mesGasto === m.off ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
                 }}
               >
                 {m.label}
@@ -542,91 +617,57 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {loadingGanancia && !gananciaMes ? (
+          {loadingGastos && !gastosMes ? (
             <div className="space-y-4">
-              {[1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-9 w-full" />)}
             </div>
+          ) : totalGastos === 0 ? (
+            <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin gastos cargados</div>
           ) : (
-            <div className="space-y-5">
-              {/* Vendido — barra segmentada por forma de pago */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#93C5FD' }} />
-                    <span className="text-xs text-gray-600 font-medium">Vendido</span>
+            <div className="space-y-4">
+              {[
+                { label: 'Local (operativo)', val: gLocal, color: '#10B981', hint: 'alquiler, servicios, sueldos…' },
+                { label: 'Mercadería', val: gMercaderia, color: '#93C5FD', hint: 'compra de stock para revender' },
+                { label: 'Personal', val: gPersonal, color: '#A78BFA', hint: 'gastos de la familia' },
+                ...(gOtros > 0 ? [{ label: 'Sin clasificar', val: gOtros, color: '#9ca3af', hint: 'sin categoría asignada' }] : []),
+              ].map(r => (
+                <div key={r.label}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+                      <span className="text-xs text-gray-600 font-medium">{r.label}</span>
+                    </div>
+                    <span className="text-xs font-bold text-gray-700 shrink-0">{mask(formatPrecio(r.val))}</span>
                   </div>
-                  <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(vendidoVal))}</span>
+                  <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(r.val / maxGasto) * 100}%`, backgroundColor: r.color }} />
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{r.hint}</p>
                 </div>
-                <div className="h-2 rounded-full bg-gray-100 overflow-hidden flex">
-                  {totalFormasPago > 0 ? formasPago.map(f => (
-                    <div
-                      key={f.metodo}
-                      className="h-full transition-all duration-700"
-                      style={{ width: `${(f.monto / totalFormasPago) * 100}%`, backgroundColor: METODO_COLORS[f.metodo] || '#9ca3af' }}
-                      title={`${f.metodo}: ${formatPrecio(f.monto)}`}
-                    />
-                  )) : <div className="h-full w-full" style={{ backgroundColor: '#93C5FD' }} />}
-                </div>
-                {formasPago.length > 0 && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-                    {formasPago.map(f => (
-                      <div key={f.metodo} className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: METODO_COLORS[f.metodo] || '#9ca3af' }} />
-                        <span className="text-[11px] text-gray-500">{f.metodo}</span>
-                        <span className="text-[11px] font-semibold text-gray-600">{mask(formatPrecio(f.monto))}</span>
+              ))}
+
+              {/* Desglose por rubro */}
+              {gastosSubs.length > 0 && (
+                <div className="pt-3 border-t border-gray-50">
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Por rubro</p>
+                  <div className="space-y-1.5">
+                    {gastosSubs.slice(0, 6).map(s => (
+                      <div key={s.nombre} className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-gray-500 truncate">
+                          {s.nombre}
+                          <span className="text-gray-300"> · {s.grupo}</span>
+                        </span>
+                        <span className="text-[11px] font-semibold text-gray-600 shrink-0">{mask(formatPrecio(s.monto))}</span>
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Ganancia */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#10B981' }} />
-                    <span className="text-xs text-gray-600 font-medium">Ganancia</span>
-                  </div>
-                  <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(gananciaVal))}</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(gananciaVal / maxVenta) * 100}%`, backgroundColor: '#10B981' }} />
-                </div>
-              </div>
-              <div className="pt-3 border-t border-gray-50">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">Margen</span>
-                  <span className="text-sm font-bold text-emerald-600">{margenPct.toFixed(0)}%</span>
-                </div>
-              </div>
-
-              {sinCosto.length > 0 && (
-                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-amber-700">
-                        {sinCosto.length} {sinCosto.length === 1 ? 'prenda vendida sin costo' : 'prendas vendidas sin costo'}
-                      </p>
-                      <p className="text-[11px] text-amber-600 mb-2">No entran en la ganancia. Cargá el costo para que el margen sea exacto.</p>
-                      <div className="flex flex-col gap-1">
-                        {sinCosto.slice(0, 3).map(p => (
-                          <Link
-                            key={p.id}
-                            href={`/inventario/${p.id}`}
-                            className="text-xs text-amber-700 hover:text-amber-900 font-medium underline decoration-amber-300 truncate"
-                          >
-                            {p.nombre}
-                          </Link>
-                        ))}
-                        {sinCosto.length > 3 && (
-                          <span className="text-[11px] text-amber-500">y {sinCosto.length - 3} más…</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               )}
+
+              <div className="pt-2 border-t border-gray-50 flex items-center justify-between">
+                <span className="text-xs text-gray-400">Total del mes</span>
+                <span className="text-sm font-bold text-gray-700">{mask(formatPrecio(totalGastos))}</span>
+              </div>
             </div>
           )}
         </motion.div>
@@ -742,6 +783,140 @@ export default function DashboardPage() {
           </ResponsiveContainer>
         )}
       </motion.div>
+
+      {/* Vendido vs Ganancia — detalle financiero (al final: uso ocasional) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Vendido vs Ganancia — con alerta de prendas sin costo cargado */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: loading ? 0 : 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.35 }}
+          className="bg-white rounded-2xl p-5"
+          style={{ boxShadow: 'var(--card-shadow)' }}
+        >
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            Vendido vs Ganancia
+          </h2>
+          <p className="text-xs text-gray-400 mb-4">Lo que facturaste vs lo que te quedó</p>
+
+          <div className="flex gap-0.5 bg-gray-100 rounded-xl p-1 mb-6">
+            {mesesOpts.map(m => (
+              <button
+                key={m.off}
+                onClick={() => setMesGanancia(m.off)}
+                className="flex-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all capitalize"
+                style={{
+                  background: mesGanancia === m.off ? 'white' : 'transparent',
+                  color: mesGanancia === m.off ? '#10B981' : '#9ca3af',
+                  boxShadow: mesGanancia === m.off ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {loadingGanancia && !gananciaMes ? (
+            <div className="space-y-4">
+              {[1, 2].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Vendido — barra segmentada por forma de pago */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#93C5FD' }} />
+                    <span className="text-xs text-gray-600 font-medium">Vendido</span>
+                  </div>
+                  <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(vendidoVal))}</span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-100 overflow-hidden flex">
+                  {totalFormasPago > 0 ? formasPago.map(f => (
+                    <div
+                      key={f.metodo}
+                      className="h-full transition-all duration-700"
+                      style={{ width: `${(f.monto / totalFormasPago) * 100}%`, backgroundColor: METODO_COLORS[f.metodo] || '#9ca3af' }}
+                      title={`${f.metodo}: ${formatPrecio(f.monto)}`}
+                    />
+                  )) : <div className="h-full w-full" style={{ backgroundColor: '#93C5FD' }} />}
+                </div>
+                {formasPago.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+                    {formasPago.map(f => (
+                      <div key={f.metodo} className="flex items-center gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: METODO_COLORS[f.metodo] || '#9ca3af' }} />
+                        <span className="text-[11px] text-gray-500">{f.metodo}</span>
+                        <span className="text-[11px] font-semibold text-gray-600">{mask(formatPrecio(f.monto))}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Ganancia bruta (antes de gastos) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#10B981' }} />
+                    <span className="text-xs text-gray-600 font-medium">Ganancia bruta</span>
+                  </div>
+                  <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(gananciaVal))}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(gananciaVal / maxVenta) * 100}%`, backgroundColor: '#10B981' }} />
+                </div>
+              </div>
+
+              {/* Estado de resultados: bruta − gastos = neto */}
+              <div className="pt-3 border-t border-gray-50 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">Gastos del local</span>
+                  <span className="text-xs font-semibold text-gray-500">−{mask(formatPrecio(gastosOperativos))}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-600">Resultado neto</span>
+                  <span className={`text-sm font-bold ${resultadoNeto >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                    {resultadoNeto < 0 ? '−' : ''}{mask(formatPrecio(Math.abs(resultadoNeto)))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-[11px] text-gray-400">Margen bruto</span>
+                  <span className="text-[11px] font-semibold text-emerald-600">{margenPct.toFixed(0)}%</span>
+                </div>
+              </div>
+
+              {sinCosto.length > 0 && (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-amber-700">
+                        {sinCosto.length} {sinCosto.length === 1 ? 'prenda vendida sin costo' : 'prendas vendidas sin costo'}
+                      </p>
+                      <p className="text-[11px] text-amber-600 mb-2">No entran en la ganancia. Cargá el costo para que el margen sea exacto.</p>
+                      <div className="flex flex-col gap-1">
+                        {sinCosto.slice(0, 3).map(p => (
+                          <Link
+                            key={p.id}
+                            href={`/inventario/${p.id}`}
+                            className="text-xs text-amber-700 hover:text-amber-900 font-medium underline decoration-amber-300 truncate"
+                          >
+                            {p.nombre}
+                          </Link>
+                        ))}
+                        {sinCosto.length > 3 && (
+                          <span className="text-[11px] text-amber-500">y {sinCosto.length - 3} más…</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </motion.div>
+      </div>
 
       {/* Bottom row: Stock Crítico + Top Productos + Top Deudores */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 pb-4">
