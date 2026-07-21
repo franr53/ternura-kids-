@@ -20,7 +20,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 interface Resumen {
   entro_contado: number; entro_cobros: number; entro_total: number
   salio_mercaderia: number; salio_local: number; salio_personal: number
-  salio_otros: number; salio_total: number; quedo: number
+  salio_otros: number; salio_proveedores: number; salio_devoluciones: number
+  salio_total: number; quedo: number
   facturado: number; costo_vendido: number; fiado_nuevo: number
   por_metodo: { metodo: string; monto: number }[]
 }
@@ -28,6 +29,7 @@ interface MesEvo {
   mes: string
   entro_contado: number; entro_cobros: number
   salio_mercaderia: number; salio_local: number; salio_personal: number
+  salio_proveedores: number
   facturado: number; costo_vendido: number; fiado_nuevo: number
 }
 interface Rubro { nombre: string; grupo: string; monto: number; monto_anterior: number }
@@ -205,7 +207,8 @@ export default function FinanzasPage() {
   const quedo = r?.quedo ?? 0
   const maxCaja = Math.max(entro, salio, 1)
   const maxEntro = Math.max(r?.entro_contado ?? 0, r?.entro_cobros ?? 0, 1)
-  const maxSalio = Math.max(r?.salio_mercaderia ?? 0, r?.salio_local ?? 0, r?.salio_personal ?? 0, r?.salio_otros ?? 0, 1)
+  const maxSalio = Math.max(r?.salio_mercaderia ?? 0, r?.salio_local ?? 0, r?.salio_personal ?? 0,
+    r?.salio_otros ?? 0, r?.salio_proveedores ?? 0, r?.salio_devoluciones ?? 0, 1)
   // Resultado del local = sin los gastos personales de la familia
   const resultadoLocal = quedo + (r?.salio_personal ?? 0)
 
@@ -219,15 +222,17 @@ export default function FinanzasPage() {
     Mercadería: Number(m.salio_mercaderia),
     Local: Number(m.salio_local),
     Personal: Number(m.salio_personal),
-    Comprado: Number(m.salio_mercaderia),
+    // La reposición real incluye lo pagado a proveedores fuera de `gastos`
+    Comprado: Number(m.salio_mercaderia) + Number(m.salio_proveedores ?? 0),
     'Vendido a costo': Number(m.costo_vendido),
     Fiado: Number(m.fiado_nuevo),
     Cobrado: Number(m.entro_cobros),
     Facturado: Number(m.facturado),
   })), [evo])
 
-  // Reposición: ¿compro al ritmo que vendo?
-  const comprado = r?.salio_mercaderia ?? 0
+  // Reposición: ¿compro al ritmo que vendo? Suma también lo pagado a
+  // proveedores por fuera de `gastos` (cliente→marca y pagos manuales).
+  const comprado = (r?.salio_mercaderia ?? 0) + (r?.salio_proveedores ?? 0)
   const vendidoCosto = r?.costo_vendido ?? 0
   const difRepo = comprado - vendidoCosto
 
@@ -324,6 +329,14 @@ export default function FinanzasPage() {
                   <FilaDesplegable label="Ropa / mercadería" monto={r?.salio_mercaderia ?? 0} max={maxSalio} color={C.azul}
                     hint="compra de stock para revender" detalle={detallePorGrupo['Mercadería'] ?? []}
                     abierta={grupoAbierto === 'Mercadería'} onToggle={() => toggleGrupo('Mercadería')} mask={mask} />
+                  {(r?.salio_proveedores ?? 0) > 0 && (
+                    <Fila label="Pagos a proveedores" monto={r?.salio_proveedores ?? 0} max={maxSalio} color={C.ambar}
+                      hint="incluye lo que clientes transfirieron directo a la marca" mask={mask} />
+                  )}
+                  {(r?.salio_devoluciones ?? 0) > 0 && (
+                    <Fila label="Devoluciones" monto={r?.salio_devoluciones ?? 0} max={maxSalio} color={C.rosa}
+                      hint="plata reintegrada al cliente" mask={mask} />
+                  )}
                   <FilaDesplegable label="Local" monto={r?.salio_local ?? 0} max={maxSalio} color={C.verde}
                     hint="servicios, sueldos, alquiler…" detalle={detallePorGrupo['Local'] ?? []}
                     abierta={grupoAbierto === 'Local'} onToggle={() => toggleGrupo('Local')} mask={mask} />
