@@ -25,7 +25,9 @@ export function formatPrecio(valor: number): string {
   }).format(valor)
 }
 
-export type Periodo = 'hoy' | 'semana' | 'mes' | 'fecha'
+// 'mes' = el mes en curso. 'mesDe' = un mes cualquiera (fechaCustom viene como
+// 'YYYY-MM'). 'fecha' = un día puntual ('YYYY-MM-DD').
+export type Periodo = 'hoy' | 'semana' | 'mes' | 'mesDe' | 'fecha'
 
 export function calcularRango(periodo: Periodo, fechaCustom: string): { desde: Date; hasta: Date } {
   const ahora = new Date()
@@ -46,6 +48,13 @@ export function calcularRango(periodo: Periodo, fechaCustom: string): { desde: D
   if (periodo === 'mes') {
     const desde = new Date(ahora.getFullYear(), ahora.getMonth(), 1)
     return { desde, hasta }
+  }
+  if (periodo === 'mesDe') {
+    // fechaCustom = 'YYYY-MM' → del 1 al último día de ese mes
+    const [ya, ma] = fechaCustom.split('-').map(Number)
+    const desde = new Date(ya, ma - 1, 1, 0, 0, 0, 0)
+    const hastaMes = new Date(ya, ma, 0, 23, 59, 59, 999)
+    return { desde, hasta: hastaMes }
   }
   // fecha custom
   const [y, m, d] = fechaCustom.split('-').map(Number)

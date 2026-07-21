@@ -9,11 +9,12 @@ import {
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import {
-  TrendingUp, TrendingDown, ArrowDown, ArrowUp, AlertTriangle,
+  TrendingUp, TrendingDown, ArrowDown, ArrowUp, AlertTriangle, ChevronDown,
 } from 'lucide-react'
 import { formatPrecio } from '@/lib/utils'
 import { usePrivacyMode } from '@/lib/hooks/use-privacy-mode'
-import { motion } from 'framer-motion'
+import Link from 'next/link'
+import { motion, AnimatePresence } from 'framer-motion'
 
 // ── Tipos que devuelven los RPC (migración 033_finanzas_rpc.sql) ──────────
 interface Resumen {
@@ -30,7 +31,7 @@ interface MesEvo {
   facturado: number; costo_vendido: number; fiado_nuevo: number
 }
 interface Rubro { nombre: string; grupo: string; monto: number; monto_anterior: number }
-interface TramoDeuda { tramo: string; orden: number; monto: number; clientes: number }
+interface DeudaCliente { cliente_id: string; nombre: string; tramo: string; orden: number; monto: number; dias: number }
 
 const METODO_LABELS: Record<string, string> = {
   efectivo: 'Efectivo', transferencia: 'Transferencia',
@@ -106,10 +107,77 @@ function Fila({ label, monto, max, color, hint, mask }: {
   )
 }
 
+/** Fila de gasto que se despliega para ver el detalle por rubro. */
+function FilaDesplegable({ label, monto, max, color, hint, detalle, abierta, onToggle, mask }: {
+  label: string; monto: number; max: number; color: string; hint?: string
+  detalle: { nombre: string; monto: number }[]
+  abierta: boolean; onToggle: () => void
+  mask: (s: string) => string
+}) {
+  const hayDetalle = detalle.length > 0
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        disabled={!hayDetalle}
+        className={`w-full text-left group ${hayDetalle ? 'cursor-pointer' : 'cursor-default'}`}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+            <span className={`text-xs font-medium truncate ${hayDetalle ? 'text-gray-600 group-hover:text-gray-900' : 'text-gray-600'}`}>
+              {label}
+            </span>
+            {hayDetalle && (
+              <ChevronDown
+                size={12}
+                className={`text-gray-300 group-hover:text-gray-500 shrink-0 transition-transform ${abierta ? 'rotate-180' : ''}`}
+              />
+            )}
+          </div>
+          <span className="text-xs font-bold text-gray-700 shrink-0">{mask(formatPrecio(monto))}</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-700"
+            style={{ width: `${max > 0 ? (monto / max) * 100 : 0}%`, backgroundColor: color }} />
+        </div>
+      </button>
+      {hint && !abierta && <p className="text-[10px] text-gray-400 mt-0.5">{hint}</p>}
+      <AnimatePresence initial={false}>
+        {abierta && hayDetalle && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-2 ml-4 pl-3 border-l-2 space-y-1.5 py-1" style={{ borderColor: color + '40' }}>
+              {detalle.map(d => (
+                <div key={d.nombre} className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-gray-500 truncate">{d.nombre}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] text-gray-300">
+                      {monto > 0 ? `${((d.monto / monto) * 100).toFixed(0)}%` : ''}
+                    </span>
+                    <span className="text-[11px] font-semibold text-gray-600">{mask(formatPrecio(d.monto))}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 export default function FinanzasPage() {
   const supabase = createClient()
   const { mask } = usePrivacyMode()
   const [mes, setMes] = useState(0)
+  const [grupoAbierto, setGrupoAbierto] = useState<string | null>(null)
+  const [tramoAbierto, setTramoAbierto] = useState<string | null>(null)
 
   const { ini, fin } = rangoMes(mes)
 
@@ -125,9 +193,9 @@ export default function FinanzasPage() {
     const { data } = await supabase.rpc('finanzas_gastos_rubro', { p_inicio: ini, p_fin: fin })
     return (data ?? []) as Rubro[]
   })
-  const { data: deuda } = useCache<TramoDeuda[]>('fin:deuda', async () => {
-    const { data } = await supabase.rpc('finanzas_deuda_antiguedad')
-    return (data ?? []) as TramoDeuda[]
+  const { data: deuda } = useCache<DeudaCliente[]>('fin:deuda:clientes', async () => {
+    const { data } = await supabase.rpc('finanzas_deuda_clientes')
+    return (data ?? []) as DeudaCliente[]
   })
 
   // ── Derivados ──────────────────────────────────────────────────────────
@@ -172,8 +240,32 @@ export default function FinanzasPage() {
   }))
   const tarjeta = porMetodo.filter(m => m.metodo === 'Débito' || m.metodo === 'Crédito').reduce((s, m) => s + m.monto, 0)
   const directo = porMetodo.filter(m => m.metodo === 'Efectivo' || m.metodo === 'Transferencia').reduce((s, m) => s + m.monto, 0)
+  // Deuda: se agrupa por tramo para el resumen y se guarda el detalle por cliente.
   const deudaList = deuda ?? []
   const totalDeuda = deudaList.reduce((s, x) => s + Number(x.monto), 0)
+  const tramos = useMemo(() => {
+    const m = new Map<string, { tramo: string; orden: number; monto: number; clientes: DeudaCliente[] }>()
+    for (const d of deudaList) {
+      const t = m.get(d.tramo) ?? { tramo: d.tramo, orden: d.orden, monto: 0, clientes: [] }
+      t.monto += Number(d.monto)
+      t.clientes.push(d)
+      m.set(d.tramo, t)
+    }
+    return Array.from(m.values())
+      .map(t => ({ ...t, clientes: t.clientes.sort((a, b) => Number(b.monto) - Number(a.monto)) }))
+      .sort((a, b) => a.orden - b.orden)
+  }, [deudaList])
+
+  // Detalle por grupo, para desplegar cada línea de "Salió".
+  const detallePorGrupo = useMemo(() => {
+    const m: Record<string, { nombre: string; monto: number }[]> = {}
+    for (const x of rubrosList) {
+      (m[x.grupo] ||= []).push({ nombre: x.nombre, monto: Number(x.monto) })
+    }
+    for (const k of Object.keys(m)) m[k].sort((a, b) => b.monto - a.monto)
+    return m
+  }, [rubrosList])
+  const toggleGrupo = (g: string) => setGrupoAbierto(prev => (prev === g ? null : g))
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto py-4">
@@ -227,16 +319,21 @@ export default function FinanzasPage() {
                   <ArrowUp size={13} className="text-rose-500" />
                   <span className="text-xs font-bold text-rose-500 uppercase tracking-wider">Salió</span>
                 </div>
+                <p className="text-[10px] text-gray-300 mb-2">Tocá cada línea para ver el detalle</p>
                 <div className="space-y-3">
-                  <Fila label="Ropa / mercadería" monto={r?.salio_mercaderia ?? 0} max={maxSalio} color={C.azul}
-                    hint="compra de stock para revender" mask={mask} />
-                  <Fila label="Local" monto={r?.salio_local ?? 0} max={maxSalio} color={C.verde}
-                    hint="servicios, sueldos, alquiler…" mask={mask} />
-                  <Fila label="Personal" monto={r?.salio_personal ?? 0} max={maxSalio} color={C.violeta}
-                    hint="gastos de la familia" mask={mask} />
+                  <FilaDesplegable label="Ropa / mercadería" monto={r?.salio_mercaderia ?? 0} max={maxSalio} color={C.azul}
+                    hint="compra de stock para revender" detalle={detallePorGrupo['Mercadería'] ?? []}
+                    abierta={grupoAbierto === 'Mercadería'} onToggle={() => toggleGrupo('Mercadería')} mask={mask} />
+                  <FilaDesplegable label="Local" monto={r?.salio_local ?? 0} max={maxSalio} color={C.verde}
+                    hint="servicios, sueldos, alquiler…" detalle={detallePorGrupo['Local'] ?? []}
+                    abierta={grupoAbierto === 'Local'} onToggle={() => toggleGrupo('Local')} mask={mask} />
+                  <FilaDesplegable label="Personal" monto={r?.salio_personal ?? 0} max={maxSalio} color={C.violeta}
+                    hint="gastos de la familia" detalle={detallePorGrupo['Personal'] ?? []}
+                    abierta={grupoAbierto === 'Personal'} onToggle={() => toggleGrupo('Personal')} mask={mask} />
                   {(r?.salio_otros ?? 0) > 0 && (
-                    <Fila label="Sin clasificar" monto={r?.salio_otros ?? 0} max={maxSalio} color={C.gris}
-                      hint="gastos sin categoría asignada" mask={mask} />
+                    <FilaDesplegable label="Sin clasificar" monto={r?.salio_otros ?? 0} max={maxSalio} color={C.gris}
+                      hint="gastos sin categoría asignada" detalle={detallePorGrupo['Otros'] ?? []}
+                      abierta={grupoAbierto === 'Otros'} onToggle={() => toggleGrupo('Otros')} mask={mask} />
                   )}
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-between">
@@ -419,24 +516,57 @@ export default function FinanzasPage() {
             <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin deuda registrada</div>
           ) : (
             <>
+              <p className="text-[10px] text-gray-300 mb-2">Tocá cada tramo para ver quiénes deben</p>
               <div className="space-y-3">
-                {deudaList.map(t => {
-                  const monto = Number(t.monto)
+                {tramos.map(t => {
                   const color = t.orden === 1 ? C.verde : t.orden === 2 ? C.ambar : t.orden === 3 ? '#FB923C' : C.rojo
+                  const abierta = tramoAbierto === t.tramo
                   return (
                     <div key={t.tramo}>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-                          <span className="text-xs text-gray-600 font-medium">{t.tramo}</span>
-                          <span className="text-[10px] text-gray-300">{t.clientes} clientes</span>
+                      <button
+                        onClick={() => setTramoAbierto(prev => (prev === t.tramo ? null : t.tramo))}
+                        className="w-full text-left group cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                            <span className="text-xs text-gray-600 font-medium group-hover:text-gray-900">{t.tramo}</span>
+                            <span className="text-[10px] text-gray-300">{t.clientes.length} clientes</span>
+                            <ChevronDown size={12}
+                              className={`text-gray-300 group-hover:text-gray-500 transition-transform ${abierta ? 'rotate-180' : ''}`} />
+                          </div>
+                          <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(t.monto))}</span>
                         </div>
-                        <span className="text-xs font-bold text-gray-700">{mask(formatPrecio(monto))}</span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                        <div className="h-full rounded-full transition-all duration-700"
-                          style={{ width: `${totalDeuda > 0 ? (monto / totalDeuda) * 100 : 0}%`, backgroundColor: color }} />
-                      </div>
+                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${totalDeuda > 0 ? (t.monto / totalDeuda) * 100 : 0}%`, backgroundColor: color }} />
+                        </div>
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {abierta && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="mt-2 ml-4 pl-3 border-l-2 py-1 space-y-1.5 max-h-56 overflow-y-auto"
+                              style={{ borderColor: color + '40' }}>
+                              {t.clientes.map(c => (
+                                <Link key={c.cliente_id + c.tramo} href={`/clientes/${c.cliente_id}`}
+                                  className="flex items-center justify-between gap-2 hover:bg-gray-50 rounded px-1 -mx-1 py-0.5 transition-colors">
+                                  <span className="text-[11px] text-gray-600 truncate">{c.nombre}</span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[10px] text-gray-300">{c.dias}d</span>
+                                    <span className="text-[11px] font-semibold text-gray-700">{mask(formatPrecio(Number(c.monto)))}</span>
+                                  </div>
+                                </Link>
+                              ))}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   )
                 })}

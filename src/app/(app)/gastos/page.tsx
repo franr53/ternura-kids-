@@ -33,7 +33,7 @@ function normalizarMetodo(m: string): Gasto['metodo_pago'] {
 }
 
 const periodoLabel: Record<Periodo, string> = {
-  hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', fecha: 'Fecha'
+  hoy: 'Hoy', semana: 'Esta semana', mes: 'Este mes', mesDe: 'Otro mes', fecha: 'Día'
 }
 
 type PeriodoCorto = 'hoy' | 'semana' | 'mes'
@@ -70,6 +70,11 @@ export default function GastosPage() {
   // Filtros del listado
   const [periodo, setPeriodo] = useState<Periodo>('mes')
   const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
+  // 'YYYY-MM' para el filtro "Otro mes" (arranca en el mes pasado, que es el caso de uso)
+  const [mesCustom, setMesCustom] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
 
   // Filtros independientes de gráficos
   const [periodoBar, setPeriodoBar] = useState<PeriodoCorto>('mes')
@@ -157,9 +162,13 @@ export default function GastosPage() {
   }, [categorias])
 
   // Cargar listado principal
-  const gastosKey = periodo === 'fecha' ? `gastos:${periodo}:${fechaCustom}` : `gastos:${periodo}`
+  // el rango depende de fechaCustom (día) o mesCustom (mes elegido) según el período
+  const valorCustom = periodo === 'mesDe' ? mesCustom : fechaCustom
+  const gastosKey = periodo === 'fecha' || periodo === 'mesDe'
+    ? `gastos:${periodo}:${valorCustom}`
+    : `gastos:${periodo}`
   const { data: gastosCache, loading: loadingGastos, refresh: cargar } = useCache<{ gastos: Gasto[]; totalVentas: number }>(gastosKey, async () => {
-    const { desde, hasta } = calcularRango(periodo, fechaCustom)
+    const { desde, hasta } = calcularRango(periodo, valorCustom)
 
     const [{ data: gastosData }, { data: ventasData }] = await Promise.all([
       supabase
@@ -408,7 +417,7 @@ export default function GastosPage() {
         <h1 className="text-lg font-bold text-gray-800">Gastos</h1>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5">
-            {(['hoy', 'semana', 'mes', 'fecha'] as Periodo[]).map(p => (
+            {(['hoy', 'semana', 'mes', 'mesDe', 'fecha'] as Periodo[]).map(p => (
               <button
                 key={p}
                 onClick={() => setPeriodo(p)}
@@ -420,6 +429,10 @@ export default function GastosPage() {
                 {periodoLabel[p]}
               </button>
             ))}
+            {periodo === 'mesDe' && (
+              <Input type="month" value={mesCustom} onChange={e => setMesCustom(e.target.value)}
+                className="h-7 text-xs w-36" />
+            )}
             {periodo === 'fecha' && (
               <Input type="date" value={fechaCustom} onChange={e => setFechaCustom(e.target.value)}
                 className="h-7 text-xs w-36" />
