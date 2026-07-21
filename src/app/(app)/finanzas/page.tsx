@@ -219,10 +219,11 @@ export default function FinanzasPage() {
 
   const evoData = useMemo(() => (evo ?? []).map(m => ({
     mes: mesCorto(m.mes),
-    Mercadería: Number(m.salio_mercaderia),
+    // Mercadería = lo cargado en gastos + lo pagado a proveedores por fuera
+    // (ficha del proveedor / transferencia del cliente). Todo es compra de ropa.
+    Mercadería: Number(m.salio_mercaderia) + Number(m.salio_proveedores ?? 0),
     Local: Number(m.salio_local),
     Personal: Number(m.salio_personal),
-    // La reposición real incluye lo pagado a proveedores fuera de `gastos`
     Comprado: Number(m.salio_mercaderia) + Number(m.salio_proveedores ?? 0),
     'Vendido a costo': Number(m.costo_vendido),
     Fiado: Number(m.fiado_nuevo),
