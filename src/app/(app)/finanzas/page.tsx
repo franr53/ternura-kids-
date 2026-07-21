@@ -34,6 +34,7 @@ interface MesEvo {
 }
 interface Rubro { nombre: string; grupo: string; monto: number; monto_anterior: number }
 interface DeudaCliente { cliente_id: string; nombre: string; tramo: string; orden: number; monto: number; dias: number }
+interface FiadoCliente { cliente_id: string; nombre: string; fiado: number; cobrado: number; saldo: number }
 
 const METODO_LABELS: Record<string, string> = {
   efectivo: 'Efectivo', transferencia: 'Transferencia',
@@ -195,6 +196,10 @@ export default function FinanzasPage() {
     const { data } = await supabase.rpc('finanzas_gastos_rubro', { p_inicio: ini, p_fin: fin })
     return (data ?? []) as Rubro[]
   })
+  const { data: porCliente } = useCache<FiadoCliente[]>(`fin:fiadocli:${mes}`, async () => {
+    const { data } = await supabase.rpc('finanzas_fiado_por_cliente', { p_inicio: ini, p_fin: fin, p_limite: 12 })
+    return (data ?? []) as FiadoCliente[]
+  })
   const { data: deuda } = useCache<DeudaCliente[]>('fin:deuda:clientes', async () => {
     const { data } = await supabase.rpc('finanzas_deuda_clientes')
     return (data ?? []) as DeudaCliente[]
@@ -272,6 +277,15 @@ export default function FinanzasPage() {
     return m
   }, [rubrosList])
   const toggleGrupo = (g: string) => setGrupoAbierto(prev => (prev === g ? null : g))
+
+  // Cuenta corriente por cliente: cuánto se llevó vs cuánto entregó en el mes.
+  const clientesData = useMemo(() => (porCliente ?? []).map(c => ({
+    nombre: c.nombre.length > 18 ? c.nombre.slice(0, 18) + '…' : c.nombre,
+    Fiado: Number(c.fiado),
+    Cobrado: Number(c.cobrado),
+    saldo: Number(c.saldo),
+    neto: Number(c.fiado) - Number(c.cobrado),
+  })), [porCliente])
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto py-4">
@@ -606,7 +620,55 @@ export default function FinanzasPage() {
         </Card>
       </div>
 
-      {/* ═══ E. EVOLUCIÓN DEL FIADO ═══ */}
+      {/* ═══ E. CUENTA CORRIENTE POR CLIENTE ═══ */}
+      <Card delay={0.28}>
+        <Titulo sub="Cuánto se llevó cada uno contra cuánto entregó, en el mes elegido">
+          Fiado vs cobrado por cuenta
+        </Titulo>
+        {clientesData.length === 0 ? (
+          <div className="h-40 flex items-center justify-center text-gray-300 text-sm">Sin movimientos de cuenta en el mes</div>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={Math.max(240, clientesData.length * 34)}>
+              <BarChart data={clientesData} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={kFmt} />
+                <YAxis type="category" dataKey="nombre" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} width={130} interval={0} />
+                <Tooltip
+                  cursor={{ fill: 'rgba(16,185,129,0.06)' }}
+                  formatter={(v) => formatPrecio(Number(v))}
+                  contentStyle={{ borderRadius: 12, border: 'none', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="Fiado" fill={C.rosa} radius={[0, 4, 4, 0]} barSize={11} />
+                <Bar dataKey="Cobrado" fill={C.verde} radius={[0, 4, 4, 0]} barSize={11} />
+              </BarChart>
+            </ResponsiveContainer>
+            {(() => {
+              const acumulan = clientesData.filter(c => c.neto > 0).sort((a, b) => b.neto - a.neto)
+              if (acumulan.length === 0) {
+                return (
+                  <p className="text-xs text-emerald-600 mt-2">
+                    Todos entregaron al menos lo que se llevaron este mes.
+                  </p>
+                )
+              }
+              return (
+                <div className="mt-3 rounded-xl bg-amber-50 border border-amber-100 p-3 flex items-start gap-2">
+                  <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                  <p className="text-xs text-amber-700">
+                    <strong>{acumulan.length}</strong> {acumulan.length === 1 ? 'cuenta se llevó' : 'cuentas se llevaron'} más de lo que
+                    {acumulan.length === 1 ? ' entregó' : ' entregaron'}. La que más creció: <strong>{acumulan[0].nombre}</strong> con{' '}
+                    {mask(formatPrecio(acumulan[0].neto))} de aumento.
+                  </p>
+                </div>
+              )
+            })()}
+          </>
+        )}
+      </Card>
+
+      {/* ═══ F. EVOLUCIÓN DEL FIADO ═══ */}
       <Card delay={0.3} className="mb-4">
         <Titulo sub="12 meses — si la deuda de los clientes crece o baja">Fiado nuevo vs cobrado</Titulo>
         {evoData.length === 0 ? (
