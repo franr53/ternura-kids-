@@ -80,6 +80,10 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
 
   const [montoPago, setMontoPago] = useState('')
   const [metodoPago, setMetodoPago] = useState('efectivo')
+  // De dónde sale la plata: solo importa para pagos en efectivo. La caja del día
+  // descuenta únicamente los gastos en efectivo marcados 'caja_hoy'; si se paga
+  // con plata retirada antes y se marca mal, el arqueo no cierra.
+  const [fuentePago, setFuentePago] = useState<'caja_hoy' | 'retiro_anterior'>('caja_hoy')
   const [registrandoPago, setRegistrandoPago] = useState(false)
   const [eliminandoPago, setEliminandoPago] = useState<string | null>(null)
 
@@ -167,7 +171,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
       monto,
       categoria_id: (catInsumos as { id: string } | null)?.id ?? null,
       metodo_pago: metodoGasto,
-      fuente_pago: 'caja_hoy',
+      fuente_pago: metodoGasto === 'efectivo' ? fuentePago : 'caja_hoy',
       proveedor_id: id,
       fecha: new Date().toISOString().split('T')[0],
     }).select('id').single()
@@ -194,6 +198,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
     }
     setPagos(prev => [nuevoPago as PagoProveedor, ...prev])
     setMontoPago('')
+    setFuentePago('caja_hoy')
     toast.success(
       aplicaADeuda > 0
         ? `Pago de ${formatPrecio(monto)} registrado${monto > aplicaADeuda ? ` (${formatPrecio(aplicaADeuda)} a cuenta de la deuda)` : ''}`
@@ -431,6 +436,31 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
                     </SelectContent>
                   </Select>
                 </div>
+                {metodoPago === 'efectivo' && (
+                  <div>
+                    <Label>¿De dónde sale la plata?</Label>
+                    <div className="grid grid-cols-2 gap-2 mt-1">
+                      {([
+                        { v: 'caja_hoy' as const, t: 'Caja de hoy', s: 'Descuenta del efectivo del día' },
+                        { v: 'retiro_anterior' as const, t: 'Retiro anterior', s: 'Plata retirada en días previos' },
+                      ]).map(o => (
+                        <button
+                          key={o.v}
+                          type="button"
+                          onClick={() => setFuentePago(o.v)}
+                          className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                            fuentePago === o.v
+                              ? 'border-green-400 bg-green-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <p className={`text-xs font-semibold ${fuentePago === o.v ? 'text-green-700' : 'text-gray-600'}`}>{o.t}</p>
+                          <p className="text-[10px] text-gray-400 leading-tight">{o.s}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {metodoPago === 'transferencia' && proveedor.alias_cbu && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-sm">
                     <p className="text-blue-500 text-xs font-medium mb-0.5">Alias / CBU del proveedor</p>
