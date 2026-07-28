@@ -126,6 +126,25 @@ function abreviaturaMarca(nombre: string): string {
   return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
 }
 
+// `codigo_barras` es UNIQUE en la base. El código que arma el builder es
+// determinístico (tipo + categoría + marca + detalle + talle), así que dos
+// productos distintos pueden caer en el mismo: dos marcas que empiezan igual
+// (Marmelada y Marroca son las dos "MAR"), o directamente el mismo producto
+// cargado de nuevo. Ante un choque desambiguamos con -2, -3, … en vez de
+// dejar que reviente el insert.
+function siguienteCodigoLibre(base: string, ocupados: Set<string>): string {
+  if (!ocupados.has(base)) return base
+  for (let n = 2; n < 500; n++) {
+    const cand = `${base}-${n}`
+    if (!ocupados.has(cand)) return cand
+  }
+  return `${base}-${Date.now().toString(36).toUpperCase()}`
+}
+
+function esCodigoDuplicado(error: { code?: string; message?: string } | null): boolean {
+  return error?.code === '23505' && (error.message || '').includes('codigo_barras')
+}
+
 
 function normalizar(s: string) {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -454,31 +473,74 @@ export default function NuevoProductoPage() {
     return `${tipoAbrev}${catAbrev}${marcaAbrev}${detalleAbrev}${colegioAbrev}`
   }
 
+  // Códigos que ya se llevan los artículos del lote todavía sin guardar. La
+  // base no los conoce (nada se escribió aún), así que sin esto dos artículos
+  // del mismo lote se pisan entre ellos.
+  function codigosReservadosEnLote(): Set<string> {
+    const s = new Set<string>()
+    loteActual.forEach(item =>
+      Object.values(item.talles).forEach(sel => { if (sel.barcode) s.add(sel.barcode) })
+    )
+    return s
+  }
+
+  // Pregunta a la base cuáles de los códigos candidatos ya existen. Consultamos
+  // el código pelado y los primeros sufijos; si hiciera falta ir más lejos, el
+  // reintento del insert se encarga.
+  async function codigosOcupados(bases: string[]): Promise<Set<string>> {
+    const ocupados = codigosReservadosEnLote()
+    const limpias = [...new Set(bases.filter(Boolean))]
+    if (limpias.length === 0) return ocupados
+    const candidatos = limpias.flatMap(b => [b, ...Array.from({ length: 5 }, (_, i) => `${b}-${i + 2}`)])
+    const { data } = await supabase
+      .from('variantes').select('codigo_barras')
+      .in('codigo_barras', candidatos)
+    data?.forEach(row => { if (row.codigo_barras) ocupados.add(row.codigo_barras) })
+    return ocupados
+  }
+
+  // Inserta el talle resolviendo el código contra los que ya están tomados. Si
+  // aun así la base lo rechaza por duplicado, marca ese código como ocupado y
+  // prueba el siguiente: es la última red antes de que se caiga el alta.
+  async function insertarVariante(
+    fila: Record<string, unknown>,
+    base: string | null,
+    ocupados: Set<string>,
+  ): Promise<{ id: string; codigo: string | null }> {
+    for (let intento = 0; intento < 30; intento++) {
+      const codigo = base ? siguienteCodigoLibre(base, ocupados) : null
+      const { data, error } = await supabase
+        .from('variantes').insert({ ...fila, codigo_barras: codigo }).select('id').single()
+      if (!error && data) {
+        if (codigo) ocupados.add(codigo)
+        return { id: (data as { id: string }).id, codigo }
+      }
+      if (!esCodigoDuplicado(error) || !codigo) {
+        throw new Error(error?.message || 'No se pudo guardar el talle')
+      }
+      ocupados.add(codigo)
+    }
+    throw new Error('No se encontró un código de barras libre')
+  }
+
+  function baseDeCodigoParaTalle(talle: string): string {
+    const talleCode = normalizarTalleParaCodigo(talle)
+    if (esProductoNuevo && tipoPrendaObj && tipo && marca) {
+      return `${calcularPrefijoCodigo()}${talleCode}`
+    }
+    // Producto existente, o alta con nombre libre (ahí tipoPrendaObj es null).
+    // Antes esto usaba sólo `producto?.nombre_base`, que en un alta libre es
+    // vacío: el código terminaba siendo nada más que el talle.
+    const nombreProd = producto?.nombre_base || nombreNuevoProducto || ''
+    return `${generarPrefijo(nombreProd)}${talleCode}`
+  }
+
   async function calcularBarcodeParaTalle(talle: string): Promise<string> {
     const varExist = tallesExistentes.find(v => v.talle === talle)
     if (varExist?.codigo_barras) return varExist.codigo_barras
 
-    if (esProductoNuevo && tipoPrendaObj && tipo && marca) {
-      const talleCode = normalizarTalleParaCodigo(talle)
-      return `${calcularPrefijoCodigo()}${talleCode}`
-    } else {
-      const nombreProd = producto?.nombre_base || ''
-      const prefix = generarPrefijo(nombreProd)
-      const talleCode = normalizarTalleParaCodigo(talle)
-      const base = `${prefix}${talleCode}`
-      const { data } = await supabase
-        .from('variantes').select('codigo_barras')
-        .like('codigo_barras', `${base}%`)
-        .order('codigo_barras', { ascending: false }).limit(10)
-      let maxSeq = 0
-      data?.forEach(row => {
-        if (row.codigo_barras) {
-          const num = parseInt(row.codigo_barras.slice(base.length))
-          if (!isNaN(num) && num > maxSeq) maxSeq = num
-        }
-      })
-      return `${base}${maxSeq > 0 ? String(maxSeq + 1).padStart(3, '0') : ''}`
-    }
+    const base = baseDeCodigoParaTalle(talle)
+    return siguienteCodigoLibre(base, await codigosOcupados([base]))
   }
 
   // ── Handlers de selección ──────────────────────────────────────
@@ -758,12 +820,24 @@ export default function NuevoProductoPage() {
     // final del lote. Se agrupa por marca porque un lote puede tener varias.
     const entradas: { marcaId: string | null; varianteId: string; cantidad: number; costo: number }[] = []
 
+    // Códigos ya tomados para lo que estamos por guardar. Se consulta una sola
+    // vez y se va actualizando a medida que insertamos, así los artículos del
+    // lote tampoco se pisan entre ellos.
+    const ocupados = await codigosOcupados(
+      loteActual.flatMap(it => Object.values(it.talles).map(sel => sel.barcode).filter(Boolean) as string[])
+    )
+
     for (let i = 0; i < loteActual.length; i++) {
       const item = loteActual[i]
       setConfirmProgress({ current: i + 1, total: loteActual.length })
+      let productoId = item.productoId
+      let productoCreadoAhora = false
+      const tallesOk: string[] = []
+      // El código que quedó realmente guardado por talle: si hubo choque lleva
+      // sufijo, y la etiqueta tiene que imprimir ese, no el que se sugirió.
+      const codigosGuardados: Record<string, string> = {}
       try {
-        let productoId = item.productoId
-        if (item.esProductoNuevo) {
+        if (item.esProductoNuevo && !productoId) {
           const { data: prod, error: errProd } = await supabase.from('productos').insert({
             nombre_base: item.nombreProducto,
             categoria_id: item.categoriaId,
@@ -773,20 +847,20 @@ export default function NuevoProductoPage() {
           }).select().single()
           if (errProd || !prod) throw new Error(errProd?.message || 'Error creando producto')
           productoId = prod.id
+          productoCreadoAhora = true
         }
 
-        const entries = Object.entries(item.talles)
-        for (const [talle, sel] of entries) {
+        for (const [talle, sel] of Object.entries(item.talles)) {
           const talleCosto = parseFloat(sel.precioCosto) || null
           const talleVenta = parseFloat(sel.precioVenta) || null
           if (item.esProductoNuevo || sel.esNueva || !sel.varianteId) {
-            const { data: nuevaVar, error } = await supabase.from('variantes').insert({
-              producto_id: productoId!, talle, codigo_barras: sel.barcode || null, stock: sel.cantidad, stock_minimo: 2,
+            const { id: varianteId, codigo } = await insertarVariante({
+              producto_id: productoId!, talle, stock: sel.cantidad, stock_minimo: 2,
               precio_costo: talleCosto, precio_venta: talleVenta,
-            }).select('id').single()
-            if (error) throw new Error(error.message)
-            if (nuevaVar && sel.cantidad > 0) {
-              entradas.push({ marcaId: item.marcaId, varianteId: (nuevaVar as { id: string }).id, cantidad: sel.cantidad, costo: talleCosto || 0 })
+            }, sel.barcode || null, ocupados)
+            if (codigo) codigosGuardados[talle] = codigo
+            if (sel.cantidad > 0) {
+              entradas.push({ marcaId: item.marcaId, varianteId, cantidad: sel.cantidad, costo: talleCosto || 0 })
             }
           } else {
             const { error } = await supabase.rpc('incrementar_stock', { p_variante_id: sel.varianteId, p_cantidad: sel.cantidad })
@@ -797,26 +871,61 @@ export default function NuevoProductoPage() {
             const updateData: Record<string, unknown> = {}
             if (talleCosto != null) updateData.precio_costo = talleCosto
             if (talleVenta != null) updateData.precio_venta = talleVenta
-            const varExist = item.variantesExistentes.find(v => v.id === sel.varianteId)
-            if (sel.barcode && !varExist?.codigo_barras) updateData.codigo_barras = sel.barcode
             if (Object.keys(updateData).length > 0) {
-              await supabase.from('variantes').update(updateData).eq('id', sel.varianteId)
+              const { error: errUpd } = await supabase.from('variantes').update(updateData).eq('id', sel.varianteId)
+              if (errUpd) throw new Error(errUpd.message)
+            }
+
+            // El código de barras de un talle que ya existe NO se toca nunca:
+            // esa etiqueta ya está impresa y pegada en la prenda. Sólo se
+            // completa cuando está vacío, y el `.is(null)` hace que sea la base
+            // la que lo garantice — no una foto en memoria que puede estar
+            // desactualizada.
+            const varExist = item.variantesExistentes.find(v => v.id === sel.varianteId)
+            if (varExist?.codigo_barras) {
+              codigosGuardados[talle] = varExist.codigo_barras
+            } else if (sel.barcode) {
+              const libre = siguienteCodigoLibre(sel.barcode, ocupados)
+              const { data: puesto } = await supabase
+                .from('variantes').update({ codigo_barras: libre })
+                .eq('id', sel.varianteId).is('codigo_barras', null)
+                .select('codigo_barras')
+              if (puesto && puesto.length > 0) {
+                ocupados.add(libre)
+                codigosGuardados[talle] = libre
+              }
             }
           }
+          tallesOk.push(talle)
         }
+      } catch (e: unknown) {
+        toast.error(`Error en "${item.nombreProducto}": ${e instanceof Error ? e.message : String(e)}`)
+        // Si se cortó sin guardar ni un talle, el producto recién creado queda
+        // vacío y sólo ensucia el inventario: lo borramos. Si algún talle sí
+        // entró, lo conservamos y el reintento sigue sobre ese mismo producto
+        // en vez de dar de alta otro igual.
+        if (productoCreadoAhora && tallesOk.length === 0 && productoId) {
+          await supabase.from('productos').delete().eq('id', productoId)
+          productoId = null
+        }
+        fallidos.push({
+          ...item,
+          productoId,
+          esProductoNuevo: item.esProductoNuevo && !productoId,
+          talles: Object.fromEntries(Object.entries(item.talles).filter(([t]) => !tallesOk.includes(t))),
+        })
+      }
+      if (tallesOk.length > 0) {
         cargados.push({
           nombre: item.nombreProducto,
           marca: item.marcaNombre,
-          talles: entries.map(([t, sel]) => ({
+          talles: tallesOk.map(t => ({
             talle: t,
-            cantidad: sel.cantidad,
-            codigoBarras: sel.barcode || undefined,
-            precioVenta: parseFloat(sel.precioVenta) || item.precioVenta,
+            cantidad: item.talles[t].cantidad,
+            codigoBarras: codigosGuardados[t] || item.talles[t].barcode || undefined,
+            precioVenta: parseFloat(item.talles[t].precioVenta) || item.precioVenta,
           })),
         })
-      } catch (e: unknown) {
-        toast.error(`Error en "${item.nombreProducto}": ${e instanceof Error ? e.message : String(e)}`)
-        fallidos.push(item)
       }
     }
 
