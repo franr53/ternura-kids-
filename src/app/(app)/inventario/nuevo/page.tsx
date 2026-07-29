@@ -487,8 +487,14 @@ export default function NuevoProductoPage() {
   // Pregunta a la base cuáles de los códigos candidatos ya existen. Consultamos
   // el código pelado y los primeros sufijos; si hiciera falta ir más lejos, el
   // reintento del insert se encarga.
-  async function codigosOcupados(bases: string[]): Promise<Set<string>> {
-    const ocupados = codigosReservadosEnLote()
+  //
+  // OJO: acá va sólo lo que está en la base. Los códigos reservados por el lote
+  // se suman aparte, y únicamente al *sugerir* un código nuevo. Al guardar no
+  // hay que sumarlos: son justo los que estamos por asignar, y si el artículo
+  // se encuentra a sí mismo en la lista se desambigua contra su propio código
+  // y sale con un -2 que no corresponde.
+  async function codigosOcupadosEnDB(bases: string[]): Promise<Set<string>> {
+    const ocupados = new Set<string>()
     const limpias = [...new Set(bases.filter(Boolean))]
     if (limpias.length === 0) return ocupados
     const candidatos = limpias.flatMap(b => [b, ...Array.from({ length: 5 }, (_, i) => `${b}-${i + 2}`)])
@@ -540,7 +546,11 @@ export default function NuevoProductoPage() {
     if (varExist?.codigo_barras) return varExist.codigo_barras
 
     const base = baseDeCodigoParaTalle(talle)
-    return siguienteCodigoLibre(base, await codigosOcupados([base]))
+    // Al sugerir sí miramos el lote pendiente: el código que proponemos no debe
+    // pisar al de otro artículo que todavía no se guardó.
+    const ocupados = await codigosOcupadosEnDB([base])
+    codigosReservadosEnLote().forEach(c => ocupados.add(c))
+    return siguienteCodigoLibre(base, ocupados)
   }
 
   // ── Handlers de selección ──────────────────────────────────────
@@ -820,10 +830,11 @@ export default function NuevoProductoPage() {
     // final del lote. Se agrupa por marca porque un lote puede tener varias.
     const entradas: { marcaId: string | null; varianteId: string; cantidad: number; costo: number }[] = []
 
-    // Códigos ya tomados para lo que estamos por guardar. Se consulta una sola
-    // vez y se va actualizando a medida que insertamos, así los artículos del
-    // lote tampoco se pisan entre ellos.
-    const ocupados = await codigosOcupados(
+    // Códigos que ya están en la base para lo que vamos a guardar. Se consulta
+    // una sola vez y se va llenando a medida que insertamos: así dos artículos
+    // del mismo lote que caen en el mismo código tampoco se pisan, pero ninguno
+    // se desambigua contra su propio código todavía sin asignar.
+    const ocupados = await codigosOcupadosEnDB(
       loteActual.flatMap(it => Object.values(it.talles).map(sel => sel.barcode).filter(Boolean) as string[])
     )
 
