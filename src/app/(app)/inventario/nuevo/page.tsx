@@ -510,18 +510,24 @@ export default function NuevoProductoPage() {
   // prueba el siguiente: es la última red antes de que se caiga el alta.
   async function insertarVariante(
     fila: Record<string, unknown>,
-    base: string | null,
+    base: string,
     ocupados: Set<string>,
-  ): Promise<{ id: string; codigo: string | null }> {
+  ): Promise<{ id: string; codigo: string }> {
+    // Una variante NUEVA sin código no es un caso válido: la etiqueta se
+    // imprime desde acá. Antes `base` podía venir en null y el insert guardaba
+    // `codigo_barras: null` como si nada, dejando la prenda muda en el
+    // inventario. Si llega vacío es un bug nuestro y es preferible frenar el
+    // alta a escribir un dato roto.
+    if (!base) throw new Error('No se pudo generar el código de barras del talle')
     for (let intento = 0; intento < 30; intento++) {
-      const codigo = base ? siguienteCodigoLibre(base, ocupados) : null
+      const codigo = siguienteCodigoLibre(base, ocupados)
       const { data, error } = await supabase
         .from('variantes').insert({ ...fila, codigo_barras: codigo }).select('id').single()
       if (!error && data) {
-        if (codigo) ocupados.add(codigo)
+        ocupados.add(codigo)
         return { id: (data as { id: string }).id, codigo }
       }
-      if (!esCodigoDuplicado(error) || !codigo) {
+      if (!esCodigoDuplicado(error)) {
         throw new Error(error?.message || 'No se pudo guardar el talle')
       }
       ocupados.add(codigo)
@@ -632,20 +638,37 @@ export default function NuevoProductoPage() {
     const defaultCosto = varExist?.precio_costo ? String(varExist.precio_costo) : precioCosto
     const defaultVenta = varExist?.precio_venta ? String(varExist.precio_venta) : precioVenta
 
+    // El código arranca RESUELTO, no vacío. `baseDeCodigoParaTalle` es pura y
+    // no toca la red, así que se calcula acá mismo; la consulta de abajo sólo
+    // refina el sufijo contra los códigos ya tomados.
+    //
+    // Antes esto entraba en '' y se llenaba después, cuando volvía la consulta.
+    // Si se guardaba en esa ventana —o si la consulta fallaba— la variante se
+    // insertaba con `codigo_barras: null`, sin error y sin aviso. Fue lo que
+    // dejó 7 talles mudos el 19/08.
+    const codigoInicial = varExist?.codigo_barras || baseDeCodigoParaTalle(talle)
+
     setTallesSeleccionados(prev => {
       if (prev[talle]) {
         const next = { ...prev }
         delete next[talle]
         return next
       }
-      return { ...prev, [talle]: { cantidad: 1, varianteId, esNueva, barcode: '', precioCosto: defaultCosto, precioVenta: defaultVenta } }
+      return { ...prev, [talle]: { cantidad: 1, varianteId, esNueva, barcode: codigoInicial, precioCosto: defaultCosto, precioVenta: defaultVenta } }
     })
-    // Calcular barcode en background
-    const bc = await calcularBarcodeParaTalle(talle)
-    setTallesSeleccionados(prev => {
-      if (!prev[talle]) return prev
-      return { ...prev, [talle]: { ...prev[talle], barcode: bc } }
-    })
+
+    // Refinamiento en segundo plano: si el código base ya está ocupado, esto lo
+    // reemplaza por el siguiente libre. Si falla queda el base, que es válido —
+    // y el insert tiene su propio reintento contra el UNIQUE de la base.
+    try {
+      const bc = await calcularBarcodeParaTalle(talle)
+      setTallesSeleccionados(prev => {
+        if (!prev[talle]) return prev
+        return { ...prev, [talle]: { ...prev[talle], barcode: bc } }
+      })
+    } catch {
+      // Deliberado: ya hay un código puesto, no hay nada que rescatar.
+    }
   }
 
   function setCantidadTalle(talle: string, cant: number) {
@@ -865,11 +888,17 @@ export default function NuevoProductoPage() {
           const talleCosto = parseFloat(sel.precioCosto) || null
           const talleVenta = parseFloat(sel.precioVenta) || null
           if (item.esProductoNuevo || sel.esNueva || !sel.varianteId) {
+            // Red de seguridad por si el código llegara vacío. Se deriva del
+            // propio item del lote y NO de `baseDeCodigoParaTalle`, que lee el
+            // estado del formulario — en este punto ese estado ya apunta a otro
+            // artículo, así que daría un prefijo equivocado.
+            const baseCodigo = sel.barcode
+              || `${generarPrefijo(item.nombreProducto)}${normalizarTalleParaCodigo(talle)}`
             const { id: varianteId, codigo } = await insertarVariante({
               producto_id: productoId!, talle, stock: sel.cantidad, stock_minimo: 2,
               precio_costo: talleCosto, precio_venta: talleVenta,
-            }, sel.barcode || null, ocupados)
-            if (codigo) codigosGuardados[talle] = codigo
+            }, baseCodigo, ocupados)
+            codigosGuardados[talle] = codigo
             if (sel.cantidad > 0) {
               entradas.push({ marcaId: item.marcaId, varianteId, cantidad: sel.cantidad, costo: talleCosto || 0 })
             }
