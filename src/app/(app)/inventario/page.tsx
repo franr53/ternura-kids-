@@ -26,14 +26,15 @@ function InventarioContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
 
-  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos:v4', async () => {
-    const [{ data: prods, error: errProds }, { data: cats }, { data: provs }] = await Promise.all([
+  const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos:v5', async () => {
+    const [{ data: prods, error: errProds }, { data: cats }, { data: provs }, { data: tipos }] = await Promise.all([
       supabase
         .from('productos')
         .select(`id, nombre_base, categoria_id, marca_id, temporada, activo, creado_en, actualizado_en, categoria:categorias(*), variantes(*)`)
         .eq('activo', true),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
+      supabase.from('tipos_prenda').select('nombre, abreviatura'),
     ])
     if (errProds) console.error('[inventario] error cargando productos:', errProds.message)
     const marcasMap = Object.fromEntries((provs || []).map(m => [m.id, m]))
@@ -42,12 +43,14 @@ function InventarioContent() {
       productos,
       categorias: (cats || []) as Categoria[],
       marcas: (provs || []) as Marca[],
+      tiposPrenda: (tipos || []) as { nombre: string; abreviatura: string }[],
     }
   })
 
   const productos = cachedData?.productos ?? []
   const categorias = cachedData?.categorias ?? []
   const marcas = cachedData?.marcas ?? []
+  const tiposPrenda = cachedData?.tiposPrenda ?? []
 
   const [busqueda, setBusqueda] = useState('')
   const [filtroCategoria, setFiltroCategoria] = useState('todas')
@@ -246,6 +249,52 @@ function InventarioContent() {
     return prefix.length > 0 ? prefix : null
   }
 
+  // Las mismas reglas que usa el alta (`inventario/nuevo`) para armar el
+  // prefijo. Se duplican acá a propósito: no queremos que esta pantalla
+  // importe media pantalla de alta para tres funciones de tres líneas.
+  const sinAcentos = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const abrev3 = (s: string) => sinAcentos(s).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
+
+  function subcatParaCategoria(nombre: string): string {
+    const n = sinAcentos(nombre)
+    if (n === 'nena') return 'NA'
+    if (n === 'nene') return 'NO'
+    if (n.includes('bebe') || n === 'bb') return 'BB'
+    if (n.includes('colegia')) return 'COL'
+    if (n.includes('calzado')) return ''
+    if (n.includes('ropa') && n.includes('inter')) return 'RI'
+    if (n.includes('acceso')) return 'ACC'
+    if (n.includes('perfum')) return 'PRF'
+    return nombre.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)
+  }
+
+  // Reconstruye el prefijo desde los datos del producto, para cuando NO hay
+  // ningún hermano con código del que copiarlo.
+  //
+  // El alta nombra los productos como «tipo + detalle + marca» — "Pantalón
+  // Jogger Niki" — y arma el código como tipo+categoría+marca+detalle:
+  // PAN + BB + NIK + JOG. Acá se deshace ese armado leyendo el nombre.
+  //
+  // Devuelve null si falta algo esencial: es preferible no sugerir nada a
+  // sugerir un prefijo inventado que después queda impreso en la ropa.
+  function construirPrefijo(producto: Producto): string | null {
+    const palabras = producto.nombre_base.trim().split(/\s+/).filter(Boolean)
+    if (!palabras.length) return null
+
+    const tipo = tiposPrenda.find(t => sinAcentos(t.nombre) === sinAcentos(palabras[0]))
+    const marcaNombre = producto.marca?.nombre
+    if (!tipo?.abreviatura || !marcaNombre || !producto.categoria?.nombre) return null
+
+    // El detalle es lo que queda entre el tipo y la marca.
+    const finMarca = sinAcentos(palabras[palabras.length - 1]) === sinAcentos(marcaNombre.split(/\s+/)[0])
+    const medio = palabras.slice(1, finMarca ? palabras.length - 1 : undefined)
+
+    return `${tipo.abreviatura}${subcatParaCategoria(producto.categoria.nombre)}${abrev3(marcaNombre)}${abrev3(medio.join(''))}`
+  }
+
+  // Copiar el prefijo de los hermanos que YA tienen código. Es la única fuente
+  // fiel: ese código está impreso en las prendas de la misma percha. Sólo esto
+  // alimenta la sugerencia aplicable.
   function inferirPrefijo(producto: Producto): string | null {
     const conCod = producto.variantes?.filter(v => v.codigo_barras) ?? []
     if (!conCod.length) return null
@@ -254,6 +303,21 @@ function InventarioContent() {
       .filter((p): p is string => p !== null)
     const unicos = [...new Set(prefijos)]
     return unicos.length === 1 ? unicos[0] : null
+  }
+
+  // Pista para cuando no hay hermanos de quién copiar.
+  //
+  // OJO — esto es una PISTA, no una sugerencia: se muestra como placeholder y
+  // hay que tipearlo a mano. Nunca entra en "Aplicar todas".
+  //
+  // El motivo: los códigos históricos del negocio no siguen una sola regla. Se
+  // midió contra las 573 variantes con código y la mejor reconstrucción acierta
+  // el 69%. Conviven al menos dos criterios ("CLZNABAC" sin detalle y
+  // "PANBBNIKJOG" con detalle), y hay tipos de prenda con abreviatura propia
+  // que no se deduce del nombre ("Camisa M/Larga" → CML). Equivocarse acá no
+  // es un bug que se corrige: es una etiqueta impresa y pegada en la ropa.
+  function pistaDePrefijo(producto: Producto): string | null {
+    return inferirPrefijo(producto) ?? construirPrefijo(producto)
   }
 
   function sugerirCodigo(v: { talle: string; id: string }, producto: Producto, usados: Set<string>): string | null {
@@ -267,8 +331,13 @@ function InventarioContent() {
 
   async function aplicarSugerencias(items: { id: string; codigo: string }[]) {
     setAplicandoCodigos(true)
+    // El `.is(null)` es la regla dura del proyecto: un código ya asignado está
+    // impreso y pegado en la prenda, no se pisa nunca. Este botón promete
+    // "rellenar los que faltan", así que la garantía la da la base y no una
+    // lista en pantalla que puede estar desactualizada.
     await Promise.all(items.map(i =>
-      supabase.from('variantes').update({ codigo_barras: i.codigo }).eq('id', i.id)
+      supabase.from('variantes').update({ codigo_barras: i.codigo })
+        .eq('id', i.id).is('codigo_barras', null)
     ))
     setSugerenciasEditadas({})
     await cargarDatos()
@@ -607,8 +676,8 @@ function InventarioContent() {
                               colisiona ? 'border-red-300 focus:ring-red-300' : 'border-gray-200 focus:ring-teal-400'
                             )}
                             placeholder={
-                              inferirPrefijo(producto)
-                                ? `${inferirPrefijo(producto)}${normTalle(v.talle)}`
+                              pistaDePrefijo(producto)
+                                ? `¿${pistaDePrefijo(producto)}${normTalle(v.talle)}? — revisalo`
                                 : 'Sin referencia — ingresá manualmente'
                             }
                           />
