@@ -2,6 +2,7 @@ import { formatPrecio } from '@/lib/utils'
 import { LOGO_BASE64 } from '@/lib/logo-base64'
 import { DORSO_BASE64 } from '@/lib/dorso-base64'
 import { waHref } from '@/lib/whatsapp'
+import type { jsPDF } from 'jspdf'
 
 export interface EtiquetaData {
   nombre: string
@@ -12,7 +13,7 @@ export interface EtiquetaData {
   precioEfectivo: number
 }
 
-// html2canvas + jsPDF se importan dinámicamente (bundle, sin CDN → funcionan offline).
+// html2canvas (solo dorso) + jsPDF + jsbarcode se importan dinámicamente (bundle, sin CDN → funcionan offline).
 type Html2CanvasFn = (typeof import('html2canvas'))['default']
 
 export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
@@ -242,61 +243,185 @@ export function generarHTMLEtiquetas(items: EtiquetaData[]): string {
 </html>`
 }
 
-// Cuántas filas de 3 etiquetas caben por página A4 (~30mm por fila, margin 5mm)
-const ROWS_PER_PAGE = 8  // 8 filas × 3 col = 24 etiquetas por página
-const ITEMS_PER_PAGE = ROWS_PER_PAGE * 3
+// --- Frente de las etiquetas: se dibuja directo con jsPDF (texto y barras vectoriales) ---
+// No pasa por html2canvas: ese render corría el texto hacia abajo y lo recortaba.
+// Geometría heredada de la versión HTML: 3 columnas × 8 filas por A4.
+const COLS = 3
+const ROWS_PER_PAGE = 8
+const ITEMS_PER_PAGE = ROWS_PER_PAGE * COLS
+const ORIGEN_X = 8.8 // mm
+const ORIGEN_Y = 8.8
+const CELDA_W = 64.1
+const CELDA_H = 31.9
+const PAD_X = 2.9
+const PAD_TOP = 2
+const PT = 0.3528 // mm por punto tipográfico
+const CAP = 0.718 // alto de mayúscula de Helvetica / tamaño de fuente
 
-async function renderPageToCanvas(
-  items: EtiquetaData[],
-  iframeDoc: Document,
-  iframeWin: Window,
-  html2canvas: Html2CanvasFn,
-): Promise<HTMLCanvasElement> {
-  // Reemplazar contenido del contenedor con las etiquetas de esta página
-  const contenedor = iframeDoc.querySelector('.contenedor') as HTMLElement
-  contenedor.innerHTML = ''
+type Pdf = jsPDF
+type JsBarcodeFn = (target: object, text: string, options?: object) => void
 
-  let barcodeIndex = 0
-  items.forEach(item => {
-    const bcId = `bc-${barcodeIndex++}`
-    const nombre = (item.nombre || '').toUpperCase()
-    const marca = (item.marca || '').toUpperCase()
-    const div = iframeDoc.createElement('div')
-    div.className = 'etiqueta'
-    div.innerHTML = `
-      <div class="acento"></div>
-      <div class="cuerpo">
-        <div class="nombre">${nombre}</div>
-        <div class="sub">${marca ? `<span class="marca">${marca}</span>` : ''}<span class="talle-badge">T${item.talle}</span></div>
-        ${item.codigoBarras ? `<div class="barcode-wrap"><svg id="${bcId}" data-barcode="${item.codigoBarras}"></svg></div>` : '<div class="barcode-placeholder"></div>'}
-        <div class="precios">
-          <div class="precio-efec">${formatPrecio(item.precioEfectivo)}<span class="efec-label">efec</span></div>
-          <div class="precio-lista">${formatPrecio(item.precioLista)}<span class="lista-label">list</span></div>
-        </div>
-      </div>`
-    contenedor.appendChild(div)
-  })
-
-  // Renderizar barcodes con JsBarcode
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const JsBarcode = (iframeWin as any).JsBarcode
-  if (JsBarcode) {
-    iframeDoc.querySelectorAll('[data-barcode]').forEach(el => {
-      try {
-        JsBarcode(el, el.getAttribute('data-barcode'), {
-          format: 'CODE128', width: 1.5, height: 38, displayValue: true,
-          fontSize: 8, margin: 1, lineColor: '#000', background: '#fff',
-        })
-      } catch (e) { console.error('Barcode error:', e) }
-    })
-  }
-  await new Promise(r => setTimeout(r, 200))
-
-  const canvas = await html2canvas(contenedor, {
-    scale: 2, useCORS: true, logging: false,
-  })
-  return canvas
+// El nombre de producto suele terminar con la marca, que ya sale en su propia línea.
+export function quitarMarcaDelNombre(nombre: string, marca: string): string {
+  const n = nombre.trim()
+  const m = marca.trim()
+  if (!m || n.length <= m.length) return n
+  if (!n.toLowerCase().endsWith(m.toLowerCase())) return n
+  const resto = n.slice(0, n.length - m.length)
+  if (!/\s$/.test(resto)) return n
+  return resto.trim() || n
 }
+
+// "T" solo delante de talles numéricos (T4, T31). Único, "4 años", 12-18m salen tal cual.
+export function formatTalleEtiqueta(talle: string): string {
+  const t = (talle || '').trim()
+  if (!t) return ''
+  if (/^[uú]nico$/i.test(t)) return 'ÚNICO'
+  return /^[\d\s.,\-¬~/]+$/.test(t) ? `T${t}` : t
+}
+
+function textoPrecio(n: number): string {
+  return formatPrecio(n).replace(/ /g, ' ')
+}
+
+function ajustarTexto(pdf: Pdf, texto: string, maxW: number): string {
+  if (pdf.getTextWidth(texto) <= maxW) return texto
+  let t = texto
+  while (t.length > 1 && pdf.getTextWidth(`${t}...`) > maxW) t = t.slice(0, -1)
+  return `${t.trimEnd()}...`
+}
+
+function dibujarBarcode(
+  pdf: Pdf, JsBarcode: JsBarcodeFn, codigo: string, x: number, y: number, w: number, hBarras: number,
+): void {
+  const enc: { encodings?: { data: string }[] } = {}
+  try {
+    JsBarcode(enc, codigo, { format: 'CODE128' })
+  } catch (e) {
+    console.error('Barcode error:', e)
+    return
+  }
+  const bits = (enc.encodings ?? []).map(e => e.data).join('')
+  if (!bits) return
+
+  const modulo = Math.min(0.38, w / (bits.length + 2))
+  const x0 = x + (w - bits.length * modulo) / 2
+  pdf.setFillColor(0, 0, 0)
+  for (let i = 0; i < bits.length; ) {
+    if (bits[i] !== '1') { i++; continue }
+    let j = i
+    while (j < bits.length && bits[j] === '1') j++
+    pdf.rect(x0 + i * modulo, y, (j - i) * modulo, hBarras, 'F')
+    i = j
+  }
+
+  pdf.setFont('courier', 'normal')
+  pdf.setFontSize(6)
+  pdf.setTextColor(0)
+  pdf.text(codigo, x + w / 2, y + hBarras + 1 + CAP * 6 * PT, { align: 'center' })
+}
+
+function dibujarEtiqueta(pdf: Pdf, JsBarcode: JsBarcodeFn, item: EtiquetaData, cx: number, cy: number): void {
+  const innerW = CELDA_W - PAD_X * 2
+  const x = cx + PAD_X
+
+  pdf.setDrawColor(224)
+  pdf.setLineWidth(0.2)
+  pdf.rect(cx, cy, CELDA_W, CELDA_H, 'S')
+
+  // Nombre: hasta 2 líneas; si aun así no entra, baja de cuerpo y como último recurso corta.
+  const marca = (item.marca || '').trim()
+  const nombre = quitarMarcaDelNombre(item.nombre || '', marca).toLocaleUpperCase('es-AR')
+  let size = 7.2
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(size)
+  let lineas = pdf.splitTextToSize(nombre, innerW) as string[]
+  if (lineas.length > 2) {
+    size = 6
+    pdf.setFontSize(size)
+    lineas = pdf.splitTextToSize(nombre, innerW) as string[]
+    if (lineas.length > 2) lineas = [lineas[0], ajustarTexto(pdf, lineas.slice(1).join(' '), innerW)]
+  }
+  const interlineado = 1.2 * size * PT
+  const nombreTop = cy + PAD_TOP
+  pdf.setTextColor(17)
+  lineas.forEach((l, i) => pdf.text(l, x, nombreTop + CAP * size * PT + i * interlineado))
+  let y = nombreTop + lineas.length * interlineado + 0.5
+
+  // Marca + badge del talle
+  const subSize = 6.2
+  const badgeH = 3.1
+  const talle = formatTalleEtiqueta(item.talle)
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(subSize)
+  const badgeW = talle ? pdf.getTextWidth(talle) + 2.8 : 0
+  const baseSub = y + badgeH / 2 + (CAP * subSize * PT) / 2
+
+  let marcaW = 0
+  if (marca) {
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(subSize)
+    pdf.setTextColor(119)
+    const txt = ajustarTexto(pdf, marca.toLocaleUpperCase('es-AR'), innerW - badgeW - 1.5)
+    pdf.text(txt, x, baseSub)
+    marcaW = pdf.getTextWidth(txt) + 1.5
+  }
+  if (talle) {
+    pdf.setDrawColor(85)
+    pdf.setLineWidth(0.2)
+    pdf.roundedRect(x + marcaW, y, badgeW, badgeH, 0.5, 0.5, 'S')
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(subSize)
+    pdf.setTextColor(17)
+    pdf.text(talle, x + marcaW + badgeW / 2, baseSub, { align: 'center' })
+  }
+  y += badgeH + 1
+
+  // Precios, pegados al borde inferior
+  const base = cy + CELDA_H - 2.6
+  const sepY = base - CAP * 10.5 * PT - 1
+  pdf.setDrawColor(238)
+  pdf.setLineWidth(0.1)
+  pdf.line(x, sepY, x + innerW, sepY)
+
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(10.5)
+  pdf.setTextColor(17)
+  const efec = textoPrecio(item.precioEfectivo)
+  pdf.text(efec, x, base)
+  const efecW = pdf.getTextWidth(efec)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(5.7)
+  pdf.setTextColor(85)
+  pdf.text('EFEC', x + efecW + 1, base)
+
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(5.7)
+  const listW = pdf.getTextWidth('LIST')
+  pdf.text('LIST', x + innerW, base, { align: 'right' })
+  pdf.setFont('helvetica', 'bold')
+  pdf.setFontSize(9)
+  pdf.setTextColor(17)
+  pdf.text(textoPrecio(item.precioLista), x + innerW - listW - 1, base, { align: 'right' })
+
+  // Código de barras en el espacio que queda entre el badge y los precios
+  if (item.codigoBarras) {
+    const textoH = 3
+    const libre = sepY - 0.8 - (y + 0.5)
+    const hBarras = Math.max(5, Math.min(11, libre - textoH))
+    const top = y + 0.5 + Math.max(0, (libre - hBarras - textoH) / 2)
+    dibujarBarcode(pdf, JsBarcode, item.codigoBarras, x, top, innerW, hBarras)
+  }
+}
+
+function dibujarPaginaFrente(pdf: Pdf, JsBarcode: JsBarcodeFn, items: EtiquetaData[]): void {
+  items.forEach((item, i) => {
+    const cx = ORIGEN_X + (i % COLS) * CELDA_W
+    const cy = ORIGEN_Y + Math.floor(i / COLS) * CELDA_H
+    dibujarEtiqueta(pdf, JsBarcode, item, cx, cy)
+  })
+}
+
 
 async function renderDorsoPageToCanvas(
   count: number,
@@ -333,10 +458,8 @@ async function renderDorsoPageToCanvas(
   return canvas
 }
 
-async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Promise<Blob> {
-  // Usamos una plantilla vacía para el iframe base (sin etiquetas aún)
-  const htmlBase = generarHTMLEtiquetas([])
-
+// El dorso conserva el render por html2canvas (fuente Caveat + imagen); solo se arma si hay doble faz.
+async function agregarDorsos(pdf: Pdf, pages: EtiquetaData[][], contentW: number, margin: number): Promise<void> {
   const iframe = document.createElement('iframe')
   iframe.style.position = 'fixed'
   iframe.style.left = '-9999px'
@@ -345,7 +468,8 @@ async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Pr
   iframe.style.height = '297mm'
   document.body.appendChild(iframe)
 
-  iframe.srcdoc = htmlBase
+  // Plantilla vacía: trae los estilos del dorso, sin etiquetas
+  iframe.srcdoc = generarHTMLEtiquetas([])
 
   await new Promise<void>((resolve) => {
     iframe.onload = () => resolve()
@@ -359,47 +483,43 @@ async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Pr
     throw new Error('No se pudo crear el iframe para el PDF')
   }
 
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-    import('html2canvas'),
-    import('jspdf'),
-  ])
+  const { default: html2canvas } = await import('html2canvas')
 
   try {
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const pageW = 210
-    const margin = 5
-    const contentW = pageW - margin * 2
-
-    // Renderizar página por página para evitar canvas gigante
-    const pages: EtiquetaData[][] = []
-    for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) {
-      pages.push(items.slice(i, i + ITEMS_PER_PAGE))
-    }
-
-    // Todos los frentes primero
+    // Todos los dorsos después de los frentes (imprimir frentes, dar vuelta, imprimir dorsos)
     for (let p = 0; p < pages.length; p++) {
-      if (p > 0) pdf.addPage()
-      const canvas = await renderPageToCanvas(pages[p], iframeDoc, iframeWin, html2canvas)
-      const drawH = (canvas.height * contentW) / canvas.width
-      const imgData = canvas.toDataURL('image/jpeg', 0.92)
-      pdf.addImage(imgData, 'JPEG', margin, margin, contentW, drawH)
+      pdf.addPage()
+      const dorsoCanvas = await renderDorsoPageToCanvas(pages[p].length, iframeDoc, iframeWin, html2canvas)
+      const dorsoH = (dorsoCanvas.height * contentW) / dorsoCanvas.width
+      const dorsoImg = dorsoCanvas.toDataURL('image/jpeg', 0.92)
+      pdf.addImage(dorsoImg, 'JPEG', margin, margin, contentW, dorsoH)
     }
-
-    // Todos los dorsos después (para impresión manual: imprimir frentes, dar vuelta, imprimir dorsos)
-    if (dobleFaz) {
-      for (let p = 0; p < pages.length; p++) {
-        pdf.addPage()
-        const dorsoCanvas = await renderDorsoPageToCanvas(pages[p].length, iframeDoc, iframeWin, html2canvas)
-        const dorsoH = (dorsoCanvas.height * contentW) / dorsoCanvas.width
-        const dorsoImg = dorsoCanvas.toDataURL('image/jpeg', 0.92)
-        pdf.addImage(dorsoImg, 'JPEG', margin, margin, contentW, dorsoH)
-      }
-    }
-
-    return pdf.output('blob') as Blob
   } finally {
     document.body.removeChild(iframe)
   }
+}
+
+export async function generarBlobEtiquetas(items: EtiquetaData[], dobleFaz = false): Promise<Blob> {
+  const [{ jsPDF }, { default: JsBarcode }] = await Promise.all([
+    import('jspdf'),
+    import('jsbarcode'),
+  ])
+
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+
+  const pages: EtiquetaData[][] = []
+  for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) {
+    pages.push(items.slice(i, i + ITEMS_PER_PAGE))
+  }
+
+  pages.forEach((page, p) => {
+    if (p > 0) pdf.addPage()
+    dibujarPaginaFrente(pdf, JsBarcode as unknown as JsBarcodeFn, page)
+  })
+
+  if (dobleFaz) await agregarDorsos(pdf, pages, 200, 5)
+
+  return pdf.output('blob') as Blob
 }
 
 export async function generarPDFEtiquetas(items: EtiquetaData[], dobleFaz = false): Promise<Blob> {
