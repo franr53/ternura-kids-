@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { traerTodo } from '@/lib/supabase/traer-todo'
 import { Categoria, Proveedor, TipoPrenda, Colegio } from '@/types'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -291,7 +292,7 @@ export default function NuevoProductoPage() {
     const [{ data: provs }, { data: cats }, { data: prods }, { data: tipos }, { data: cols }] = await Promise.all([
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
-      supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo,precio_venta,precio_costo)').eq('activo', true).order('nombre_base'),
+      traerTodo((desde, hasta) => supabase.from('productos').select('*, variantes(id,talle,codigo_barras,stock,stock_minimo,precio_venta,precio_costo)', { count: 'exact' }).eq('activo', true).order('nombre_base').order('id').range(desde, hasta)),
       supabase.from('tipos_prenda').select('*').eq('activo', true).order('nombre'),
       supabase.from('colegios').select('*').eq('activo', true).order('nombre'),
     ])

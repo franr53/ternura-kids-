@@ -4,6 +4,7 @@ import { Suspense, useState, useMemo, useEffect, useTransition, useCallback } fr
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { traerTodo } from '@/lib/supabase/traer-todo'
 import { Producto, Categoria, Marca } from '@/types'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Button } from '@/components/ui/button'
@@ -28,10 +29,12 @@ function InventarioContent() {
 
   const { data: cachedData, loading, refresh: cargarDatos } = useCache('inv:datos:v5', async () => {
     const [{ data: prods, error: errProds }, { data: cats }, { data: provs }, { data: tipos }] = await Promise.all([
-      supabase
+      traerTodo((desde, hasta) => supabase
         .from('productos')
-        .select(`id, nombre_base, categoria_id, marca_id, temporada, activo, creado_en, actualizado_en, categoria:categorias(*), variantes(*)`)
-        .eq('activo', true),
+        .select(`id, nombre_base, categoria_id, marca_id, temporada, activo, creado_en, actualizado_en, categoria:categorias(*), variantes(*)`, { count: 'exact' })
+        .eq('activo', true)
+        .order('id')
+        .range(desde, hasta)),
       supabase.from('categorias').select('*').eq('activa', true).order('nombre'),
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
       supabase.from('tipos_prenda').select('nombre, abreviatura'),

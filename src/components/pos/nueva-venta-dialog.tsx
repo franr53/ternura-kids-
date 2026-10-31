@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { traerTodo } from '@/lib/supabase/traer-todo'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Cliente, Producto, Proveedor, Variante, MetodoPago } from '@/types'
 import { ItemCarrito } from '@/app/(app)/pos/page'
@@ -78,10 +79,12 @@ export default function NuevaVentaDialog({ onCerrar, onVentaCompletada }: Props)
   // Data (cached)
   const { data: posData, loading: loadingData } = useCache<{ variantes: VarianteConProducto[]; clientes: Cliente[]; proveedores: Proveedor[] }>('pos:dialog:v2', async () => {
     const [{ data: productos }, { data: clientes }, { data: proveedores }] = await Promise.all([
-      supabase
+      traerTodo((desde, hasta) => supabase
         .from('productos')
-        .select('*, categoria:categorias(nombre, color), variantes(*)')
-        .eq('activo', true),
+        .select('*, categoria:categorias(nombre, color), variantes(*)', { count: 'exact' })
+        .eq('activo', true)
+        .order('id')
+        .range(desde, hasta)),
       supabase.from('clientes').select('*').eq('activo', true).order('nombre'),
       supabase.from('marcas').select('*').eq('activo', true).order('nombre'),
     ])

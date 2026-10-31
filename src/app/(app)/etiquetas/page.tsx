@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { traerTodo } from '@/lib/supabase/traer-todo'
 import { useCache } from '@/lib/hooks/use-cache'
 import { Producto, Variante } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -34,11 +35,13 @@ interface EtiquetaItem {
 export default function EtiquetasPage() {
   const supabase = createClient()
   const { data: _productos } = useCache<ProductoConMarca[]>('etiq:prods', async () => {
-    const { data } = await supabase
+    const { data } = await traerTodo((desde, hasta) => supabase
       .from('productos')
-      .select('*, variantes(*), marca:marcas(nombre)')
+      .select('*, variantes(*), marca:marcas(nombre)', { count: 'exact' })
       .eq('activo', true)
       .order('nombre_base')
+      .order('id')
+      .range(desde, hasta))
     return (data || []) as ProductoConMarca[]
   })
   const productos = _productos ?? []
