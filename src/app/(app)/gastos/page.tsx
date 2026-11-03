@@ -14,7 +14,7 @@ import {
   CreditCard, TrendingUp, TrendingDown, ChevronRight, ChevronDown, Truck,
 } from 'lucide-react'
 import Link from 'next/link'
-import { formatPrecio, cn, calcularRango, Periodo } from '@/lib/utils'
+import { formatPrecio, cn, calcularRango, Periodo, fechaArgentina } from '@/lib/utils'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -70,7 +70,7 @@ export default function GastosPage() {
 
   // Filtros del listado
   const [periodo, setPeriodo] = useState<Periodo>('mes')
-  const [fechaCustom, setFechaCustom] = useState(() => new Date().toISOString().split('T')[0])
+  const [fechaCustom, setFechaCustom] = useState(() => fechaArgentina())
   // 'YYYY-MM' para el filtro "Otro mes" (arranca en el mes pasado, que es el caso de uso)
   const [mesCustom, setMesCustom] = useState(() => {
     const d = new Date(); d.setMonth(d.getMonth() - 1)
@@ -92,7 +92,7 @@ export default function GastosPage() {
   const [proveedorGastoId, setProveedorGastoId] = useState('')
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [notas, setNotas] = useState('')
-  const [fechaGasto, setFechaGasto] = useState(() => new Date().toISOString().split('T')[0])
+  const [fechaGasto, setFechaGasto] = useState(() => fechaArgentina())
   const [guardando, setGuardando] = useState(false)
 
   // Modal categorías — estado SEPARADO para grupo vs subcategoría

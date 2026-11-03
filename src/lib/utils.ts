@@ -25,6 +25,12 @@ export function formatPrecio(valor: number): string {
   }).format(valor)
 }
 
+// El día en Argentina, como 'YYYY-MM-DD'. toISOString() da el de UTC, que desde
+// las 21 h ya es mañana: la caja cerraba la del día y abría la del siguiente.
+export function fechaArgentina(fecha: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(fecha)
+}
+
 // 'mes' = el mes en curso. 'mesDe' = un mes cualquiera (fechaCustom viene como
 // 'YYYY-MM'). 'fecha' = un día puntual ('YYYY-MM-DD').
 export type Periodo = 'hoy' | 'semana' | 'mes' | 'mesDe' | 'fecha'

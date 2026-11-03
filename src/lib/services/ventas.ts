@@ -1,6 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { Cliente, MetodoPago } from '@/types'
-import { formatPrecio } from '@/lib/utils'
+import { formatPrecio, fechaArgentina } from '@/lib/utils'
 
 export interface ItemVenta {
   varianteId: string
@@ -68,7 +68,7 @@ export async function confirmarVenta({
     notas: p.notas ?? null,
   }))
 
-  const fechaHoy = new Date().toISOString().split('T')[0]
+  const fechaHoy = fechaArgentina()
 
   const { data, error } = await supabase.rpc('procesar_venta', {
     p_caja_fecha: fechaHoy,

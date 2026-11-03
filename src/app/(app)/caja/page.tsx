@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { Wallet, Plus, Lock, Unlock, History, ChevronDown, ChevronRight, X, Receipt } from 'lucide-react'
-import { formatPrecio, cn } from '@/lib/utils'
+import { formatPrecio, cn, fechaArgentina } from '@/lib/utils'
 import Link from 'next/link'
 
 interface VentaDetalle {
@@ -59,7 +59,7 @@ interface Retiro {
 export default function CajaPage() {
   const supabase = createClient()
   const { data: cajaCache, loading, refresh: cargarCaja } = useCache<{ caja: Caja | null; retiros: Retiro[]; gastosDia: GastoDia[] }>('caja:hoy', async () => {
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaArgentina()
 
     const [{ data: cajaData }, { data: gastosData }] = await Promise.all([
       supabase
@@ -107,7 +107,7 @@ export default function CajaPage() {
   // Auto-cerrar cajas de días anteriores y auto-abrir la de hoy si no existe
   useEffect(() => {
     async function inicializarCaja() {
-      const hoy = new Date().toISOString().split('T')[0]
+      const hoy = fechaArgentina()
 
       // Cerrar cajas abiertas de días anteriores
       const { data: anteriores } = await supabase
@@ -175,7 +175,7 @@ export default function CajaPage() {
     const monto = parseFloat(montoInicial) || 0
     if (monto < 0) { toast.error('El monto inicial no puede ser negativo'); return }
     setAbriendo(true)
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaArgentina()
 
     // Verificar que no exista caja abierta hoy
     const { data: existente } = await supabase
@@ -275,22 +275,22 @@ export default function CajaPage() {
 
     const nextDay = new Date(fecha + 'T00:00:00')
     nextDay.setDate(nextDay.getDate() + 1)
-    const nextDayStr = nextDay.toISOString().split('T')[0]
+    const nextDayStr = fechaArgentina(nextDay)
 
     const [{ data: ventasData }, { data: abonosData }, { data: gastosData }] = await Promise.all([
       supabase
         .from('ventas')
         .select('id, creado_en, cliente:clientes(nombre), venta_pagos(metodo, monto), venta_items(cantidad, precio_unitario, variante:variantes(talle, producto:productos(nombre_base)))')
-        .gte('creado_en', `${fecha}T00:00:00`)
-        .lt('creado_en', `${nextDayStr}T00:00:00`)
+        .gte('creado_en', `${fecha}T00:00:00-03:00`)
+        .lt('creado_en', `${nextDayStr}T00:00:00-03:00`)
         .neq('estado', 'anulada')
         .order('creado_en'),
       supabase
         .from('fiado_movimientos')
         .select('id, creado_en, monto, metodo_pago, cliente:clientes(nombre)')
         .eq('tipo', 'abono')
-        .gte('creado_en', `${fecha}T00:00:00`)
-        .lt('creado_en', `${nextDayStr}T00:00:00`)
+        .gte('creado_en', `${fecha}T00:00:00-03:00`)
+        .lt('creado_en', `${nextDayStr}T00:00:00-03:00`)
         .order('creado_en'),
       supabase
         .from('gastos')
@@ -334,10 +334,10 @@ export default function CajaPage() {
     setMostrarAnteriores(true)
     setLoadingAnteriores(true)
     const d = dias ?? periodoAnteriores
-    const hoy = new Date().toISOString().split('T')[0]
+    const hoy = fechaArgentina()
     const desde = new Date()
     desde.setDate(desde.getDate() - d)
-    const desdeStr = desde.toISOString().split('T')[0]
+    const desdeStr = fechaArgentina(desde)
     const { data } = await supabase
       .from('cajas')
       .select('*')

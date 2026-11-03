@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { fechaArgentina } from '@/lib/utils'
 
 // Llamado por Vercel Cron a las 00:00 ART (03:00 UTC)
 // Cierra automáticamente todas las cajas abiertas del día anterior
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  const hoy = new Date().toISOString().split('T')[0]
+  const hoy = fechaArgentina()
 
   const { data: cajasAbiertas, error: fetchError } = await supabase
     .from('cajas')

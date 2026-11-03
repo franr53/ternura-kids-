@@ -21,7 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import { ArrowLeft, Save, Plus, FileText, Upload, TrendingUp, TrendingDown, Minus, Pencil, Check, Trash2 } from 'lucide-react'
 import Link from 'next/link'
-import { formatPrecio } from '@/lib/utils'
+import { formatPrecio, fechaArgentina } from '@/lib/utils'
 import * as XLSX from 'xlsx'
 
 interface PagoProveedor {
@@ -173,7 +173,7 @@ export default function ProveedorDetallePage({ params }: { params: Promise<{ id:
       metodo_pago: metodoGasto,
       fuente_pago: metodoGasto === 'efectivo' ? fuentePago : 'caja_hoy',
       proveedor_id: id,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: fechaArgentina(),
     }).select('id').single()
 
     const { data: nuevoPago, error } = await supabase.from('pagos_proveedores').insert({
