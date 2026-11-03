@@ -51,6 +51,7 @@
 - **017**: `fuente_pago` + `proveedor_id` en `gastos`; `gasto_id` en `pagos_proveedores` — aplicada
 - **018**: RLS fix `tipos_prenda` y `colegios` — aplicada
 - **021**: tabla `cambios` + RPC `procesar_cambio` (devolucion/cambio de prendas) — aplicada
+- **041**: caja en hora de Argentina (`obtener_o_crear_caja_hoy`), signo de `procesar_cambio` y `procesar_devolucion` sin tocar la caja — aplicada en producción el 03/11/2026; rollback en `supabase/rollback/041_caja_anterior.sql`
 - Pedí confirmación ANTES de aplicar cualquier migración. Seguir numeración existente.
 
 ## Decisiones clave
